@@ -205,6 +205,47 @@ is part of the result:
 | python-chess `skip_game()` | 810,463 | 84.60 MiB/s | 20.25 MB | Finds and skips games without fully parsing them |
 | Scoutfish `make` | Not completed | Not valid | Not valid | Parses legal positions and writes a query index |
 
+## Semantic chess result
+
+`gambit-chess` resolves each SAN token against a 104-byte bitboard position,
+tests legality, and applies it. The hot path targets only source pieces that can
+geometrically reach the SAN destination; it does not generate every legal move
+unless it must verify castling or checkmate.
+
+Run the combined incremental PGN and semantic validator:
+
+```console
+cargo build --release -p gambit-pgn --example semantic-validate
+
+for run_number in 1 2 3 4 5; do
+  target/release/examples/semantic-validate \
+    "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn"
+done
+```
+
+Every run completed all 810,463 games and applied all 54,748,499 SAN moves with
+zero errors.
+
+| Run | Elapsed | Throughput | Move rate |
+| ---: | ---: | ---: | ---: |
+| 1 | 8.995s | 74.40 MiB/s | 6.09 million/s |
+| 2 | 8.843s | 75.69 MiB/s | 6.19 million/s |
+| 3 | 8.939s | 74.87 MiB/s | 6.12 million/s |
+| 4 | 8.805s | 76.01 MiB/s | 6.22 million/s |
+| 5 | 8.796s | 76.09 MiB/s | 6.22 million/s |
+| **Median** | **8.843s** | **75.69 MiB/s** | **6.19 million/s** |
+
+A separate timed run reported 1,769,472 bytes maximum RSS. The semantic work
+reduces byte throughput relative to lexical-only parsing, but it keeps the same
+bounded-memory profile.
+
+The comparable python-chess visitor validates SAN and updates positions without
+retaining game trees. A fresh run was interrupted after 324.90 seconds without
+finishing; the earlier attempt was stopped after 401.90 seconds. Neither partial
+run is reported as completed throughput. Gambit completes the full semantic
+workload more than 36 times within the shorter interrupted duration, but an
+exact completed speedup remains unavailable.
+
 ### python-chess 1.11.2
 
 The committed `benchmarks/python_chess_scan.py` script supports three modes.
@@ -228,11 +269,9 @@ done
 The five results were 85.69, 85.06, 84.26, 84.60, and 82.96 MiB/s. Each found
 exactly 810,463 games. A timed run reported 20,250,624 bytes maximum RSS.
 
-An exploratory `visitor` run was stopped after 401.90 seconds without completing
-the corpus. This is not reported as a throughput result: unlike Gambit's current
-lexical parser, it decodes SAN, validates moves against board state, and updates
-positions. That work belongs in a future comparison against Gambit's SAN/board
-layer.
+The original exploratory `visitor` run was stopped after 401.90 seconds without
+completing the corpus. The semantic section above now provides the comparable
+Gambit SAN/board result and records a second interrupted python-chess attempt.
 
 ### Scoutfish commit `00cec1339f97114a32c30080dbad5e3a500634f2`
 
@@ -275,11 +314,11 @@ Scoutfish.
   development baseline, not a portable hardware comparison.
 - No compiler flags such as `-C target-cpu=native`, LTO, or PGO were enabled.
 
-The next performance milestone is batch-level parallelism around a compact
+The next performance milestone is batch-level parallelism around the compact
 SAN/board layer. Games are independent work units, so a bounded producer/worker
 pipeline can keep ingestion ordered while legality checking and position
-updates scale across cores. Semantic comparisons with python-chess visitor mode
-and Scoutfish indexing become meaningful at that point.
+updates scale across cores. A completed Scoutfish comparison still requires a
+supported x86-64 environment.
 
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless

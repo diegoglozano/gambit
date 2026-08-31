@@ -1,8 +1,8 @@
 # Gambit
 
-Gambit is the beginning of a high-performance chess analysis stack in Rust. The
-first component is `gambit-pgn`, a dependency-free PGN parser designed for bulk
-game ingestion.
+Gambit is the beginning of a high-performance chess analysis stack in Rust. It
+currently contains a dependency-free PGN ingestion layer and a compact semantic
+chess core.
 
 ## Parser design
 
@@ -74,6 +74,25 @@ The first real-corpus baseline uses 810,463 standard-rated Lichess games. See
 dataset checksum, reproducible commands, python-chess and Scoutfish comparison,
 results, and measurement limitations.
 
-The parser is lexical by design. The next layer should decode SAN directly into
-a compact board representation, then process independent games across worker
-threads. Legality and position-dependent meaning belong in that layer.
+The parser remains lexical by design. `gambit-chess` owns legality and
+position-dependent meaning so ingestion and chess-state work stay independently
+optimizable.
+
+## Semantic chess core
+
+`gambit-chess` adds 104-byte copyable bitboard positions, 32-bit moves, FEN
+loading, legal move generation, and SAN execution. It handles pins, checks,
+castling, en passant, promotion, and file/rank disambiguation without external
+dependencies.
+
+Validate every SAN move while incrementally reading a PGN corpus:
+
+```console
+cargo run --release -p gambit-pgn --example semantic-validate -- games.pgn
+zstdcat games.pgn.zst | \
+  cargo run --release -p gambit-pgn --example semantic-validate -- -
+```
+
+On the April 2014 Lichess corpus, the single-threaded semantic path validates
+54,748,499 moves at a median 6.19 million moves/s with approximately 1.77 MB
+maximum RSS. The next HPC milestone is a bounded parallel game pipeline.
