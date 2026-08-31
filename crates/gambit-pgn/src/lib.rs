@@ -5,8 +5,10 @@
 //! execute them without this crate allocating an intermediate game tree.
 
 mod parser;
+mod stream;
 
 pub use parser::{
     Comment, CommentKind, ErrorKind, Event, Nag, Outcome, ParseError, Parser, ParserOptions, Span,
     Tag, Token,
 };
+pub use stream::{FrameError, GameReader, GameReaderOptions};
