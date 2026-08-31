@@ -25,8 +25,8 @@ impl Span {
 /// A borrowed token from the movetext section.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Token<'a> {
-    bytes: &'a [u8],
-    span: Span,
+    pub(crate) bytes: &'a [u8],
+    pub(crate) span: Span,
 }
 
 impl<'a> Token<'a> {
@@ -53,9 +53,9 @@ impl<'a> Token<'a> {
 /// A tag pair from the header section.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Tag<'a> {
-    name: &'a [u8],
-    value: &'a [u8],
-    span: Span,
+    pub(crate) name: &'a [u8],
+    pub(crate) value: &'a [u8],
+    pub(crate) span: Span,
 }
 
 impl<'a> Tag<'a> {

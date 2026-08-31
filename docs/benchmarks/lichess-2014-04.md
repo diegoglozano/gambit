@@ -83,6 +83,22 @@ zstdcat "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn.zst" | \
   target/release/examples/stream-validate -
 ```
 
+Run the fused incremental parser over the same inputs:
+
+```console
+cargo build --release -p gambit-pgn --example incremental-validate
+
+for run_number in 1 2 3 4 5; do
+  target/release/examples/incremental-validate \
+    "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn"
+done
+
+for run_number in 1 2 3 4 5; do
+  zstdcat "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn.zst" | \
+    target/release/examples/incremental-validate -
+done
+```
+
 ## Correctness result
 
 Strict parsing completed without an error and produced:
@@ -149,6 +165,31 @@ from approximately 703 MB to 1.7 MB. Its lower throughput is expected because
 the current implementation scans the bytes once to find game boundaries and a
 second time to emit PGN events.
 
+## Fused incremental streaming result
+
+The follow-up `IncrementalParser` combines boundary recognition and event
+emission in one lexical state machine. It reads 64 KiB chunks, retains only an
+incomplete token across reads, and lends borrowed events to a callback before
+the reusable buffer is compacted. No input byte is rescanned by a separate game
+framer.
+
+All ten runs reproduced every correctness count above. The largest internal
+buffer observed was 65,624 bytes.
+
+| Input | Runs (MiB/s) | Median (MiB/s) |
+| --- | --- | ---: |
+| Decompressed file | 416.93, 432.53, 433.64, 432.84, 431.86 | **432.53** |
+| `zstdcat` pipe | 424.43, 427.02, 427.28, 427.05, 426.46 | **427.02** |
+
+This is a 79.3% improvement over both two-pass medians. It retains approximately
+82.6% of the whole-file counter harness's throughput while avoiding its
+full-corpus allocation.
+
+A timed file run reported 1,736,704 bytes maximum RSS. A timed pipeline run
+reported 1,753,088 bytes maximum RSS for Gambit, excluding the separate
+decompressor. The parser therefore keeps essentially the same bounded memory
+footprint as `GameReader` while eliminating its duplicate scan.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row
@@ -157,6 +198,8 @@ is part of the result:
 | Tool and operation | Correct games | Median throughput | Maximum RSS | Semantics |
 | --- | ---: | ---: | ---: | --- |
 | Gambit whole-file | 810,463 | 539.88 MiB/s | 703.3 MB | Lexes and emits every structural event |
+| Gambit fused streaming file | 810,463 | 432.53 MiB/s | 1.74 MB | Reads once, lexes, and counts every event |
+| Gambit fused `zstdcat` pipeline | 810,463 | 427.02 MiB/s | 1.75 MB | Decompresses, reads once, lexes, and counts every event |
 | Gambit streaming file | 810,463 | 241.28 MiB/s | 1.74 MB | Frames games, then lexes and counts every event |
 | Gambit `zstdcat` pipeline | 810,463 | 238.10 MiB/s | 1.77 MB | Decompresses, frames, lexes, and counts every event |
 | python-chess `skip_game()` | 810,463 | 84.60 MiB/s | 20.25 MB | Finds and skips games without fully parsing them |
@@ -222,8 +265,9 @@ Scoutfish.
   removes that limitation.
 - `GameReader` currently requires a top-level outcome marker and has a default
   16 MiB maximum game size. It intentionally rejects incomplete final records.
-- The streaming framer and parser both inspect the input. A fused incremental
-  parser could remove the duplicate scan while retaining bounded memory.
+- The legacy `GameReader` path still scans input twice and remains useful when
+  callers specifically need complete borrowed game slices. `IncrementalParser`
+  is the faster path for event consumers.
 - The April 2014 corpus contains no recursive annotation variations, so the
   unit tests and synthetic corpus remain responsible for that grammar path.
 - These runs were made on a local fanless laptop without CPU pinning, a fixed
@@ -231,7 +275,14 @@ Scoutfish.
   development baseline, not a portable hardware comparison.
 - No compiler flags such as `-C target-cpu=native`, LTO, or PGO were enabled.
 
-The next performance milestone should fuse game framing and event parsing into
-one incremental state machine. After that, add batch-level parallelism and the
-SAN/board layer, where semantic comparisons with python-chess visitor mode and
-Scoutfish indexing become meaningful.
+The next performance milestone is batch-level parallelism around a compact
+SAN/board layer. Games are independent work units, so a bounded producer/worker
+pipeline can keep ingestion ordered while legality checking and position
+updates scale across cores. Semantic comparisons with python-chess visitor mode
+and Scoutfish indexing become meaningful at that point.
+
+Before changing I/O backends, profile on the deployment platform. `io_uring` is
+Linux-only and is unlikely to improve this cached, sequential workload unless
+storage latency or syscall overhead appears in a Linux profile. Parallel
+decompression, partitioned files, native CPU tuning, SIMD token scans, and PGO
+are higher-priority experiments after the semantic workload exists.

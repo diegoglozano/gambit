@@ -23,3 +23,7 @@ path = "examples/validate.rs"
 [[example]]
 name = "stream-validate"
 path = "examples/stream_validate.rs"
+
+[[example]]
+name = "incremental-validate"
+path = "examples/incremental_validate.rs"
