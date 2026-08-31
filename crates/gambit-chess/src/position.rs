@@ -925,6 +925,8 @@ mod tests {
 
     #[test]
     fn initial_position_has_twenty_legal_moves() {
+        assert_eq!(std::mem::size_of::<Position>(), 104);
+        assert_eq!(std::mem::size_of::<Move>(), 4);
         let mut moves = MoveList::default();
         Position::initial().generate_legal_moves(&mut moves);
         assert_eq!(moves.len(), 20);
