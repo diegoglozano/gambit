@@ -12,6 +12,9 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[dev-dependencies]
+gambit-chess = { path = "../gambit-chess" }
+
 [[example]]
 name = "throughput"
 path = "examples/throughput.rs"
@@ -27,3 +30,7 @@ path = "examples/stream_validate.rs"
 [[example]]
 name = "incremental-validate"
 path = "examples/incremental_validate.rs"
+
+[[example]]
+name = "semantic-validate"
+path = "examples/semantic_validate.rs"
