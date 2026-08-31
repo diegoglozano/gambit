@@ -1,0 +1,18 @@
+[package]
+name = "gambit-pgn"
+version = "0.1.0"
+description = "A zero-copy, streaming PGN parser for chess data pipelines"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[[example]]
+name = "throughput"
+path = "examples/throughput.rs"
+
