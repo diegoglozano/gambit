@@ -11,6 +11,7 @@ game ingestion.
   original input
 - Structural events for headers, move numbers, SAN, NAGs, comments, recursive
   annotation variations, and outcomes
+- Bounded-memory game framing from files, pipes, or decompression streams
 - Byte-accurate spans and errors
 - Strict and lenient modes
 - No chess-position work in the parsing layer
@@ -41,6 +42,26 @@ file:
 cargo run --release -p gambit-pgn --example throughput
 cargo run --release -p gambit-pgn --example throughput -- games.pgn
 ```
+
+Validate a corpus and print structural counts:
+
+```console
+cargo run --release -p gambit-pgn --example validate -- games.pgn
+```
+
+Stream a decompressed file with bounded memory, or decompress and parse in one
+pipeline:
+
+```console
+cargo run --release -p gambit-pgn --example stream-validate -- games.pgn
+zstdcat games.pgn.zst | \
+  cargo run --release -p gambit-pgn --example stream-validate -- -
+```
+
+The first real-corpus baseline uses 810,463 standard-rated Lichess games. See
+[the April 2014 benchmark report](docs/benchmarks/lichess-2014-04.md) for the
+dataset checksum, reproducible commands, python-chess and Scoutfish comparison,
+results, and measurement limitations.
 
 The parser is lexical by design. The next layer should decode SAN directly into
 a compact board representation, where legality and position-dependent meaning

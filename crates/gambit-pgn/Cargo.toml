@@ -16,3 +16,10 @@ workspace = true
 name = "throughput"
 path = "examples/throughput.rs"
 
+[[example]]
+name = "validate"
+path = "examples/validate.rs"
+
+[[example]]
+name = "stream-validate"
+path = "examples/stream_validate.rs"
