@@ -95,4 +95,30 @@ zstdcat games.pgn.zst | \
 
 On the April 2014 Lichess corpus, the single-threaded semantic path validates
 54,748,499 moves at a median 6.19 million moves/s with approximately 1.77 MB
-maximum RSS. The next HPC milestone is a bounded parallel game pipeline.
+maximum RSS.
+
+An experimental bounded parallel path frames complete games into packed byte
+batches and validates each batch on worker-local chess state. The optional
+arguments select the worker count and target batch size in MiB; defaults are
+the available hardware parallelism and 1 MiB:
+
+```console
+cargo run --release -p gambit-pgn \
+  --example parallel-semantic-validate -- games.pgn 4 1
+```
+
+Sweep worker counts on the same decompressed corpus to measure strong scaling:
+
+```console
+cargo build --release -p gambit-pgn --example parallel-semantic-validate
+for workers in 1 2 4 8; do
+  target/release/examples/parallel-semantic-validate games.pgn "$workers" 1
+done
+```
+
+The queue holds at most twice the worker count in pending batches. Games larger
+than the batch target remain intact, so the existing 16 MiB `GameReader` limit
+is still the per-game upper bound. This path intentionally uses the lightweight
+game framer before worker-local parsing. Initial scaling results show that the
+next file-oriented experiment should use direct game-aligned range partitioning
+to remove that serial framing ceiling.
