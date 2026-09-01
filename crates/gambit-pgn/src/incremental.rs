@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Read};
 
+use crate::parser::is_san_boundary;
 use crate::{
     Comment, CommentKind, ErrorKind, Event, Nag, Outcome, ParseError, ParserOptions, Span, Tag,
     Token,
@@ -394,18 +395,20 @@ fn next_movetext<'a>(
         let attempt = parse_glyph_nag(input, start, base, eof);
         return Some(commit_attempt(attempt, cursor, line_start, state));
     }
-    match parse_outcome(input, start, base, eof) {
-        Attempt::Complete(event, end) => {
-            *cursor = end;
-            *line_start = false;
-            if *variation_depth == 0 {
-                *state = State::GameEnd;
+    if matches!(byte, b'0' | b'1' | b'*') {
+        match parse_outcome(input, start, base, eof) {
+            Attempt::Complete(event, end) => {
+                *cursor = end;
+                *line_start = false;
+                if *variation_depth == 0 {
+                    *state = State::GameEnd;
+                }
+                return Some(Step::Event(event));
             }
-            return Some(Step::Event(event));
+            Attempt::NeedMore => return Some(Step::NeedMore),
+            Attempt::Error(error) => return Some(stop(error, state)),
+            Attempt::NotApplicable => {}
         }
-        Attempt::NeedMore => return Some(Step::NeedMore),
-        Attempt::Error(error) => return Some(stop(error, state)),
-        Attempt::NotApplicable => {}
     }
     if byte.is_ascii_digit() {
         let attempt = parse_move_number(input, start, base, eof);
@@ -695,13 +698,7 @@ fn parse_move_number(input: &[u8], start: usize, base: u64, eof: bool) -> Attemp
 
 fn parse_san(input: &[u8], start: usize, base: u64, eof: bool) -> Attempt<'_> {
     let mut end = start;
-    while input.get(end).is_some_and(|byte| {
-        !byte.is_ascii_whitespace()
-            && !matches!(
-                *byte,
-                b'{' | b'}' | b';' | b'(' | b')' | b'$' | b'!' | b'?' | b'['
-            )
-    }) {
+    while input.get(end).is_some_and(|byte| !is_san_boundary(*byte)) {
         end += 1;
     }
     if end == input.len() && !eof {
