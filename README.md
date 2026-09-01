@@ -93,9 +93,9 @@ zstdcat games.pgn.zst | \
   cargo run --release -p gambit-pgn --example semantic-validate -- -
 ```
 
-On the April 2014 Lichess corpus, the single-threaded semantic path validates
-54,748,499 moves at a median 6.19 million moves/s with approximately 1.77 MB
-maximum RSS.
+On the April 2014 Lichess corpus, the current single-threaded semantic path
+validates 54,748,499 moves at a median 9.57 million moves/s on an Apple M3, with
+approximately 1.79 MB maximum RSS.
 
 An experimental bounded parallel path frames complete games into packed byte
 batches and validates each batch on worker-local chess state. The optional
@@ -131,8 +131,8 @@ cargo run --release -p gambit-pgn \
   --example partitioned-semantic-validate -- games.pgn 4
 ```
 
-It reports partitioning and validation time separately. On the four-core
-benchmark host, direct validation was only slightly faster than the queue path,
-and the discovery pass made a single end-to-end run slower. The result redirects
-the next optimization work toward profiling the SAN/board kernel. Partitioning
-may still help repeated analyses if boundaries are persisted and reused.
+It reports partitioning and validation time separately. On the Intel N95,
+direct validation was only slightly faster than the queue path. On the Apple M3,
+eight direct ranges validate faster than the four-worker queue, but the discovery
+pass still makes a one-shot run slower. Persisted boundaries amortize after
+approximately four repeated M3 analyses.

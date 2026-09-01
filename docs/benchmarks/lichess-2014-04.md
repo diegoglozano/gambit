@@ -480,6 +480,83 @@ kernel candidate is applying the ray masks to pseudo-legal sliding move
 generation, which still advances through board coordinates one square at a
 time.
 
+## Final merged version on Apple M3
+
+The final version through the sliding-ray optimization was rerun on the Apple
+M3 host so the Intel N95 measurements above have a current macOS comparison:
+
+- Date: 2026-09-01
+- Commit: `6068928`
+- Hardware: Apple M3 MacBook Air, 4 performance and 4 efficiency cores, 16 GB
+  memory
+- Operating system: macOS 26.0.1, arm64
+- Rust: `rustc 1.93.1 (01f6ddf75 2026-02-11)`
+- Build: default Cargo release profile, no native CPU flags
+- Input: the same checksum-verified 701,772,510-byte April 2014 corpus
+- Bounded queue batch target: 1 MiB
+
+Commands launched by the benchmark automation inherited macOS background
+scheduling, producing unusable 28–114 MiB/s single-thread variance. Each
+published process was moved out of `PRIO_DARWIN_BG` immediately after launch
+with `taskpolicy -B -p PID`. Five subsequent fused runs stayed within 1.1% of
+each other. A process launched normally from an interactive terminal does not
+need this adjustment.
+
+Every published run reproduced exactly 810,463 games and 54,748,499 legal SAN
+moves.
+
+### Fused single-thread result
+
+| Runs (MiB/s) | Median | Median elapsed | Median move rate |
+| --- | ---: | ---: | ---: |
+| 116.99, 116.22, 116.78, 117.04, 117.46 | **116.99 MiB/s** | **5.721s** | **9.57 million/s** |
+
+A separately timed run used 1,785,856 bytes maximum RSS.
+
+### Bounded queue scaling
+
+| Workers | Runs (MiB/s) | Median | Median move rate | Speedup vs. fused |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | 123.19, 123.75, 123.90, 123.55, 123.24 | **123.55 MiB/s** | 10.11 million/s | 1.06x |
+| 2 | 242.40, 241.44, 242.22, 242.18, 240.89 | **242.18 MiB/s** | 19.81 million/s | 2.07x |
+| 4 | 393.89, 393.81, 391.62, 371.18, 386.08 | **391.62 MiB/s** | 32.04 million/s | 3.35x |
+| 8 | 378.57, 378.49, 379.68, 365.85, 364.47 | **378.49 MiB/s** | 30.96 million/s | 3.24x |
+
+Four workers are the queue saturation point and reach 79.2% scaling efficiency
+relative to the one-worker queue. A sampled four-worker run used 10,715,136
+bytes maximum RSS.
+
+The final merged N95 and M3 series are directly comparable because both use the
+same code, corpus, 1 MiB batches, and default release profile:
+
+| Path | Intel N95 median | Apple M3 median | M3/N95 |
+| --- | ---: | ---: | ---: |
+| Fused single-thread | 52.78 MiB/s | 116.99 MiB/s | 2.22x |
+| Bounded, 1 worker | 55.53 MiB/s | 123.55 MiB/s | 2.22x |
+| Bounded, 2 workers | 94.49 MiB/s | 242.18 MiB/s | 2.56x |
+| Bounded, 4 workers | 131.13 MiB/s | 391.62 MiB/s | 2.99x |
+| Bounded, 8 workers | 126.14 MiB/s | 378.49 MiB/s | 3.00x |
+
+### Partitioned file scaling
+
+| Ranges | Validation runs (MiB/s) | Validation median | End-to-end median | Median partition time | Median move rate |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | 95.27, 95.94, 95.99, 95.77, 95.59 | **95.77 MiB/s** | **78.88 MiB/s** | 1.496s | 7.83 million/s |
+| 2 | 185.95, 186.27, 185.81, 186.54, 185.23 | **185.95 MiB/s** | **131.30 MiB/s** | 1.498s | 15.21 million/s |
+| 4 | 354.71, 343.20, 347.47, 347.04, 340.91 | **347.04 MiB/s** | **195.40 MiB/s** | 1.497s | 28.39 million/s |
+| 8 | 513.03, 515.88, 508.26, 500.00, 512.73 | **512.73 MiB/s** | **238.77 MiB/s** | 1.496s | 41.94 million/s |
+
+Unlike the bounded queue, validation-only throughput uses all eight M3 cores
+and is 31% above the best queue median. The serial boundary pass still makes
+one-shot partitioning 39% slower than the queue. With persisted boundaries,
+the approximately 0.40s validation advantage amortizes the 1.50s discovery
+cost on the fourth repeated analysis. A sampled eight-range run used 3,244,032
+bytes maximum RSS.
+
+The older N95 partition table predates the two attack-kernel optimizations, so
+it should not be used for a direct M3/N95 hardware ratio. A new N95 partition
+run at `6068928` would be required for that comparison.
+
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel
