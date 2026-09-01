@@ -1,5 +1,7 @@
+use std::fmt;
+
 use gambit_chess::Position;
-use gambit_pgn::Event;
+use gambit_pgn::{Event, Parser};
 
 #[derive(Debug)]
 pub(crate) struct SemanticError {
@@ -9,6 +11,66 @@ pub(crate) struct SemanticError {
     pub(crate) kind: &'static str,
     pub(crate) context: Vec<u8>,
     pub(crate) detail: String,
+}
+
+#[derive(Debug)]
+#[allow(dead_code)] // This shared module is compiled separately by each example.
+pub(crate) enum GameValidationError {
+    Parse {
+        game: u64,
+        offset: u64,
+        detail: String,
+    },
+    Semantic(SemanticError),
+}
+
+impl fmt::Display for GameValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse {
+                game,
+                offset,
+                detail,
+            } => write!(f, "game {game}, byte {offset}: {detail}"),
+            Self::Semantic(error) => write!(
+                f,
+                "game {}, ply {}, byte {}: {} {}: {}",
+                error.game,
+                error.ply,
+                error.offset,
+                error.kind,
+                String::from_utf8_lossy(&error.context),
+                error.detail
+            ),
+        }
+    }
+}
+
+#[allow(dead_code)] // The incremental example consumes events directly.
+pub(crate) fn validate_game(
+    input: &[u8],
+    game_number: u64,
+    offset: u64,
+) -> Result<u64, GameValidationError> {
+    let mut validator = Validator::with_origin(game_number - 1, offset);
+    for event in Parser::new(input) {
+        match event {
+            Ok(event) => validator.observe(event),
+            Err(error) => {
+                return Err(GameValidationError::Parse {
+                    game: game_number,
+                    offset: offset
+                        + u64::try_from(error.offset).expect("parse error offset fits in u64"),
+                    detail: error.to_string(),
+                });
+            }
+        }
+        if let Some(error) = validator.error.take() {
+            return Err(GameValidationError::Semantic(error));
+        }
+    }
+    debug_assert_eq!(validator.games, game_number);
+    Ok(validator.moves)
 }
 
 pub(crate) struct Validator {

@@ -119,6 +119,20 @@ done
 The queue holds at most twice the worker count in pending batches. Games larger
 than the batch target remain intact, so the existing 16 MiB `GameReader` limit
 is still the per-game upper bound. This path intentionally uses the lightweight
-game framer before worker-local parsing. Initial scaling results show that the
-next file-oriented experiment should use direct game-aligned range partitioning
-to remove that serial framing ceiling.
+game framer before worker-local parsing. The file-oriented experiment below
+tests direct game-aligned range partitioning without that serial validation
+stage.
+
+The experimental partitioned path performs a bounded boundary-discovery pass,
+then lets each worker seek to and validate an independent game-aligned range:
+
+```console
+cargo run --release -p gambit-pgn \
+  --example partitioned-semantic-validate -- games.pgn 4
+```
+
+It reports partitioning and validation time separately. On the four-core
+benchmark host, direct validation was only slightly faster than the queue path,
+and the discovery pass made a single end-to-end run slower. The result redirects
+the next optimization work toward profiling the SAN/board kernel. Partitioning
+may still help repeated analyses if boundaries are persisted and reused.

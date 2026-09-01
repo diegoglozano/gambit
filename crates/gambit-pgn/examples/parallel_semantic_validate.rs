@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use gambit_pgn::{FrameError, GameReader, Parser};
+use gambit_pgn::{FrameError, GameReader};
 
 mod support;
 
-use support::{SemanticError, Validator};
+use support::{GameValidationError, validate_game};
 
 const DEFAULT_BATCH_MIB: usize = 1;
 
@@ -32,39 +32,7 @@ struct BatchResult {
     sequence: u64,
     games: u64,
     moves: u64,
-    error: Option<ValidationError>,
-}
-
-#[derive(Debug)]
-enum ValidationError {
-    Parse {
-        game: u64,
-        offset: u64,
-        detail: String,
-    },
-    Semantic(SemanticError),
-}
-
-impl fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Parse {
-                game,
-                offset,
-                detail,
-            } => write!(f, "game {game}, byte {offset}: {detail}"),
-            Self::Semantic(error) => write!(
-                f,
-                "game {}, ply {}, byte {}: {} {}: {}",
-                error.game,
-                error.ply,
-                error.offset,
-                error.kind,
-                String::from_utf8_lossy(&error.context),
-                error.detail
-            ),
-        }
-    }
+    error: Option<GameValidationError>,
 }
 
 #[derive(Debug)]
@@ -72,7 +40,7 @@ enum PipelineError {
     Frame(FrameError),
     WorkersUnavailable,
     WorkerPanicked,
-    Validation(ValidationError),
+    Validation(GameValidationError),
 }
 
 impl fmt::Display for PipelineError {
@@ -347,37 +315,18 @@ fn validate_batch(batch: &Batch) -> BatchResult {
             batch.first_game + u64::try_from(index).expect("batch game index fits in u64");
         let game_offset =
             batch.base_offset + u64::try_from(start).expect("batch byte offset fits in u64");
-        let mut validator = Validator::with_origin(game_number - 1, game_offset);
-        for event in Parser::new(&batch.bytes[start..end]) {
-            match event {
-                Ok(event) => validator.observe(event),
-                Err(error) => {
-                    return BatchResult {
-                        sequence: batch.sequence,
-                        games,
-                        moves,
-                        error: Some(ValidationError::Parse {
-                            game: game_number,
-                            offset: game_offset
-                                + u64::try_from(error.offset)
-                                    .expect("parse error offset fits in u64"),
-                            detail: error.to_string(),
-                        }),
-                    };
-                }
-            }
-            if let Some(error) = validator.error.take() {
+        match validate_game(&batch.bytes[start..end], game_number, game_offset) {
+            Ok(game_moves) => moves += game_moves,
+            Err(error) => {
                 return BatchResult {
                     sequence: batch.sequence,
                     games,
                     moves,
-                    error: Some(ValidationError::Semantic(error)),
+                    error: Some(error),
                 };
             }
         }
-        debug_assert_eq!(validator.games, game_number);
         games += 1;
-        moves += validator.moves;
         start = end;
     }
     BatchResult {
@@ -411,7 +360,7 @@ mod tests {
         let error = run_parallel(Cursor::new(input), 2, 1).unwrap_err();
 
         match error {
-            PipelineError::Validation(ValidationError::Semantic(error)) => {
+            PipelineError::Validation(GameValidationError::Semantic(error)) => {
                 assert_eq!(error.game, 2);
                 assert_eq!(error.ply, 1);
                 assert_eq!(error.context, b"e5");
