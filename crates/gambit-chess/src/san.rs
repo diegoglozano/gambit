@@ -60,14 +60,15 @@ impl Position {
     /// check-annotated SAN.
     pub fn play_san(&mut self, san: &[u8]) -> Result<Move, SanError> {
         let parsed = parse_san(san)?;
-        let chess_move = if parsed.castle {
-            find_castle(*self, parsed)?
+        let (chess_move, next) = if parsed.castle {
+            let chess_move = find_castle(*self, parsed)?;
+            let mut next = *self;
+            next.play_unchecked(chess_move);
+            (chess_move, next)
         } else {
             find_targeted_move(*self, parsed)?
         };
 
-        let mut next = *self;
-        next.play_unchecked(chess_move);
         validate_check_suffix(next, parsed.check)?;
         *self = next;
         Ok(chess_move)
@@ -214,7 +215,7 @@ fn find_castle(position: Position, parsed: ParsedSan) -> Result<Move, SanError> 
         })
 }
 
-fn find_targeted_move(position: Position, parsed: ParsedSan) -> Result<Move, SanError> {
+fn find_targeted_move(position: Position, parsed: ParsedSan) -> Result<(Move, Position), SanError> {
     let color = position.side_to_move();
     let mut sources = position.bitboard(color, parsed.piece);
     let mut matched = None;
@@ -242,7 +243,7 @@ fn find_targeted_move(position: Position, parsed: ParsedSan) -> Result<Move, San
                 kind: SanErrorKind::AmbiguousMove,
             });
         }
-        matched = Some(chess_move);
+        matched = Some((chess_move, next));
     }
     matched.ok_or(SanError {
         kind: SanErrorKind::IllegalMove,
@@ -308,7 +309,13 @@ fn candidate_move(position: Position, from: Square, parsed: ParsedSan) -> Option
     if parsed.capture {
         flags |= Move::CAPTURE;
     }
-    Some(Move::new(from, destination, parsed.promotion, flags))
+    Some(Move::new(
+        from,
+        destination,
+        parsed.piece,
+        parsed.promotion,
+        flags,
+    ))
 }
 
 fn file_distance(from: Square, to: Square) -> u8 {

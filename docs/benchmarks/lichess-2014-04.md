@@ -607,6 +607,50 @@ As with the preceding Mac measurements, the automation initially launched
 processes with macOS background priority. Each measured process was moved out
 of `PRIO_DARWIN_BG` immediately after launch with `taskpolicy -B -p PID`.
 
+## Move-application metadata on Apple M3
+
+A four-second sample of the fused validator at the merged ray baseline
+`fca38e5` showed that semantic validation remained dominated by SAN resolution
+and move application. Three redundant operations were isolated:
+
+- a selected non-castling SAN move was applied once to verify king safety and
+  then applied again to commit it;
+- `play_unchecked` searched all piece bitboards to rediscover the moving piece,
+  even though both the SAN resolver and move generator already knew its type;
+- `play_unchecked` searched for a captured piece on quiet moves despite the
+  existing capture flag proving that no capture could occur.
+
+SAN resolution now returns the already-validated successor position. The
+moving piece occupies three previously unused high bits in the existing 32-bit
+`Move`; zero remains an unspecified-piece sentinel so default moves retain the
+old lookup fallback. Quiet moves bypass captured-piece lookup entirely. `Move`
+therefore remains 4 bytes and `Position` remains 104 bytes.
+
+The previous section's ray candidate is the perft baseline. Five foreground
+runs of the final candidate produced:
+
+| Position | Depth | Nodes | Baseline median | Candidate runs (Mnodes/s) | Candidate median | Change |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| Initial | 6 | 119,060,324 | 54.69 Mnodes/s | 72.60, 72.98, 73.34, 73.81, 73.78 | **73.34 Mnodes/s** | **+34.10%** |
+| Kiwipete | 5 | 193,690,690 | 59.44 Mnodes/s | 70.72, 70.75, 70.74, 70.87, 70.44 | **70.74 Mnodes/s** | **+19.01%** |
+
+A fresh paired fused baseline produced 120.00, 116.22, 120.18, 120.55, and
+120.36 MiB/s, a 120.18 MiB/s median. The final candidate produced 130.63,
+132.35, 132.82, 132.37, and 130.55 MiB/s, a **132.35 MiB/s median** and a
+**10.13% improvement**. Median move rate increased from 9.83 to 10.83 million
+moves/s. Every run reproduced exactly 810,463 games and 54,748,499 legal SAN
+moves.
+
+The legal-move tests retain the canonical initial, Kiwipete, and endgame perft
+counts, and now also verify that generated moves carry the piece found on their
+source square. Debug and release workspace tests cover SAN ambiguity, castling,
+en passant, promotion, check, and mate.
+
+Four-worker queue and eight-range runs also reproduced the exact corpus counts,
+but are omitted as throughput comparisons: concurrent WindowServer and UI load
+produced 231–320 MiB/s queue results and similarly unstable range results. The
+single-process perft and fused series remained stable enough to publish.
+
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel

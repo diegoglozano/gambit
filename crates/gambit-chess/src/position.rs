@@ -231,6 +231,7 @@ impl Move {
     pub(crate) const fn new(
         from: Square,
         to: Square,
+        piece: Piece,
         promotion: Option<Piece>,
         flags: u32,
     ) -> Self {
@@ -241,7 +242,13 @@ impl Move {
             Some(Piece::Rook) => 3,
             Some(Piece::Queen) => 4,
         };
-        Self((from.0 as u32) | ((to.0 as u32) << 6) | (promotion << 12) | flags)
+        Self(
+            (from.0 as u32)
+                | ((to.0 as u32) << 6)
+                | (promotion << 12)
+                | flags
+                | (((piece as u32) + 1) << 19),
+        )
     }
 
     #[must_use]
@@ -261,6 +268,18 @@ impl Move {
             2 => Some(Piece::Bishop),
             3 => Some(Piece::Rook),
             4 => Some(Piece::Queen),
+            _ => None,
+        }
+    }
+
+    const fn piece(self) -> Option<Piece> {
+        match (self.0 >> 19) & 7 {
+            1 => Some(Piece::Pawn),
+            2 => Some(Piece::Knight),
+            3 => Some(Piece::Bishop),
+            4 => Some(Piece::Rook),
+            5 => Some(Piece::Queen),
+            6 => Some(Piece::King),
             _ => None,
         }
     }
@@ -578,10 +597,12 @@ impl Position {
         let opponent = color.opposite();
         let from = chess_move.from();
         let to = chess_move.to();
-        let (_, piece) = self
-            .piece_at(from)
-            .filter(|(piece_color, _)| *piece_color == color)
-            .expect("unchecked move must have a moving piece");
+        let piece = chess_move.piece().unwrap_or_else(|| {
+            self.piece_at(from)
+                .filter(|(piece_color, _)| *piece_color == color)
+                .map(|(_, piece)| piece)
+                .expect("unchecked move must have a moving piece")
+        });
 
         self.pieces[piece_index(color, piece)] &= !from.bit();
         let captured_square = if chess_move.is_en_passant() {
@@ -593,9 +614,12 @@ impl Position {
         } else {
             to
         };
-        let captured = self
-            .piece_at(captured_square)
-            .filter(|(captured_color, _)| *captured_color == opponent);
+        let captured = if chess_move.is_capture() {
+            self.piece_at(captured_square)
+                .filter(|(captured_color, _)| *captured_color == opponent)
+        } else {
+            None
+        };
         if let Some((_, captured_piece)) = captured {
             self.pieces[piece_index(opponent, captured_piece)] &= !captured_square.bit();
         }
@@ -680,7 +704,13 @@ impl Position {
                     if from.rank() == start_rank {
                         if let Some(double_to) = offset_square(from, 0, direction * 2) {
                             if occupied & double_to.bit() == 0 {
-                                moves.push(Move::new(from, double_to, None, Move::DOUBLE_PAWN));
+                                moves.push(Move::new(
+                                    from,
+                                    double_to,
+                                    Piece::Pawn,
+                                    None,
+                                    Move::DOUBLE_PAWN,
+                                ));
                             }
                         }
                     }
@@ -699,7 +729,13 @@ impl Position {
                         to.0 + 8
                     });
                     if self.bitboard(color.opposite(), Piece::Pawn) & captured.bit() != 0 {
-                        moves.push(Move::new(from, to, None, Move::CAPTURE | Move::EN_PASSANT));
+                        moves.push(Move::new(
+                            from,
+                            to,
+                            Piece::Pawn,
+                            None,
+                            Move::CAPTURE | Move::EN_PASSANT,
+                        ));
                     }
                 }
             }
@@ -709,10 +745,10 @@ impl Position {
     fn push_pawn_move(moves: &mut MoveList, from: Square, to: Square, flags: u32) {
         if matches!(to.rank(), 0 | 7) {
             for promotion in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight] {
-                moves.push(Move::new(from, to, Some(promotion), flags));
+                moves.push(Move::new(from, to, Piece::Pawn, Some(promotion), flags));
             }
         } else {
-            moves.push(Move::new(from, to, None, flags));
+            moves.push(Move::new(from, to, Piece::Pawn, None, flags));
         }
     }
 
@@ -728,7 +764,7 @@ impl Position {
                 } else {
                     0
                 };
-                moves.push(Move::new(from, to, None, flags));
+                moves.push(Move::new(from, to, piece, None, flags));
             }
         }
     }
@@ -746,7 +782,7 @@ impl Position {
                 } else {
                     0
                 };
-                moves.push(Move::new(from, to, None, flags));
+                moves.push(Move::new(from, to, piece, None, flags));
             }
         }
     }
@@ -764,7 +800,7 @@ impl Position {
             } else {
                 0
             };
-            moves.push(Move::new(from, to, None, flags));
+            moves.push(Move::new(from, to, Piece::King, None, flags));
         }
         self.generate_castles(moves);
     }
@@ -800,7 +836,13 @@ impl Position {
             && !self.is_square_attacked(transit, opponent)
             && !self.is_square_attacked(destination, opponent)
         {
-            moves.push(Move::new(king, destination, None, Move::CASTLE));
+            moves.push(Move::new(
+                king,
+                destination,
+                Piece::King,
+                None,
+                Move::CASTLE,
+            ));
         }
         let (queenside_rook, rook_gap, destination, transit) = match color {
             Color::White => (Square::A1, Square(1), Square::C1, Square::D1),
@@ -812,7 +854,13 @@ impl Position {
             && !self.is_square_attacked(transit, opponent)
             && !self.is_square_attacked(destination, opponent)
         {
-            moves.push(Move::new(king, destination, None, Move::CASTLE));
+            moves.push(Move::new(
+                king,
+                destination,
+                Piece::King,
+                None,
+                Move::CASTLE,
+            ));
         }
     }
 }
@@ -990,8 +1038,15 @@ mod tests {
         assert_eq!(std::mem::size_of::<Position>(), 104);
         assert_eq!(std::mem::size_of::<Move>(), 4);
         let mut moves = MoveList::default();
-        Position::initial().generate_legal_moves(&mut moves);
+        let position = Position::initial();
+        position.generate_legal_moves(&mut moves);
         assert_eq!(moves.len(), 20);
+        for chess_move in moves.as_slice() {
+            assert_eq!(
+                chess_move.piece(),
+                position.piece_at(chess_move.from()).map(|(_, piece)| piece)
+            );
+        }
     }
 
     #[test]
