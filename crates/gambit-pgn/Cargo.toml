@@ -38,3 +38,7 @@ path = "examples/semantic_validate.rs"
 [[example]]
 name = "parallel-semantic-validate"
 path = "examples/parallel_semantic_validate.rs"
+
+[[example]]
+name = "partitioned-semantic-validate"
+path = "examples/partitioned_semantic_validate.rs"

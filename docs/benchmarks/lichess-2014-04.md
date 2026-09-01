@@ -369,14 +369,47 @@ scaling series. Maximum RSS is one sample per size. Because 1 MiB retains
 is the new default.
 
 The achieved 2.64x strong-scaling speedup is useful but only 66% efficiency at
-four cores. The next experiment should partition a seekable decompressed file
-into independent game-aligned ranges, removing the serial framer, packed-batch
-copy, and producer/worker oversubscription from the file benchmark. The bounded
-producer remains appropriate for pipes and non-seekable decompression streams.
+four cores. The following experiment tests whether direct file partitioning can
+remove the serial framer, packed-batch copy, and producer/worker
+oversubscription. The bounded producer remains appropriate for pipes and
+non-seekable decompression streams.
+
+## Partitioned file result
+
+The partitioned prototype first makes a bounded serial `GameReader` pass to
+choose approximately byte-balanced game boundaries. Each worker then seeks to
+its assigned boundary and independently frames, parses, and semantically
+validates that range. It uses no central producer or packed-game copies during
+the validation phase. Partitioning and validation are timed separately so a
+reusable external index can be evaluated independently from a one-shot run.
+
+The same Intel N95 host, Rust target, build configuration, and checksum-verified
+corpus were used. Every run again produced exactly 810,463 games and 54,748,499
+legal SAN moves.
+
+| Workers | Validation runs (MiB/s) | Validation median | End-to-end median | Median partition time |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | 31.57, 31.00, 31.39, 31.56, 31.44 | **31.44 MiB/s** | **28.08 MiB/s** | 2.598s |
+| 2 | 58.07, 58.37, 57.85, 59.19, 57.80 | **58.07 MiB/s** | **47.58 MiB/s** | 2.586s |
+| 4 | 86.31, 89.05, 94.50, 95.84, 96.03 | **94.50 MiB/s** | **69.82 MiB/s** | 2.579s |
+| 8 | 91.76, 93.83, 92.10, 96.15, 97.44 | **93.83 MiB/s** | **68.79 MiB/s** | 2.596s |
+
+Four ranges are again the saturation point. Their validation-only median is
+2.9% above the bounded queue's 91.82 MiB/s median, but the boundary pass makes
+one-shot end-to-end throughput 24.0% lower. A separately timed four-range run
+used 1,144 KiB maximum RSS, compared with 14,424 KiB for a 1 MiB queue batch.
+
+Using the observed median times, a reusable partition index would need roughly
+13 validation passes over the same file to amortize its initial discovery cost
+against the queue pipeline. Persisting such an index is therefore useful only
+for repeated analytics, not one-shot validation. The result also shows that the
+producer and batch copies are not the main scaling limit on this host. The next
+optimization should profile the SAN/board kernel, especially repeated
+occupancy, piece lookup, attack generation, and `Position` copies.
 
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel
 decompression, partitioned files, native CPU tuning, SIMD token scans, and PGO
-are higher-priority experiments, with partitioned files now the next measured
-step.
+remain candidate experiments, but the measured partition result makes semantic
+kernel profiling the next priority.
