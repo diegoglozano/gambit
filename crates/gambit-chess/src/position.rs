@@ -3,6 +3,54 @@ use std::fmt;
 
 const NO_SQUARE: u8 = 64;
 const MAX_LEGAL_MOVES: usize = 256;
+const KNIGHT_ATTACKS: [u64; 64] = build_attack_table([
+    (1, 2),
+    (2, 1),
+    (2, -1),
+    (1, -2),
+    (-1, -2),
+    (-2, -1),
+    (-2, 1),
+    (-1, 2),
+]);
+const KING_ATTACKS: [u64; 64] = build_attack_table([
+    (1, 1),
+    (1, 0),
+    (1, -1),
+    (0, -1),
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, 1),
+]);
+const WHITE_PAWN_ATTACKERS: [u64; 64] = build_attack_table([(-1, -1), (1, -1)]);
+const BLACK_PAWN_ATTACKERS: [u64; 64] = build_attack_table([(-1, 1), (1, 1)]);
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
+const fn build_attack_table<const N: usize>(deltas: [(i8, i8); N]) -> [u64; 64] {
+    let mut table = [0_u64; 64];
+    let mut index = 0_usize;
+    while index < table.len() {
+        let file = (index & 7) as i8;
+        let rank = (index >> 3) as i8;
+        let mut delta = 0_usize;
+        while delta < deltas.len() {
+            let target_file = file + deltas[delta].0;
+            let target_rank = rank + deltas[delta].1;
+            if target_file >= 0 && target_file < 8 && target_rank >= 0 && target_rank < 8 {
+                let target = (target_rank as usize) * 8 + target_file as usize;
+                table[index] |= 1_u64 << target;
+            }
+            delta += 1;
+        }
+        index += 1;
+    }
+    table
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -446,13 +494,10 @@ impl Position {
     #[must_use]
     pub fn is_square_attacked(self, square: Square, by: Color) -> bool {
         let pawns = self.bitboard(by, Piece::Pawn);
+        let square_index = usize::from(square.0);
         let pawn_attackers = match by {
-            Color::White => {
-                shifted(square, -1, -1).unwrap_or(0) | shifted(square, 1, -1).unwrap_or(0)
-            }
-            Color::Black => {
-                shifted(square, -1, 1).unwrap_or(0) | shifted(square, 1, 1).unwrap_or(0)
-            }
+            Color::White => WHITE_PAWN_ATTACKERS[square_index],
+            Color::Black => BLACK_PAWN_ATTACKERS[square_index],
         };
         if pawns & pawn_attackers != 0
             || self.bitboard(by, Piece::Knight) & knight_attacks(square) != 0
@@ -872,40 +917,12 @@ fn square_from_bit(bitboard: u64) -> Square {
     Square(u8::try_from(bitboard.trailing_zeros()).expect("nonzero u64 bit index is below 64"))
 }
 
-fn shifted(square: Square, file_delta: i8, rank_delta: i8) -> Option<u64> {
-    offset_square(square, file_delta, rank_delta).map(Square::bit)
-}
-
 fn knight_attacks(square: Square) -> u64 {
-    [
-        (1, 2),
-        (2, 1),
-        (2, -1),
-        (1, -2),
-        (-1, -2),
-        (-2, -1),
-        (-2, 1),
-        (-1, 2),
-    ]
-    .into_iter()
-    .filter_map(|(file, rank)| shifted(square, file, rank))
-    .fold(0, |attacks, square| attacks | square)
+    KNIGHT_ATTACKS[usize::from(square.0)]
 }
 
 fn king_attacks(square: Square) -> u64 {
-    [
-        (1, 1),
-        (1, 0),
-        (1, -1),
-        (0, -1),
-        (-1, -1),
-        (-1, 0),
-        (-1, 1),
-        (0, 1),
-    ]
-    .into_iter()
-    .filter_map(|(file, rank)| shifted(square, file, rank))
-    .fold(0, |attacks, square| attacks | square)
+    KING_ATTACKS[usize::from(square.0)]
 }
 
 fn first_occupied(from: Square, file_delta: i8, rank_delta: i8, occupied: u64) -> Option<u64> {
