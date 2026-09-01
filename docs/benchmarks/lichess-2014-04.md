@@ -692,6 +692,41 @@ input blocks before emitting events. It is not a good fit for the current inner
 SAN loop, where tokens are commonly only two to seven bytes and branch/table
 setup dominates useful vector work.
 
+## Destination-directed SAN sources on Intel N95
+
+After the ray move-generation, move-metadata, and token-dispatch changes were
+merged, the SAN resolver still began each non-castling move with every piece of
+the requested type. A quiet pawn move could therefore test all eight pawns even
+though its destination has at most two possible source squares. Each rejected
+source also repeated destination occupancy and geometry work.
+
+The candidate intersects the piece bitboard with attacks projected backward
+from the SAN destination. Pawn captures use the existing color-specific attack
+tables, quiet pawns use one- and two-rank shifts, knights and kings use their
+existing lookup tables, and sliding pieces reuse the ray kernel. Destination
+occupancy is resolved once per SAN token. No new tables, dependencies, or
+position state are required.
+
+Fresh five-run measurements compared binaries from merged `main` at `8b145ef`
+with the candidate on the same Intel N95 host and decompressed corpus:
+
+| Path | Baseline runs (MiB/s) | Baseline median | Candidate runs (MiB/s) | Candidate median | Change |
+| --- | --- | ---: | --- | ---: | ---: |
+| Fused single-thread | 56.96, 61.13, 56.35, 59.37, 60.72 | **59.37 MiB/s** | 64.68, 65.57, 64.80, 64.77, 63.08 | **64.77 MiB/s** | **+9.10%** |
+| Bounded, 4 workers | 149.75, 149.34, 155.71, 157.96, 154.53 | **154.53 MiB/s** | 164.53, 152.58, 161.95, 159.30, 164.39 | **161.95 MiB/s** | **+4.80%** |
+
+Every run validated exactly 810,463 games and 54,748,499 legal SAN moves. The
+single-thread candidate median corresponds to 5.30 million moves/s; the
+four-worker median reaches 13.25 million moves/s. A sampled candidate
+four-worker run used 14,228 KiB maximum RSS. The smaller bounded-path gain is
+consistent with the serial framer and queue becoming a larger share of total
+time as worker-local semantic validation gets faster.
+
+The next isolated semantic candidate is retaining the captured piece type in
+the unused high bits of `Move`. SAN resolution already discovers that type, so
+carrying it forward could remove the remaining captured-piece bitboard scan in
+`play_unchecked` without widening the 4-byte move representation.
+
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel

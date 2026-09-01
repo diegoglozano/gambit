@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::position::sliding_moves;
-use crate::{Move, MoveList, Piece, Position, Square};
+use crate::position::{king_attacks, knight_attacks, pawn_attackers, sliding_moves};
+use crate::{Color, Move, MoveList, Piece, Position, Square};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SanError {
@@ -217,7 +217,14 @@ fn find_castle(position: Position, parsed: ParsedSan) -> Result<Move, SanError> 
 
 fn find_targeted_move(position: Position, parsed: ParsedSan) -> Result<(Move, Position), SanError> {
     let color = position.side_to_move();
-    let mut sources = position.bitboard(color, parsed.piece);
+    let destination_piece = position.piece_at(parsed.destination);
+    if destination_piece.is_some_and(|(piece_color, _)| piece_color == color) {
+        return Err(SanError {
+            kind: SanErrorKind::IllegalMove,
+        });
+    }
+    let actual_capture = destination_piece.is_some();
+    let mut sources = candidate_sources(position, parsed);
     let mut matched = None;
     while sources != 0 {
         let from = Square::from_index(
@@ -230,7 +237,7 @@ fn find_targeted_move(position: Position, parsed: ParsedSan) -> Result<(Move, Po
         {
             continue;
         }
-        let Some(chess_move) = candidate_move(position, from, parsed) else {
+        let Some(chess_move) = candidate_move(position, from, parsed, actual_capture) else {
             continue;
         };
         let mut next = position;
@@ -250,14 +257,33 @@ fn find_targeted_move(position: Position, parsed: ParsedSan) -> Result<(Move, Po
     })
 }
 
-fn candidate_move(position: Position, from: Square, parsed: ParsedSan) -> Option<Move> {
+fn candidate_sources(position: Position, parsed: ParsedSan) -> u64 {
     let color = position.side_to_move();
     let destination = parsed.destination;
-    let destination_piece = position.piece_at(destination);
-    if destination_piece.is_some_and(|(piece_color, _)| piece_color == color) {
-        return None;
-    }
-    let actual_capture = destination_piece.is_some();
+    let destination_bit = 1_u64 << destination.index();
+    let reaches = match parsed.piece {
+        Piece::Pawn if parsed.capture => pawn_attackers(destination, color),
+        Piece::Pawn => match color {
+            Color::White => (destination_bit >> 8) | (destination_bit >> 16),
+            Color::Black => (destination_bit << 8) | (destination_bit << 16),
+        },
+        Piece::Knight => knight_attacks(destination),
+        Piece::Bishop | Piece::Rook | Piece::Queen => {
+            sliding_moves(destination, parsed.piece, position.occupied())
+        }
+        Piece::King => king_attacks(destination),
+    };
+    position.bitboard(color, parsed.piece) & reaches
+}
+
+fn candidate_move(
+    position: Position,
+    from: Square,
+    parsed: ParsedSan,
+    actual_capture: bool,
+) -> Option<Move> {
+    let color = position.side_to_move();
+    let destination = parsed.destination;
     let mut flags = 0;
 
     let reaches = match parsed.piece {
@@ -290,18 +316,7 @@ fn candidate_move(position: Position, from: Square, parsed: ParsedSan) -> Option
                 false
             }
         }
-        Piece::Knight => {
-            let file = file_distance(from, destination);
-            let rank = rank_distance(from, destination);
-            matches!((file, rank), (1, 2) | (2, 1))
-        }
-        Piece::Bishop | Piece::Rook | Piece::Queen => {
-            sliding_moves(from, parsed.piece, position.occupied()) & (1_u64 << destination.index())
-                != 0
-        }
-        Piece::King => {
-            file_distance(from, destination) <= 1 && rank_distance(from, destination) <= 1
-        }
+        Piece::Knight | Piece::Bishop | Piece::Rook | Piece::Queen | Piece::King => true,
     };
     if !reaches || parsed.capture != (actual_capture || flags & Move::EN_PASSANT != 0) {
         return None;
@@ -316,14 +331,6 @@ fn candidate_move(position: Position, from: Square, parsed: ParsedSan) -> Option
         parsed.promotion,
         flags,
     ))
-}
-
-fn file_distance(from: Square, to: Square) -> u8 {
-    from.file().abs_diff(to.file())
-}
-
-fn rank_distance(from: Square, to: Square) -> u8 {
-    from.rank().abs_diff(to.rank())
 }
 
 fn validate_check_suffix(position: Position, suffix: CheckSuffix) -> Result<(), SanError> {
