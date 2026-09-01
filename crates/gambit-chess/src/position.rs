@@ -544,10 +544,7 @@ impl Position {
     pub fn is_square_attacked(self, square: Square, by: Color) -> bool {
         let pawns = self.bitboard(by, Piece::Pawn);
         let square_index = usize::from(square.0);
-        let pawn_attackers = match by {
-            Color::White => WHITE_PAWN_ATTACKERS[square_index],
-            Color::Black => BLACK_PAWN_ATTACKERS[square_index],
-        };
+        let pawn_attackers = pawn_attackers(square, by);
         if pawns & pawn_attackers != 0
             || self.bitboard(by, Piece::Knight) & knight_attacks(square) != 0
             || self.bitboard(by, Piece::King) & king_attacks(square) != 0
@@ -965,11 +962,18 @@ fn square_from_bit(bitboard: u64) -> Square {
     Square(u8::try_from(bitboard.trailing_zeros()).expect("nonzero u64 bit index is below 64"))
 }
 
-fn knight_attacks(square: Square) -> u64 {
+pub(crate) fn pawn_attackers(square: Square, color: Color) -> u64 {
+    match color {
+        Color::White => WHITE_PAWN_ATTACKERS[usize::from(square.0)],
+        Color::Black => BLACK_PAWN_ATTACKERS[usize::from(square.0)],
+    }
+}
+
+pub(crate) fn knight_attacks(square: Square) -> u64 {
     KNIGHT_ATTACKS[usize::from(square.0)]
 }
 
-fn king_attacks(square: Square) -> u64 {
+pub(crate) fn king_attacks(square: Square) -> u64 {
     KING_ATTACKS[usize::from(square.0)]
 }
 
