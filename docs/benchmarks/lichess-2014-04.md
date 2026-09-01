@@ -444,6 +444,42 @@ unchanged from the previous 14,424 KiB sample. Four physical workers remain the
 saturation point. The next kernel candidate is sliding-ray attack lookup, which
 should likewise be evaluated independently before changing the position layout.
 
+## Precomputed sliding rays
+
+The sliding-ray candidate replaces the eight coordinate walks in check
+detection with per-square ray masks. The nearest occupied square on an
+increasing ray is isolated with its least significant bit; decreasing rays use
+the most significant bit. The eight compile-time 64-entry tables add 4 KiB of
+static data. The 104-byte `Position` layout and the bounded queue are unchanged.
+
+Fresh five-run measurements compared the retained merged attack-table binary
+with the sliding-ray candidate on the same decompressed corpus and host:
+
+| Version | Runs (MiB/s) | Median | Move rate |
+| --- | --- | ---: | ---: |
+| Attack-table baseline | 36.29, 38.33, 38.62, 38.76, 38.60 | **38.60 MiB/s** | 3.16 million/s |
+| Sliding rays | 51.00, 52.78, 53.15, 52.99, 52.57 | **52.78 MiB/s** | 4.32 million/s |
+
+This is a 36.7% single-thread throughput improvement. Both binaries validated
+all 810,463 games and 54,748,499 legal SAN moves on every run. A fresh
+four-worker comparison measured 104.30, 105.96, 103.95, 104.00, and 103.25
+MiB/s for the merged baseline, a 104.00 MiB/s median. The final candidate
+scaling series was:
+
+| Workers | Runs (MiB/s) | Median | Median move rate |
+| ---: | --- | ---: | ---: |
+| 1 | 55.53, 56.13, 55.45, 55.59, 53.23 | **55.53 MiB/s** | 4.54 million/s |
+| 2 | 94.49, 98.26, 97.27, 93.92, 94.43 | **94.49 MiB/s** | 7.73 million/s |
+| 4 | 133.02, 131.13, 119.38, 122.43, 135.30 | **131.13 MiB/s** | 10.73 million/s |
+| 8 | 126.31, 126.14, 124.25, 129.09, 121.76 | **126.14 MiB/s** | 10.32 million/s |
+
+The four-worker median improves by 26.1% over the fresh merged baseline. A
+sampled four-worker run used 14,368 KiB maximum RSS, only 64 KiB above the prior
+sample. Four physical workers remain the saturation point. The next isolated
+kernel candidate is applying the ray masks to pseudo-legal sliding move
+generation, which still advances through board coordinates one square at a
+time.
+
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel
