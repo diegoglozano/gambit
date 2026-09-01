@@ -34,3 +34,7 @@ path = "examples/incremental_validate.rs"
 [[example]]
 name = "semantic-validate"
 path = "examples/semantic_validate.rs"
+
+[[example]]
+name = "parallel-semantic-validate"
+path = "examples/parallel_semantic_validate.rs"

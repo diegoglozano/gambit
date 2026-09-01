@@ -314,14 +314,69 @@ Scoutfish.
   development baseline, not a portable hardware comparison.
 - No compiler flags such as `-C target-cpu=native`, LTO, or PGO were enabled.
 
-The next performance milestone is batch-level parallelism around the compact
+The parallel follow-up below adds batch-level concurrency around the compact
 SAN/board layer. Games are independent work units, so a bounded producer/worker
-pipeline can keep ingestion ordered while legality checking and position
-updates scale across cores. A completed Scoutfish comparison still requires a
-supported x86-64 environment.
+pipeline keeps memory bounded while legality checking and position updates
+scale across cores. A completed Scoutfish comparison still requires a supported
+x86-64 environment.
+
+## Bounded parallel semantic result
+
+The first parallel prototype uses `GameReader` as a serial producer, copies
+complete games into packed byte batches, and sends those batches through a
+bounded queue to worker-local parsers and chess positions. Results are reduced
+in input order so error reporting remains deterministic.
+
+This follow-up measurement used a separate host and is not directly comparable
+to the Apple M3 results above:
+
+- Date: 2026-09-01
+- Hardware: Intel N95, 4 physical cores, no SMT, single NUMA node
+- Rust: `rustc 1.85.0 (4d91de4e 2025-02-17)`
+- Target: `x86_64-unknown-linux-musl`
+- Build: default Cargo release profile, no native CPU flags
+- Input: the same checksum-verified decompressed April 2014 corpus
+- Batch target: 4 MiB
+
+Every run reproduced 810,463 games and 54,748,499 legal SAN moves. Five runs
+were made for each worker count:
+
+| Workers | Runs (MiB/s) | Median | Median move rate | Speedup vs. fused baseline |
+| ---: | --- | ---: | ---: | ---: |
+| Fused single-thread baseline | 34.66, 35.07, 34.56, 35.06, 34.77 | **34.77** | 2.84 million/s | 1.00x |
+| 1 | 35.26, 34.84, 35.70, 35.34, 35.34 | **35.34** | 2.89 million/s | 1.02x |
+| 2 | 63.53, 63.88, 63.38, 64.02, 64.33 | **63.88** | 5.23 million/s | 1.84x |
+| 4 | 91.82, 92.65, 90.33, 89.31, 91.99 | **91.82** | 7.51 million/s | 2.64x |
+| 8 | 92.48, 85.09, 91.77, 90.95, 91.70 | **91.70** | 7.50 million/s | 2.64x |
+
+Four workers use all physical cores and are the saturation point on this host.
+Eight workers add scheduling variability without increasing the median. A
+separately timed four-worker, 4 MiB run consumed approximately 360% CPU and
+54,816 KiB maximum RSS.
+
+A smaller batch-size sweep found no meaningful throughput benefit from larger
+batches:
+
+| Target batch | Batches | Median throughput | Sample maximum RSS |
+| ---: | ---: | ---: | ---: |
+| 1 MiB | 670 | **91.59 MiB/s** | 14,424 KiB |
+| 4 MiB | 168 | **91.82 MiB/s** | 54,816 KiB |
+| 16 MiB | 42 | **90.50 MiB/s** | 215,796 KiB |
+
+The 1 and 16 MiB medians use three runs; the 4 MiB median uses the five-run
+scaling series. Maximum RSS is one sample per size. Because 1 MiB retains
+99.7% of the 4 MiB median throughput while using substantially less memory, it
+is the new default.
+
+The achieved 2.64x strong-scaling speedup is useful but only 66% efficiency at
+four cores. The next experiment should partition a seekable decompressed file
+into independent game-aligned ranges, removing the serial framer, packed-batch
+copy, and producer/worker oversubscription from the file benchmark. The bounded
+producer remains appropriate for pipes and non-seekable decompression streams.
 
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel
 decompression, partitioned files, native CPU tuning, SIMD token scans, and PGO
-are higher-priority experiments after the semantic workload exists.
+are higher-priority experiments, with partitioned files now the next measured
+step.
