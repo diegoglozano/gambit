@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::position::sliding_moves;
 use crate::{Move, MoveList, Piece, Position, Square};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -293,19 +294,9 @@ fn candidate_move(position: Position, from: Square, parsed: ParsedSan) -> Option
             let rank = rank_distance(from, destination);
             matches!((file, rank), (1, 2) | (2, 1))
         }
-        Piece::Bishop => {
-            file_distance(from, destination) == rank_distance(from, destination)
-                && path_is_clear(position, from, destination)
-        }
-        Piece::Rook => {
-            (from.file() == destination.file() || from.rank() == destination.rank())
-                && path_is_clear(position, from, destination)
-        }
-        Piece::Queen => {
-            (from.file() == destination.file()
-                || from.rank() == destination.rank()
-                || file_distance(from, destination) == rank_distance(from, destination))
-                && path_is_clear(position, from, destination)
+        Piece::Bishop | Piece::Rook | Piece::Queen => {
+            sliding_moves(from, parsed.piece, position.occupied()) & (1_u64 << destination.index())
+                != 0
         }
         Piece::King => {
             file_distance(from, destination) <= 1 && rank_distance(from, destination) <= 1
@@ -318,33 +309,6 @@ fn candidate_move(position: Position, from: Square, parsed: ParsedSan) -> Option
         flags |= Move::CAPTURE;
     }
     Some(Move::new(from, destination, parsed.promotion, flags))
-}
-
-fn path_is_clear(position: Position, from: Square, to: Square) -> bool {
-    let file_step = sign(i16::from(to.file()) - i16::from(from.file()));
-    let rank_step = sign(i16::from(to.rank()) - i16::from(from.rank()));
-    if file_step == 0 && rank_step == 0 {
-        return false;
-    }
-    let mut file = i16::from(from.file()) + file_step;
-    let mut rank = i16::from(from.rank()) + rank_step;
-    while file != i16::from(to.file()) || rank != i16::from(to.rank()) {
-        let square = Square::from_coords(
-            u8::try_from(file).ok().unwrap(),
-            u8::try_from(rank).ok().unwrap(),
-        )
-        .expect("path remains on board");
-        if position.piece_at(square).is_some() {
-            return false;
-        }
-        file += file_step;
-        rank += rank_step;
-    }
-    true
-}
-
-fn sign(value: i16) -> i16 {
-    value.signum()
 }
 
 fn file_distance(from: Square, to: Square) -> u8 {

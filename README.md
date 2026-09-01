@@ -85,6 +85,15 @@ loading, legal move generation, and SAN execution. It handles pins, checks,
 castling, en passant, promotion, and file/rank disambiguation without external
 dependencies.
 
+Run a reproducible legal-move-generation benchmark from the initial position;
+the optional arguments are depth followed by a FEN:
+
+```console
+cargo run --release -p gambit-chess --example perft -- 6
+cargo run --release -p gambit-chess --example perft -- 5 \
+  'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1'
+```
+
 Validate every SAN move while incrementally reading a PGN corpus:
 
 ```console
@@ -94,7 +103,7 @@ zstdcat games.pgn.zst | \
 ```
 
 On the April 2014 Lichess corpus, the current single-threaded semantic path
-validates 54,748,499 moves at a median 9.57 million moves/s on an Apple M3, with
+validates 54,748,499 moves at a median 9.81 million moves/s on an Apple M3, with
 approximately 1.79 MB maximum RSS.
 
 An experimental bounded parallel path frames complete games into packed byte
