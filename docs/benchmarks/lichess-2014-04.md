@@ -476,9 +476,8 @@ scaling series was:
 The four-worker median improves by 26.1% over the fresh merged baseline. A
 sampled four-worker run used 14,368 KiB maximum RSS, only 64 KiB above the prior
 sample. Four physical workers remain the saturation point. The next isolated
-kernel candidate is applying the ray masks to pseudo-legal sliding move
-generation, which still advances through board coordinates one square at a
-time.
+kernel candidate was applying the ray masks to pseudo-legal sliding move
+generation; that experiment is reported after the Apple M3 baseline below.
 
 ## Final merged version on Apple M3
 
@@ -556,6 +555,57 @@ bytes maximum RSS.
 The older N95 partition table predates the two attack-kernel optimizations, so
 it should not be used for a direct M3/N95 hardware ratio. A new N95 partition
 run at `6068928` would be required for that comparison.
+
+## Ray-based sliding move generation on Apple M3
+
+The next candidate reuses the existing eight per-square ray tables for bishop,
+rook, and queen move generation. It isolates the nearest blocker on each ray
+with a least- or most-significant-bit operation, includes that blocker as a
+possible capture, and masks friendly pieces from the result. SAN candidate
+selection now uses the same kernel instead of a separate coordinate walk. This
+adds no tables and leaves the 104-byte `Position` layout unchanged.
+
+The new `perft` example makes the move-generation benchmark reproducible:
+
+```console
+cargo build --release -p gambit-chess --example perft
+target/release/examples/perft 6
+target/release/examples/perft 5 \
+  'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1'
+```
+
+Five foreground runs of binaries built from the main-branch baseline
+`b581215` and the candidate produced:
+
+| Position | Depth | Nodes | Baseline (Mnodes/s) | Ray candidate (Mnodes/s) | Median change |
+| --- | ---: | ---: | --- | --- | ---: |
+| Initial | 6 | 119,060,324 | 51.65, 52.41, 52.65, 52.26, 52.64 | 54.83, 54.55, 54.69, 54.46, 54.81 | **+4.35%** |
+| Kiwipete | 5 | 193,690,690 | 58.37, 56.14, 57.92, 58.52, 58.09 | 57.50, 58.35, 59.93, 60.22, 59.44 | **+2.32%** |
+
+Correctness checks compare the ray kernel with the old coordinate walk for all
+64 source squares, all three sliding pieces, fixed dense occupancy patterns,
+and every possible single-square blocker. The existing initial, Kiwipete, and
+endgame perft assertions also pass.
+
+The semantic benchmark verifies whether the isolated kernel win survives the
+full PGN-to-position path. Every candidate run again produced exactly 810,463
+games and 54,748,499 legal SAN moves:
+
+| Path | Main baseline median | Candidate runs (MiB/s) | Candidate median | Change |
+| --- | ---: | --- | ---: | ---: |
+| Fused single-thread | 116.99 MiB/s | 116.10, 119.98, 120.30, 117.64, 120.45 | **119.98 MiB/s** | **+2.56%** |
+| Bounded, 4 workers | 391.62 MiB/s | 395.86, 390.31, 386.73, 386.42, 374.18 | **386.73 MiB/s** | -1.25% |
+| Partitioned, 8 ranges | 512.73 MiB/s | 551.02, 541.53, 537.78, 512.68, 553.80 | **541.53 MiB/s** | +5.62% |
+
+The fused result is the cleanest end-to-end signal and raises median move rate
+from 9.57 to 9.81 million moves/s. The bounded result is effectively flat amid
+parallel-run variance. Eight-range validation improved, but it is sensitive to
+workstation scheduling; its median end-to-end throughput moved only from
+238.77 to 243.27 MiB/s because the serial partition pass is unchanged.
+
+As with the preceding Mac measurements, the automation initially launched
+processes with macOS background priority. Each measured process was moved out
+of `PRIO_DARWIN_BG` immediately after launch with `taskpolicy -B -p PID`.
 
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless

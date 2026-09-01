@@ -737,41 +737,16 @@ impl Position {
         let own = self.occupied_by(self.side_to_move);
         let opponents = self.occupied_by(self.side_to_move.opposite());
         let occupied = own | opponents;
-        let directions: &[(i8, i8)] = match piece {
-            Piece::Bishop => &[(1, 1), (1, -1), (-1, 1), (-1, -1)],
-            Piece::Rook => &[(1, 0), (-1, 0), (0, 1), (0, -1)],
-            Piece::Queen => &[
-                (1, 1),
-                (1, -1),
-                (-1, 1),
-                (-1, -1),
-                (1, 0),
-                (-1, 0),
-                (0, 1),
-                (0, -1),
-            ],
-            _ => unreachable!("only sliding pieces"),
-        };
         let mut pieces = self.bitboard(self.side_to_move, piece);
         while let Some(from) = pop_square(&mut pieces) {
-            for (file_delta, rank_delta) in directions {
-                let mut current = from;
-                while let Some(to) = offset_square(current, *file_delta, *rank_delta) {
-                    if own & to.bit() != 0 {
-                        break;
-                    }
-                    let capture = opponents & to.bit() != 0;
-                    moves.push(Move::new(
-                        from,
-                        to,
-                        None,
-                        if capture { Move::CAPTURE } else { 0 },
-                    ));
-                    if occupied & to.bit() != 0 {
-                        break;
-                    }
-                    current = to;
-                }
+            let mut destinations = sliding_moves(from, piece, occupied) & !own;
+            while let Some(to) = pop_square(&mut destinations) {
+                let flags = if opponents & to.bit() != 0 {
+                    Move::CAPTURE
+                } else {
+                    0
+                };
+                moves.push(Move::new(from, to, None, flags));
             }
         }
     }
@@ -964,6 +939,48 @@ fn first_occupied_decreasing(ray: u64, occupied: u64) -> u64 {
     }
 }
 
+fn ray_moves_increasing(ray: u64, occupied: u64) -> u64 {
+    let blocker = first_occupied_increasing(ray, occupied);
+    if blocker == 0 {
+        ray
+    } else {
+        ray & (blocker | blocker.wrapping_sub(1))
+    }
+}
+
+fn ray_moves_decreasing(ray: u64, occupied: u64) -> u64 {
+    let blocker = first_occupied_decreasing(ray, occupied);
+    if blocker == 0 {
+        ray
+    } else {
+        ray & !blocker.wrapping_sub(1)
+    }
+}
+
+pub(crate) fn sliding_moves(square: Square, piece: Piece, occupied: u64) -> u64 {
+    let square_index = usize::from(square.0);
+    let diagonal = || {
+        ray_moves_increasing(NORTH_EAST_RAYS[square_index], occupied)
+            | ray_moves_increasing(NORTH_WEST_RAYS[square_index], occupied)
+            | ray_moves_decreasing(SOUTH_EAST_RAYS[square_index], occupied)
+            | ray_moves_decreasing(SOUTH_WEST_RAYS[square_index], occupied)
+    };
+    let orthogonal = || {
+        ray_moves_increasing(EAST_RAYS[square_index], occupied)
+            | ray_moves_increasing(NORTH_RAYS[square_index], occupied)
+            | ray_moves_decreasing(WEST_RAYS[square_index], occupied)
+            | ray_moves_decreasing(SOUTH_RAYS[square_index], occupied)
+    };
+    match piece {
+        Piece::Bishop => diagonal(),
+        Piece::Rook => orthogonal(),
+        Piece::Queen => diagonal() | orthogonal(),
+        Piece::Pawn | Piece::Knight | Piece::King => {
+            unreachable!("only sliding pieces have ray moves")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1026,5 +1043,61 @@ mod tests {
         assert_eq!(perft(endgame, 2), 191);
         assert_eq!(perft(endgame, 3), 2_812);
         assert_eq!(perft(endgame, 4), 43_238);
+    }
+
+    #[test]
+    fn sliding_rays_match_coordinate_walks() {
+        fn reference(square: Square, piece: Piece, occupied: u64) -> u64 {
+            let directions: &[(i8, i8)] = match piece {
+                Piece::Bishop => &[(1, 1), (1, -1), (-1, 1), (-1, -1)],
+                Piece::Rook => &[(1, 0), (-1, 0), (0, 1), (0, -1)],
+                Piece::Queen => &[
+                    (1, 1),
+                    (1, -1),
+                    (-1, 1),
+                    (-1, -1),
+                    (1, 0),
+                    (-1, 0),
+                    (0, 1),
+                    (0, -1),
+                ],
+                Piece::Pawn | Piece::Knight | Piece::King => unreachable!(),
+            };
+            let mut destinations = 0_u64;
+            for (file_delta, rank_delta) in directions {
+                let mut current = square;
+                while let Some(to) = offset_square(current, *file_delta, *rank_delta) {
+                    destinations |= to.bit();
+                    if occupied & to.bit() != 0 {
+                        break;
+                    }
+                    current = to;
+                }
+            }
+            destinations
+        }
+
+        let fixed_occupancies = [
+            0,
+            u64::MAX,
+            0x00ff_0000_0000_ff00,
+            0x8142_2418_1824_4281,
+            0xaa55_aa55_55aa_55aa,
+        ];
+        for square_index in 0..64 {
+            let square = Square(square_index);
+            for piece in [Piece::Bishop, Piece::Rook, Piece::Queen] {
+                for occupied in fixed_occupancies
+                    .into_iter()
+                    .chain((0..64).map(|bit| 1_u64 << bit))
+                {
+                    assert_eq!(
+                        sliding_moves(square, piece, occupied),
+                        reference(square, piece, occupied),
+                        "{piece:?} from {square} with occupancy {occupied:#018x}"
+                    );
+                }
+            }
+        }
     }
 }
