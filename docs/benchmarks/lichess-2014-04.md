@@ -407,6 +407,43 @@ producer and batch copies are not the main scaling limit on this host. The next
 optimization should profile the SAN/board kernel, especially repeated
 occupancy, piece lookup, attack generation, and `Position` copies.
 
+## Precomputed non-sliding attacks
+
+Hardware counters were unavailable on the Intel N95 host because Linux exposed
+`perf_event_paranoid=4`. Source-guided candidate changes were therefore accepted
+only after five-run corpus measurements. Hoisting occupancy and replacing
+target-square piece lookup with bit tests regressed the single-thread median
+from 34.10 to 33.81 MiB/s and was reverted.
+
+The successful change generates pawn, knight, and king attack tables at compile
+time. Runtime check detection now performs indexed lookups instead of repeatedly
+walking coordinate deltas. The four 64-entry tables occupy 2 KiB of static data;
+the 104-byte `Position` layout and runtime memory bounds are unchanged.
+
+Fresh single-thread fused-parser measurements before and after the final table
+change were:
+
+| Version | Runs (MiB/s) | Median | Move rate |
+| --- | --- | ---: | ---: |
+| Before | 34.29, 34.64, 33.87, 34.10, 33.91 | **34.10 MiB/s** | 2.79 million/s |
+| Attack tables | 37.59, 37.96, 38.28, 38.36, 38.33 | **38.28 MiB/s** | 3.13 million/s |
+
+This is a 12.3% single-thread throughput improvement. The final bounded queue
+scaling series with 1 MiB batches was:
+
+| Workers | Runs (MiB/s) | Median | Median move rate |
+| ---: | --- | ---: | ---: |
+| 1 | 39.72, 39.33, 38.86, 39.68, 39.58 | **39.58 MiB/s** | 3.24 million/s |
+| 2 | 72.57, 71.24, 71.55, 71.70, 67.78 | **71.55 MiB/s** | 5.85 million/s |
+| 4 | 105.92, 105.06, 101.41, 104.69, 96.25 | **104.69 MiB/s** | 8.56 million/s |
+| 8 | 102.24, 104.87, 100.72, 105.26, 100.67 | **102.24 MiB/s** | 8.36 million/s |
+
+The four-worker median is 14.3% above the earlier 1 MiB batch result of 91.59
+MiB/s. A sampled four-worker run used 14,304 KiB maximum RSS, effectively
+unchanged from the previous 14,424 KiB sample. Four physical workers remain the
+saturation point. The next kernel candidate is sliding-ray attack lookup, which
+should likewise be evaluated independently before changing the position layout.
+
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel
