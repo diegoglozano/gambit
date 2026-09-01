@@ -25,6 +25,14 @@ const KING_ATTACKS: [u64; 64] = build_attack_table([
 ]);
 const WHITE_PAWN_ATTACKERS: [u64; 64] = build_attack_table([(-1, -1), (1, -1)]);
 const BLACK_PAWN_ATTACKERS: [u64; 64] = build_attack_table([(-1, 1), (1, 1)]);
+const NORTH_EAST_RAYS: [u64; 64] = build_ray_table(1, 1);
+const NORTH_WEST_RAYS: [u64; 64] = build_ray_table(-1, 1);
+const SOUTH_EAST_RAYS: [u64; 64] = build_ray_table(1, -1);
+const SOUTH_WEST_RAYS: [u64; 64] = build_ray_table(-1, -1);
+const EAST_RAYS: [u64; 64] = build_ray_table(1, 0);
+const NORTH_RAYS: [u64; 64] = build_ray_table(0, 1);
+const WEST_RAYS: [u64; 64] = build_ray_table(-1, 0);
+const SOUTH_RAYS: [u64; 64] = build_ray_table(0, -1);
 
 #[allow(
     clippy::cast_possible_truncation,
@@ -46,6 +54,28 @@ const fn build_attack_table<const N: usize>(deltas: [(i8, i8); N]) -> [u64; 64] 
                 table[index] |= 1_u64 << target;
             }
             delta += 1;
+        }
+        index += 1;
+    }
+    table
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
+const fn build_ray_table(file_delta: i8, rank_delta: i8) -> [u64; 64] {
+    let mut table = [0_u64; 64];
+    let mut index = 0_usize;
+    while index < table.len() {
+        let mut file = (index & 7) as i8 + file_delta;
+        let mut rank = (index >> 3) as i8 + rank_delta;
+        while file >= 0 && file < 8 && rank >= 0 && rank < 8 {
+            let target = (rank as usize) * 8 + file as usize;
+            table[index] |= 1_u64 << target;
+            file += file_delta;
+            rank += rank_delta;
         }
         index += 1;
     }
@@ -507,25 +537,20 @@ impl Position {
         }
 
         let occupied = self.occupied();
-        for (file_delta, rank_delta) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
-            if let Some(hit) = first_occupied(square, file_delta, rank_delta, occupied) {
-                if self.bitboard(by, Piece::Bishop) & hit != 0
-                    || self.bitboard(by, Piece::Queen) & hit != 0
-                {
-                    return true;
-                }
-            }
+        let diagonal_hits = first_occupied_increasing(NORTH_EAST_RAYS[square_index], occupied)
+            | first_occupied_increasing(NORTH_WEST_RAYS[square_index], occupied)
+            | first_occupied_decreasing(SOUTH_EAST_RAYS[square_index], occupied)
+            | first_occupied_decreasing(SOUTH_WEST_RAYS[square_index], occupied);
+        if diagonal_hits & (self.bitboard(by, Piece::Bishop) | self.bitboard(by, Piece::Queen)) != 0
+        {
+            return true;
         }
-        for (file_delta, rank_delta) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            if let Some(hit) = first_occupied(square, file_delta, rank_delta, occupied) {
-                if self.bitboard(by, Piece::Rook) & hit != 0
-                    || self.bitboard(by, Piece::Queen) & hit != 0
-                {
-                    return true;
-                }
-            }
-        }
-        false
+
+        let orthogonal_hits = first_occupied_increasing(EAST_RAYS[square_index], occupied)
+            | first_occupied_increasing(NORTH_RAYS[square_index], occupied)
+            | first_occupied_decreasing(WEST_RAYS[square_index], occupied)
+            | first_occupied_decreasing(SOUTH_RAYS[square_index], occupied);
+        orthogonal_hits & (self.bitboard(by, Piece::Rook) | self.bitboard(by, Piece::Queen)) != 0
     }
 
     pub fn generate_legal_moves(self, moves: &mut MoveList) {
@@ -925,15 +950,18 @@ fn king_attacks(square: Square) -> u64 {
     KING_ATTACKS[usize::from(square.0)]
 }
 
-fn first_occupied(from: Square, file_delta: i8, rank_delta: i8, occupied: u64) -> Option<u64> {
-    let mut current = from;
-    while let Some(square) = offset_square(current, file_delta, rank_delta) {
-        if occupied & square.bit() != 0 {
-            return Some(square.bit());
-        }
-        current = square;
+fn first_occupied_increasing(ray: u64, occupied: u64) -> u64 {
+    let blockers = ray & occupied;
+    blockers & blockers.wrapping_neg()
+}
+
+fn first_occupied_decreasing(ray: u64, occupied: u64) -> u64 {
+    let blockers = ray & occupied;
+    if blockers == 0 {
+        0
+    } else {
+        1_u64 << (63 - blockers.leading_zeros())
     }
-    None
 }
 
 #[cfg(test)]
