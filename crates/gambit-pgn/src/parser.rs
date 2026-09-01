@@ -3,6 +3,32 @@ use std::error::Error;
 use std::fmt;
 use std::iter::FusedIterator;
 
+const SAN_BOUNDARIES: [bool; 256] = build_san_boundaries();
+
+const fn build_san_boundaries() -> [bool; 256] {
+    let mut boundaries = [false; 256];
+    boundaries[b'\t' as usize] = true;
+    boundaries[b'\n' as usize] = true;
+    boundaries[0x0c] = true;
+    boundaries[b'\r' as usize] = true;
+    boundaries[b' ' as usize] = true;
+    boundaries[b'{' as usize] = true;
+    boundaries[b'}' as usize] = true;
+    boundaries[b';' as usize] = true;
+    boundaries[b'(' as usize] = true;
+    boundaries[b')' as usize] = true;
+    boundaries[b'$' as usize] = true;
+    boundaries[b'!' as usize] = true;
+    boundaries[b'?' as usize] = true;
+    boundaries[b'[' as usize] = true;
+    boundaries
+}
+
+#[inline]
+pub(crate) const fn is_san_boundary(byte: u8) -> bool {
+    SAN_BOUNDARIES[byte as usize]
+}
+
 /// A half-open byte range in the original PGN input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Span {
@@ -500,13 +526,11 @@ impl<'a> Parser<'a> {
 
     fn parse_san(&mut self) -> Result<Event<'a>, ParseError> {
         let start = self.cursor;
-        while self.input.get(self.cursor).is_some_and(|byte| {
-            !byte.is_ascii_whitespace()
-                && !matches!(
-                    *byte,
-                    b'{' | b'}' | b';' | b'(' | b')' | b'$' | b'!' | b'?' | b'['
-                )
-        }) {
+        while self
+            .input
+            .get(self.cursor)
+            .is_some_and(|byte| !is_san_boundary(*byte))
+        {
             self.cursor += 1;
         }
         if self.cursor == start {
@@ -616,19 +640,21 @@ impl<'a> Parser<'a> {
         if matches!(byte, b'!' | b'?') {
             return Some(Ok(self.parse_glyph_nag()));
         }
-        if let Some((outcome, marker_len)) = self.outcome_at_cursor() {
-            self.cursor += marker_len;
-            let event = Event::Outcome {
-                outcome,
-                span: Span {
-                    start,
-                    end: self.cursor,
-                },
-            };
-            if self.variation_depth == 0 {
-                self.state = State::GameEnd;
+        if matches!(byte, b'0' | b'1' | b'*') {
+            if let Some((outcome, marker_len)) = self.outcome_at_cursor() {
+                self.cursor += marker_len;
+                let event = Event::Outcome {
+                    outcome,
+                    span: Span {
+                        start,
+                        end: self.cursor,
+                    },
+                };
+                if self.variation_depth == 0 {
+                    self.state = State::GameEnd;
+                }
+                return Some(Ok(event));
             }
-            return Some(Ok(event));
         }
         if byte.is_ascii_digit() {
             match self.parse_move_number() {
@@ -716,6 +742,18 @@ fn is_token_boundary(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn san_boundary_table_matches_the_grammar() {
+        for byte in u8::MIN..=u8::MAX {
+            let expected = byte.is_ascii_whitespace()
+                || matches!(
+                    byte,
+                    b'{' | b'}' | b';' | b'(' | b')' | b'$' | b'!' | b'?' | b'['
+                );
+            assert_eq!(is_san_boundary(byte), expected, "byte {byte:#04x}");
+        }
+    }
 
     fn events(input: &[u8]) -> Vec<Event<'_>> {
         Parser::new(input).collect::<Result<Vec<_>, _>>().unwrap()

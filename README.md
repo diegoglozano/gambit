@@ -103,7 +103,7 @@ zstdcat games.pgn.zst | \
 ```
 
 On the April 2014 Lichess corpus, the current single-threaded semantic path
-validates 54,748,499 moves at a median 10.83 million moves/s on an Apple M3, with
+validates 54,748,499 moves at a median 11.43 million moves/s on an Apple M3, with
 approximately 1.79 MB maximum RSS.
 
 An experimental bounded parallel path frames complete games into packed byte

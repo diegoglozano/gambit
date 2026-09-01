@@ -651,9 +651,50 @@ but are omitted as throughput comparisons: concurrent WindowServer and UI load
 produced 231–320 MiB/s queue results and similarly unstable range results. The
 single-process perft and fused series remained stable enough to publish.
 
+## Token dispatch and SIMD experiment on Apple M3
+
+A source-line profile of the merged move-metadata version `496d388` attributed
+substantial parser time to SAN token boundaries, outcome probing, tag parsing,
+and whitespace. Brace and line comment scans accounted for less than 1% of
+samples despite 4,030,007 comment events.
+
+An explicit SIMD-dispatched experiment replaced brace and line-comment loops
+with the safe `memchr` and `memchr2` APIs. It reduced the incremental parser
+median from 430.30 to 414.97 MiB/s, a 3.56% regression. Lichess comments are
+generally too short to amortize the wider search setup, so the experiment and
+dependency were removed.
+
+The retained optimization instead avoids testing all four outcome strings for
+ordinary tokens: only tokens beginning with `0`, `1`, or `*` enter outcome
+matching. An intermediate five-run incremental median reached 450.05 MiB/s.
+SAN scanning now classifies each byte through a shared 256-byte boundary table
+instead of repeating whitespace and punctuation branches. The table is checked
+exhaustively against the grammar for all byte values. This requires no unsafe
+code or dependencies and adds only 256 bytes of static data.
+
+Fresh baseline binaries at `496d388` and final candidate binaries were measured
+on the same host and corpus:
+
+| Parser path | Baseline runs (MiB/s) | Baseline median | Candidate runs (MiB/s) | Candidate median | Change |
+| --- | --- | ---: | --- | ---: | ---: |
+| Incremental file parser | 424.41, 433.53, 434.16, 434.37, 434.87 | **434.16 MiB/s** | 437.75, 472.92, 487.94, 487.64, 485.16 | **485.16 MiB/s** | **+11.75%** |
+| In-memory slice parser | 532.93, 539.57, 536.14, 541.42, 529.17 | **536.14 MiB/s** | 636.68, 642.49, 645.62, 639.51, 639.92 | **639.92 MiB/s** | **+19.36%** |
+
+Every incremental run produced the same 104,757,225 events, including
+54,748,499 SAN tokens. The final full semantic series was 139.12, 139.97,
+139.87, 139.71, and 139.64 MiB/s, a **139.71 MiB/s median** and a **5.56%
+improvement** over the preceding 132.35 MiB/s median. It reproduced exactly
+810,463 games and 54,748,499 legal SAN moves on every run; median move rate rose
+from 10.83 to 11.43 million moves/s.
+
+Direct SIMD remains interesting for a future batched lexer that classifies long
+input blocks before emitting events. It is not a good fit for the current inner
+SAN loop, where tokens are commonly only two to seven bytes and branch/table
+setup dominates useful vector work.
+
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
 storage latency or syscall overhead appears in a Linux profile. Parallel
-decompression, partitioned files, native CPU tuning, SIMD token scans, and PGO
-remain candidate experiments, but the measured partition result makes semantic
-kernel profiling the next priority.
+decompression, persisted partitions, native CPU tuning, and PGO remain
+candidate experiments. Further SIMD work should begin with a separate batched
+lexer design and retain a scalar path for short tokens.
