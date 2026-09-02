@@ -19,10 +19,11 @@ gambit stats ./sharded-corpus
 gambit stats --format json january.pgn february.pgn.zst
 ```
 
-Stats reports decompressed bytes, complete games, mainline plies, result
-distribution, and minimum/average/maximum game length. Recursive-variation
-moves are excluded. It is deliberately lexical and does not execute moves; use
-Doctor when chess-semantic validity matters.
+Stats reports decompressed bytes, complete games, mainline plies, result and
+game-length distributions, Seven Tag Roster coverage, complete date range, and
+Elo coverage/range/average. Recursive-variation moves are excluded. It is
+deliberately lexical and does not execute moves; use Doctor when
+chess-semantic validity matters.
 
 The hot path uses fixed-size counters over the fused incremental parser. Input
 is read once with a 64 KiB reusable buffer, memory does not grow with corpus

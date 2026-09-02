@@ -12,8 +12,11 @@ games: 810463
 mainline plies: 54748499
 results: 410370 white wins, 372707 black wins, 27386 draws, 0 unfinished
 game length (plies): min 0, avg 67.55, max 344
-elapsed: 1.904s
-throughput: 351.54 MiB/s
+header coverage: Event 810463/810463, Site 810463/810463, Date 0/810463, Round 0/810463, White 810463/810463, Black 810463/810463, Result 810463/810463
+dates: 810463 complete (2014.03.31 to 2014.04.30), 0 incomplete/invalid, 0 missing
+ratings: 1620815 numeric (min 732, avg 1619.09, max 2734), 111 invalid, 0 missing
+elapsed: 1.903s
+throughput: 351.67 MiB/s
 ```
 
 This is the median end-to-end throughput from five runs on the compressed
@@ -31,6 +34,22 @@ environment, reproduction commands, all runs, and memory measurements.
 - `results` counts the mainline `1-0`, `0-1`, `1/2-1/2`, and `*` markers.
 - game length is the minimum, arithmetic mean, and maximum mainline ply count
   across complete games.
+- `header coverage` counts complete games containing each case-sensitive Seven
+  Tag Roster name. Values are presence counts, so duplicate tags do not inflate
+  them.
+- `dates` uses the first `Date` value, falling back to the first `UTCDate` when
+  `Date` is absent. Only real `YYYY.MM.DD` calendar dates contribute to the
+  range; partial dates such as `????.??.??` are counted as incomplete.
+- `ratings` combines the first `WhiteElo` and `BlackElo` values into two player
+  slots per game. Unsigned decimal values contribute to the range and
+  arithmetic mean; absent and invalid values are counted separately.
+
+Stats intentionally does not retain player names, event names, or other tag
+values. Exact distinct-value counts would make memory grow with corpus
+cardinality, violating the bounded-memory contract.
+
+Missing, incomplete, or invalid metadata is a quality signal, not a PGN syntax
+failure. These counters do not change the scan status or exit code.
 
 Stats performs lexical PGN parsing. It does not execute moves or establish that
 SAN is legal in the current chess position. Run `gambit doctor` when semantic
@@ -101,6 +120,30 @@ aggregate object with a `reports` array. The schema distinguishes
     "minimum_plies": 7,
     "average_plies": 82.259765625,
     "maximum_plies": 281
+  },
+  "header_coverage": {
+    "event": 512,
+    "site": 512,
+    "date": 500,
+    "round": 512,
+    "white": 512,
+    "black": 512,
+    "result": 512
+  },
+  "dates": {
+    "complete": 500,
+    "incomplete_or_invalid": 8,
+    "missing": 4,
+    "earliest": "2025.01.03",
+    "latest": "2025.12.19"
+  },
+  "ratings": {
+    "numeric": 1000,
+    "invalid": 4,
+    "missing": 20,
+    "minimum": 812,
+    "average": 1647.218,
+    "maximum": 2813
   },
   "elapsed_seconds": 0.012,
   "throughput_mib_per_second": 14.6484375,

@@ -128,8 +128,11 @@ fn stats_human_output_is_a_compact_summary() {
     assert!(stdout.contains("stats: valid"));
     assert!(stdout.contains("games: 1"));
     assert!(stdout.contains("mainline plies: 2"));
-    assert!(stdout.contains("0 white wins, 0 black wins, 1 draws, 0 unfinished"));
+    assert!(stdout.contains("0 white wins, 0 black wins, 1 draw, 0 unfinished"));
     assert!(stdout.contains("min 2, avg 2.00, max 2"));
+    assert!(stdout.contains("header coverage:"));
+    assert!(stdout.contains("dates: 0 complete, 0 incomplete/invalid, 1 missing"));
+    assert!(stdout.contains("ratings: 0 numeric, 0 invalid, 2 missing"));
 }
 
 #[test]
@@ -189,8 +192,14 @@ fn stats_reads_zstd_files() {
 #[test]
 fn stats_aggregates_a_directory_batch() {
     let directory = TestDirectory::new();
-    directory.write("one.pgn", b"1. e4 *\n");
-    directory.write("nested/two.pgn", b"1. d4 d5 0-1\n");
+    directory.write(
+        "one.pgn",
+        b"[Event \"One\"]\n[Date \"2025.01.02\"]\n[WhiteElo \"2000\"]\n[BlackElo \"2200\"]\n\n1. e4 *\n",
+    );
+    directory.write(
+        "nested/two.pgn",
+        b"[Date \"2023.12.31\"]\n[WhiteElo \"?\"]\n[BlackElo \"1800\"]\n\n1. d4 d5 0-1\n",
+    );
 
     let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
         .args(["stats", "--format=json"])
@@ -207,6 +216,17 @@ fn stats_aggregates_a_directory_batch() {
     assert_eq!(batch["mainline_plies"], 3);
     assert_eq!(batch["results"]["black_wins"], 1);
     assert_eq!(batch["game_length"]["average_plies"], 1.5);
+    assert_eq!(batch["header_coverage"]["event"], 1);
+    assert_eq!(batch["header_coverage"]["date"], 2);
+    assert_eq!(batch["dates"]["complete"], 2);
+    assert_eq!(batch["dates"]["earliest"], "2023.12.31");
+    assert_eq!(batch["dates"]["latest"], "2025.01.02");
+    assert_eq!(batch["ratings"]["numeric"], 3);
+    assert_eq!(batch["ratings"]["invalid"], 1);
+    assert_eq!(batch["ratings"]["missing"], 0);
+    assert_eq!(batch["ratings"]["minimum"], 1800);
+    assert_eq!(batch["ratings"]["average"], 2000.0);
+    assert_eq!(batch["ratings"]["maximum"], 2200);
     assert_eq!(batch["reports"].as_array().unwrap().len(), 2);
 }
 

@@ -50,9 +50,10 @@ cannot be combined with any other input path.
 | `-h`, `--help` | Print help. |
 
 Stats accepts the same file, directory, compressed, and standard-input forms as
-Doctor. It performs structural parsing without executing chess moves. See
-[Corpus statistics](statistics.md) for metric definitions, JSON shape, and HPC
-behavior.
+Doctor. It performs structural parsing without executing chess moves and
+reports corpus shape, Seven Tag Roster coverage, date quality/range, and Elo
+quality/range. See [Corpus statistics](statistics.md) for metric definitions,
+JSON shape, and HPC behavior.
 
 ## Validation modes
 

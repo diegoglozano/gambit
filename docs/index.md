@@ -19,6 +19,9 @@ games: 512
 mainline plies: 42117
 results: 249 white wins, 231 black wins, 32 draws, 0 unfinished
 game length (plies): min 7, avg 82.26, max 281
+header coverage: Event 512/512, Site 512/512, Date 500/512, Round 512/512, White 512/512, Black 512/512, Result 512/512
+dates: 500 complete (2025.01.03 to 2025.12.19), 8 incomplete/invalid, 4 missing
+ratings: 1000 numeric (min 812, avg 1647.22, max 2813), 4 invalid, 20 missing
 elapsed: 0.001s
 throughput: 175.78 MiB/s
 ```

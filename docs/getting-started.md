@@ -28,9 +28,10 @@ gambit stats ./corpus
 gambit stats --format json games.pgn.zst
 ```
 
-Stats counts complete games, mainline plies, outcomes, and game lengths in one
-bounded-memory pass. See [Corpus statistics](statistics.md) for exact metric
-semantics and performance behavior.
+Stats counts complete games, mainline plies, outcomes, game lengths, header
+coverage, dates, and ratings in one bounded-memory pass. See
+[Corpus statistics](statistics.md) for exact metric semantics and performance
+behavior.
 
 ## Validate a file
 
