@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use gambit_chess::{Position, SanErrorKind};
 use gambit_pgn::{
-    Event, IncrementalParser, IncrementalParserOptions, ParserOptions, StreamParseError, Tag,
+    Event, FrameError, GameReader, IncrementalParser, IncrementalParserOptions, ParseError, Parser,
+    ParserOptions, StreamParseError, Tag,
 };
 use serde::Serialize;
 
@@ -30,6 +31,7 @@ impl ValidationMode {
 pub(crate) struct DoctorOptions {
     pub(crate) mode: ValidationMode,
     pub(crate) require_outcome: bool,
+    pub(crate) max_errors: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -68,7 +70,7 @@ impl DiagnosticCategory {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct Diagnostic {
     pub(crate) category: DiagnosticCategory,
     pub(crate) game: Option<u64>,
@@ -114,6 +116,9 @@ pub(crate) struct Report {
     pub(crate) elapsed_seconds: f64,
     pub(crate) throughput_mib_per_second: f64,
     pub(crate) diagnostic: Option<Diagnostic>,
+    pub(crate) additional_diagnostics: Vec<Diagnostic>,
+    pub(crate) diagnostic_count: usize,
+    pub(crate) error_limit_reached: bool,
 }
 
 impl Report {
@@ -149,11 +154,28 @@ impl Report {
                 headers: None,
                 message,
             }),
+            additional_diagnostics: Vec::new(),
+            diagnostic_count: 1,
+            error_limit_reached: false,
         }
+    }
+
+    pub(crate) fn diagnostics(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.diagnostic
+            .iter()
+            .chain(self.additional_diagnostics.iter())
     }
 }
 
 pub(crate) fn inspect<R: Read>(input: R, source: String, options: DoctorOptions) -> Report {
+    if options.max_errors == 1 {
+        inspect_first(input, source, options)
+    } else {
+        inspect_complete(input, source, options)
+    }
+}
+
+fn inspect_first<R: Read>(input: R, source: String, options: DoctorOptions) -> Report {
     let started = Instant::now();
     let parser_options = if options.require_outcome {
         ParserOptions::STRICT
@@ -167,7 +189,7 @@ pub(crate) fn inspect<R: Read>(input: R, source: String, options: DoctorOptions)
     let tracker = Rc::new(RefCell::new(SourceTracker::default()));
     let input = TrackingReader::new(input, Rc::clone(&tracker));
     let mut parser = IncrementalParser::with_options(input, incremental_options);
-    let mut validator = Validator::new(options.mode, Rc::clone(&tracker));
+    let mut validator = Validator::new(options.mode, Rc::clone(&tracker), 0, 0);
     let parse_result = parser.parse(|event| validator.observe(event));
     let bytes = parser.into_inner().bytes_read;
     let elapsed = started.elapsed().as_secs_f64();
@@ -211,7 +233,292 @@ pub(crate) fn inspect<R: Read>(input: R, source: String, options: DoctorOptions)
         moves: validator.moves,
         elapsed_seconds: elapsed,
         throughput_mib_per_second: throughput,
+        diagnostic_count: usize::from(diagnostic.is_some()),
         diagnostic,
+        additional_diagnostics: Vec::new(),
+        error_limit_reached: false,
+    }
+}
+
+fn inspect_complete<R: Read>(input: R, source: String, options: DoctorOptions) -> Report {
+    let started = Instant::now();
+    let mut reader = GameReader::new(input);
+    let mut diagnostics = Vec::new();
+    let mut games = 0_u64;
+    let mut moves = 0_u64;
+    let mut base_offset = 0_u64;
+    let mut base_line = 1_u64;
+    let mut base_column = 1_u64;
+    let mut error_limit_reached = false;
+
+    loop {
+        match reader.read_game() {
+            Ok(Some(game)) => {
+                let game_len = game.len();
+                let result = inspect_framed_game(
+                    game,
+                    games + 1,
+                    base_offset,
+                    base_line,
+                    base_column,
+                    options,
+                    true,
+                );
+                games += 1;
+                moves += result.moves;
+                if let Some(diagnostic) = result.diagnostic {
+                    diagnostics.push(diagnostic);
+                }
+                (base_line, base_column) =
+                    advance_location(base_line, base_column, &game[..game_len]);
+                base_offset += game_len as u64;
+            }
+            Ok(None) => break,
+            Err(FrameError::MissingOutcome { .. }) => {
+                let game = reader.pending_game();
+                let result = inspect_framed_game(
+                    game,
+                    games + 1,
+                    base_offset,
+                    base_line,
+                    base_column,
+                    options,
+                    false,
+                );
+                moves += result.moves;
+                if !options.require_outcome {
+                    games += 1;
+                }
+                if let Some(diagnostic) = result.diagnostic {
+                    diagnostics.push(diagnostic);
+                }
+                break;
+            }
+            Err(error) => {
+                diagnostics.push(diagnostic_from_frame_error(error, games));
+                break;
+            }
+        }
+
+        if diagnostics.len() >= options.max_errors {
+            error_limit_reached = true;
+            break;
+        }
+    }
+
+    let bytes = reader.bytes_read();
+    let elapsed = started.elapsed().as_secs_f64();
+    let status = report_status(&diagnostics);
+    #[allow(clippy::cast_precision_loss)]
+    let throughput = if elapsed > 0.0 {
+        bytes as f64 / (1024.0 * 1024.0) / elapsed
+    } else {
+        0.0
+    };
+    let diagnostic_count = diagnostics.len();
+    let mut diagnostics = diagnostics.into_iter();
+    let diagnostic = diagnostics.next();
+
+    Report {
+        schema_version: 1,
+        status,
+        source,
+        mode: options.mode.label(),
+        outcome_required: options.require_outcome,
+        bytes,
+        games,
+        moves,
+        elapsed_seconds: elapsed,
+        throughput_mib_per_second: throughput,
+        diagnostic,
+        additional_diagnostics: diagnostics.collect(),
+        diagnostic_count,
+        error_limit_reached,
+    }
+}
+
+struct FramedGameResult {
+    moves: u64,
+    diagnostic: Option<Diagnostic>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inspect_framed_game(
+    game: &[u8],
+    game_number: u64,
+    base_offset: u64,
+    base_line: u64,
+    base_column: u64,
+    options: DoctorOptions,
+    framed_with_outcome: bool,
+) -> FramedGameResult {
+    let parser_options = if options.require_outcome || framed_with_outcome {
+        ParserOptions::STRICT
+    } else {
+        ParserOptions::LENIENT
+    };
+    let tracker = Rc::new(RefCell::new(SourceTracker::at(
+        base_offset,
+        base_line,
+        base_column,
+    )));
+    let mut validator = Validator::new(
+        options.mode,
+        Rc::clone(&tracker),
+        game_number - 1,
+        base_offset,
+    );
+    let mut fed = 0;
+    let mut parse_diagnostic = None;
+
+    for event in Parser::with_options(game, parser_options) {
+        match event {
+            Ok(event) => {
+                feed_event_context(game, event, &tracker, &mut fed);
+                validator.observe(event);
+                if validator.error.is_some() {
+                    break;
+                }
+            }
+            Err(error) => {
+                feed_line_context(game, error.offset, &tracker, &mut fed);
+                parse_diagnostic = Some(diagnostic_from_parse_error(
+                    error,
+                    game_number,
+                    &validator.headers,
+                    &tracker.borrow(),
+                    base_offset,
+                ));
+                break;
+            }
+        }
+    }
+
+    FramedGameResult {
+        moves: validator.moves,
+        diagnostic: earliest_diagnostic(validator.error, parse_diagnostic),
+    }
+}
+
+fn feed_event_context(
+    input: &[u8],
+    event: Event<'_>,
+    tracker: &Rc<RefCell<SourceTracker>>,
+    fed: &mut usize,
+) {
+    let offset = match event {
+        Event::GameStart { offset }
+        | Event::MovetextStart { offset }
+        | Event::GameEnd { offset } => offset,
+        Event::Tag(tag) => tag.span().start,
+        Event::San(token) => token.span().start,
+        Event::MoveNumber { span, .. }
+        | Event::VariationStart(span)
+        | Event::VariationEnd(span)
+        | Event::Outcome { span, .. } => span.start,
+        Event::Nag(_) | Event::Comment(_) => return,
+    };
+    feed_line_context(input, offset, tracker, fed);
+}
+
+fn feed_line_context(
+    input: &[u8],
+    offset: usize,
+    tracker: &Rc<RefCell<SourceTracker>>,
+    fed: &mut usize,
+) {
+    if offset < *fed {
+        return;
+    }
+    let end = input[offset.min(input.len())..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(input.len(), |newline| offset.min(input.len()) + newline + 1);
+    tracker.borrow_mut().append(&input[*fed..end]);
+    *fed = end;
+}
+
+fn diagnostic_from_parse_error(
+    error: ParseError,
+    game: u64,
+    headers: &GameHeaders,
+    tracker: &SourceTracker,
+    base_offset: u64,
+) -> Diagnostic {
+    let offset = base_offset + error.offset as u64;
+    let global_error = ParseError {
+        offset: usize::try_from(offset).unwrap_or(usize::MAX),
+        kind: error.kind,
+    };
+    located_diagnostic(
+        DiagnosticDetails {
+            category: DiagnosticCategory::Syntax,
+            game,
+            ply: None,
+            offset,
+            context: None,
+            message: global_error.to_string(),
+        },
+        headers,
+        tracker,
+    )
+}
+
+fn diagnostic_from_frame_error(error: FrameError, completed_games: u64) -> Diagnostic {
+    match error {
+        FrameError::Io(error) => Diagnostic {
+            category: DiagnosticCategory::Input,
+            game: Some(completed_games + 1),
+            ply: None,
+            byte: None,
+            line: None,
+            column: None,
+            context: None,
+            excerpt: None,
+            headers: None,
+            message: format!("failed to read PGN stream: {error}"),
+        },
+        FrameError::GameTooLarge { offset, limit } => Diagnostic {
+            category: DiagnosticCategory::Limit,
+            game: Some(completed_games + 1),
+            ply: None,
+            byte: Some(offset),
+            line: None,
+            column: None,
+            context: None,
+            excerpt: None,
+            headers: None,
+            message: format!("PGN game starting near byte {offset} exceeds the {limit}-byte limit"),
+        },
+        FrameError::MissingOutcome { offset, buffered } => Diagnostic {
+            category: DiagnosticCategory::Syntax,
+            game: Some(completed_games + 1),
+            ply: None,
+            byte: Some(offset),
+            line: None,
+            column: None,
+            context: None,
+            excerpt: None,
+            headers: None,
+            message: format!(
+                "PGN stream ended near byte {offset} with {buffered} unterminated game bytes"
+            ),
+        },
+    }
+}
+
+fn report_status(diagnostics: &[Diagnostic]) -> ReportStatus {
+    if diagnostics.is_empty() {
+        ReportStatus::Valid
+    } else if diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.category,
+            DiagnosticCategory::Input | DiagnosticCategory::Limit
+        )
+    }) {
+        ReportStatus::Error
+    } else {
+        ReportStatus::Invalid
     }
 }
 
@@ -360,6 +667,15 @@ impl Default for SourceTracker {
 }
 
 impl SourceTracker {
+    fn at(base_offset: u64, base_line: u64, base_column: u64) -> Self {
+        Self {
+            bytes: Vec::with_capacity(SOURCE_CONTEXT_BYTES),
+            base_offset,
+            base_line,
+            base_column,
+        }
+    }
+
     fn append(&mut self, input: &[u8]) {
         let overflow = self
             .bytes
@@ -466,10 +782,16 @@ struct Validator {
     game_ply: u64,
     headers: GameHeaders,
     error: Option<Diagnostic>,
+    offset_base: u64,
 }
 
 impl Validator {
-    fn new(mode: ValidationMode, tracker: Rc<RefCell<SourceTracker>>) -> Self {
+    fn new(
+        mode: ValidationMode,
+        tracker: Rc<RefCell<SourceTracker>>,
+        completed_games: u64,
+        offset_base: u64,
+    ) -> Self {
         Self {
             mode,
             tracker,
@@ -477,11 +799,12 @@ impl Validator {
             before_last_move: Position::initial(),
             variation_stack: Vec::new(),
             fen: None,
-            games: 0,
+            games: completed_games,
             moves: 0,
             game_ply: 0,
             headers: GameHeaders::default(),
             error: None,
+            offset_base,
         }
     }
 
@@ -511,7 +834,7 @@ impl Validator {
                                     category: DiagnosticCategory::InvalidFen,
                                     game: self.games + 1,
                                     ply: Some(0),
-                                    offset: *offset as u64,
+                                    offset: self.offset_base + *offset as u64,
                                     context: Some(String::from_utf8_lossy(fen).into_owned()),
                                     message: error.to_string(),
                                 },
@@ -549,7 +872,7 @@ impl Validator {
                                 category,
                                 game: self.games + 1,
                                 ply: Some(self.game_ply),
-                                offset: token.span().start as u64,
+                                offset: self.offset_base + token.span().start as u64,
                                 context: Some(
                                     String::from_utf8_lossy(token.as_bytes()).into_owned(),
                                 ),
@@ -618,6 +941,19 @@ mod tests {
             DoctorOptions {
                 mode,
                 require_outcome: true,
+                max_errors: 1,
+            },
+        )
+    }
+
+    fn inspect_all(input: &[u8], max_errors: usize) -> Report {
+        inspect(
+            input,
+            String::from("test"),
+            DoctorOptions {
+                mode: ValidationMode::Semantic,
+                require_outcome: true,
+                max_errors,
             },
         )
     }
@@ -659,5 +995,28 @@ mod tests {
         assert_eq!(location.line, 2);
         assert_eq!(location.column, 6);
         assert_eq!(location.excerpt, "last line");
+    }
+
+    #[test]
+    fn complete_scan_recovers_at_game_boundaries() {
+        let report = inspect_all(b"1. e5 *\n\n1. d5 *\n\n1. e4 e5 *\n", 100);
+        assert_eq!(report.status, ReportStatus::Invalid);
+        assert_eq!(report.games, 3);
+        assert_eq!(report.moves, 2);
+        assert_eq!(report.diagnostic_count, 2);
+        let diagnostics = report.diagnostics().collect::<Vec<_>>();
+        assert_eq!(diagnostics[0].game, Some(1));
+        assert_eq!(diagnostics[0].line, Some(1));
+        assert_eq!(diagnostics[1].game, Some(2));
+        assert_eq!(diagnostics[1].line, Some(3));
+        assert!(!report.error_limit_reached);
+    }
+
+    #[test]
+    fn complete_scan_stops_at_the_error_limit() {
+        let report = inspect_all(b"1. e5 *\n1. d5 *\n1. c5 *\n", 2);
+        assert_eq!(report.games, 2);
+        assert_eq!(report.diagnostic_count, 2);
+        assert!(report.error_limit_reached);
     }
 }

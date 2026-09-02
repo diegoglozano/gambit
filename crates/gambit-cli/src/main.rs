@@ -9,13 +9,16 @@ use std::process::ExitCode;
 use doctor::{
     Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
 };
+use serde::Serialize;
 
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <FILE.pgn|->\n  gambit <FILE.pgn|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct file form is retained as a compatibility alias for 'gambit doctor'.\nUse - to read PGN from standard input.\n\nOptions:\n      --format <human|json>  Select output format [default: human]\n      --syntax-only          Check PGN structure without executing moves\n      --lenient              Allow a final game without an outcome marker\n  -q, --quiet                Print nothing when the input is valid\n  -h, --help                 Print help\n  -V, --version              Print version";
+const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <FILE.pgn|->\n  gambit <FILE.pgn|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct file form is retained as a compatibility alias for 'gambit doctor'.\nUse - to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl>  Select output format [default: human]\n      --syntax-only                Check PGN structure without executing moves\n      --lenient                    Allow a final game without an outcome marker\n      --keep-going                 Continue after errors [default limit: 100]\n      --max-errors <N>             Continue until N errors have been reported\n  -q, --quiet                      Print nothing when the input is valid\n  -h, --help                       Print help\n  -V, --version                    Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
     Human,
     Json,
+    Jsonl,
 }
 
 #[derive(Debug)]
@@ -76,6 +79,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
                 options: DoctorOptions {
                     mode: ValidationMode::Semantic,
                     require_outcome: true,
+                    max_errors: 1,
                 },
             }))
         }
@@ -99,6 +103,7 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
     let mut quiet = false;
     let mut mode = ValidationMode::Semantic;
     let mut require_outcome = true;
+    let mut max_errors = 1;
     let mut arguments = arguments.peekable();
 
     while let Some(argument) = arguments.next() {
@@ -107,6 +112,13 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
             Some("-q" | "--quiet") => quiet = true,
             Some("--syntax-only") => mode = ValidationMode::Syntax,
             Some("--lenient") => require_outcome = false,
+            Some("--keep-going") => max_errors = DEFAULT_KEEP_GOING_ERRORS,
+            Some("--max-errors") => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| String::from("--max-errors requires a value"))?;
+                max_errors = parse_max_errors(&value)?;
+            }
             Some("--format") => {
                 let value = arguments
                     .next()
@@ -129,6 +141,10 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
             Some(value) if value.starts_with("--format=") => {
                 format = parse_format(std::ffi::OsStr::new(&value["--format=".len()..]))?;
             }
+            Some(value) if value.starts_with("--max-errors=") => {
+                max_errors =
+                    parse_max_errors(std::ffi::OsStr::new(&value["--max-errors=".len()..]))?;
+            }
             Some(value) if value.starts_with('-') && value != "-" => {
                 return Err(format!("unknown doctor option: {value}"));
             }
@@ -137,9 +153,9 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
         }
     }
 
-    if quiet && format == OutputFormat::Json {
+    if quiet && format != OutputFormat::Human {
         return Err(String::from(
-            "--quiet cannot be combined with --format json",
+            "--quiet cannot be combined with a machine-readable format",
         ));
     }
     let path = path.ok_or_else(|| String::from("doctor requires a PGN file"))?;
@@ -150,6 +166,7 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
         options: DoctorOptions {
             mode,
             require_outcome,
+            max_errors,
         },
     }))
 }
@@ -158,8 +175,19 @@ fn parse_format(value: &std::ffi::OsStr) -> Result<OutputFormat, String> {
     match value.to_str() {
         Some("human") => Ok(OutputFormat::Human),
         Some("json") => Ok(OutputFormat::Json),
+        Some("jsonl") => Ok(OutputFormat::Jsonl),
         Some(value) => Err(format!("unknown output format: {value}")),
         None => Err(String::from("output format must be valid UTF-8")),
+    }
+}
+
+fn parse_max_errors(value: &std::ffi::OsStr) -> Result<usize, String> {
+    let value = value
+        .to_str()
+        .ok_or_else(|| String::from("error limit must be valid UTF-8"))?;
+    match value.parse::<usize>() {
+        Ok(0) | Err(_) => Err(String::from("--max-errors must be a positive integer")),
+        Ok(limit) => Ok(limit),
     }
 }
 
@@ -196,6 +224,7 @@ fn render_report(report: &Report, format: OutputFormat, quiet: bool) -> io::Resu
             serde_json::to_writer(&mut output, report)?;
             writeln!(output)
         }
+        OutputFormat::Jsonl => render_jsonl(report),
         OutputFormat::Human if report.status == ReportStatus::Valid && quiet => Ok(()),
         OutputFormat::Human if report.status == ReportStatus::Valid => {
             let mut output = io::stdout().lock();
@@ -219,8 +248,17 @@ fn render_report(report: &Report, format: OutputFormat, quiet: bool) -> io::Resu
                 ReportStatus::Valid => unreachable!(),
             };
             writeln!(output, "{label}: {}", report.source)?;
-            if let Some(diagnostic) = &report.diagnostic {
+            for (index, diagnostic) in report.diagnostics().enumerate() {
+                if index > 0 {
+                    writeln!(output)?;
+                }
                 render_diagnostic(&mut output, diagnostic)?;
+            }
+            if report.diagnostic_count > 1 {
+                writeln!(output, "diagnostics: {}", report.diagnostic_count)?;
+            }
+            if report.error_limit_reached {
+                writeln!(output, "stopped after reaching the error limit")?;
             }
             writeln!(
                 output,
@@ -229,6 +267,66 @@ fn render_report(report: &Report, format: OutputFormat, quiet: bool) -> io::Resu
             )
         }
     }
+}
+
+#[derive(Serialize)]
+struct JsonlDiagnostic<'a> {
+    schema_version: u8,
+    record: &'static str,
+    source: &'a str,
+    diagnostic: &'a Diagnostic,
+}
+
+#[derive(Serialize)]
+struct JsonlSummary<'a> {
+    schema_version: u8,
+    record: &'static str,
+    status: ReportStatus,
+    source: &'a str,
+    mode: &'static str,
+    outcome_required: bool,
+    bytes: u64,
+    games: u64,
+    moves: u64,
+    elapsed_seconds: f64,
+    throughput_mib_per_second: f64,
+    diagnostic_count: usize,
+    error_limit_reached: bool,
+}
+
+fn render_jsonl(report: &Report) -> io::Result<()> {
+    let mut output = io::stdout().lock();
+    for diagnostic in report.diagnostics() {
+        serde_json::to_writer(
+            &mut output,
+            &JsonlDiagnostic {
+                schema_version: report.schema_version,
+                record: "diagnostic",
+                source: &report.source,
+                diagnostic,
+            },
+        )?;
+        writeln!(output)?;
+    }
+    serde_json::to_writer(
+        &mut output,
+        &JsonlSummary {
+            schema_version: report.schema_version,
+            record: "summary",
+            status: report.status,
+            source: &report.source,
+            mode: report.mode,
+            outcome_required: report.outcome_required,
+            bytes: report.bytes,
+            games: report.games,
+            moves: report.moves,
+            elapsed_seconds: report.elapsed_seconds,
+            throughput_mib_per_second: report.throughput_mib_per_second,
+            diagnostic_count: report.diagnostic_count,
+            error_limit_reached: report.error_limit_reached,
+        },
+    )?;
+    writeln!(output)
 }
 
 fn render_diagnostic(output: &mut impl Write, diagnostic: &Diagnostic) -> io::Result<()> {
