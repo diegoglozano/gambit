@@ -29,7 +29,9 @@ zstdcat games.pgn.zst | gambit doctor -
 ```
 
 Doctor reports malformed PGN, invalid FEN starting positions, malformed or
-illegal SAN, ambiguous moves, and incorrect check or mate suffixes. It exits
+illegal SAN, ambiguous moves, and incorrect check or mate suffixes. Diagnostics
+include the game number and identifying headers, ply, byte offset, line, column,
+and a source-line excerpt. Lines and byte columns are one-based. Doctor exits
 with status 0 for valid input, 1 for invalid chess data, 2 for command-line
 usage errors, and 3 for input or reporting failures.
 

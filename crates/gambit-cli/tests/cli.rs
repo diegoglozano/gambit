@@ -70,7 +70,7 @@ fn emits_a_json_success_report() {
 fn diagnoses_illegal_moves_as_json() {
     let output = run_with_stdin(
         &["doctor", "--format=json", "-"],
-        b"[Event \"Example\"]\n\n1. e5 *\n",
+        b"[Event \"Example\"]\n[Date \"2026.09.02\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n\n1. e5 *\n",
     );
     assert_eq!(output.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -79,6 +79,13 @@ fn diagnoses_illegal_moves_as_json() {
     assert_eq!(report["diagnostic"]["game"], 1);
     assert_eq!(report["diagnostic"]["ply"], 1);
     assert_eq!(report["diagnostic"]["context"], "e5");
+    assert_eq!(report["diagnostic"]["line"], 6);
+    assert_eq!(report["diagnostic"]["column"], 4);
+    assert_eq!(report["diagnostic"]["excerpt"], "1. e5 *");
+    assert_eq!(report["diagnostic"]["headers"]["event"], "Example");
+    assert_eq!(report["diagnostic"]["headers"]["date"], "2026.09.02");
+    assert_eq!(report["diagnostic"]["headers"]["white"], "Alice");
+    assert_eq!(report["diagnostic"]["headers"]["black"], "Bob");
 }
 
 #[test]
@@ -101,6 +108,23 @@ fn diagnoses_pgn_syntax_errors() {
     assert_eq!(output.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["diagnostic"]["category"], "syntax");
+    assert_eq!(report["diagnostic"]["line"], 3);
+    assert_eq!(report["diagnostic"]["column"], 7);
+    assert_eq!(report["diagnostic"]["excerpt"], "1. e4 ) *");
+}
+
+#[test]
+fn human_diagnostics_include_game_and_source_context() {
+    let output = run_with_stdin(
+        &["doctor", "-"],
+        b"[Event \"Club Championship\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n\n1. e5 *\n",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("line 5, column 4"));
+    assert!(stderr.contains("White=\"Alice\", Black=\"Bob\""));
+    assert!(stderr.contains("Event=\"Club Championship\""));
+    assert!(stderr.contains("source: 1. e5 *"));
 }
 
 #[test]
