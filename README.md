@@ -4,7 +4,7 @@ Gambit is the beginning of a high-performance chess analysis stack in Rust. It
 currently contains a dependency-free PGN ingestion layer and a compact semantic
 chess core.
 
-## Install the command-line validator
+## Gambit Doctor
 
 Release archives and installers are built for Linux, macOS, and Windows. On
 Linux or macOS, install the latest release with:
@@ -20,12 +20,31 @@ On Windows PowerShell:
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/diegoglozano/gambit/releases/latest/download/gambit-installer.ps1 | iex"
 ```
 
-Validate a PGN file, or stream decompressed PGN through standard input:
+Diagnose the syntax and chess semantics of a PGN file, or stream decompressed
+PGN through standard input:
 
 ```console
-gambit games.pgn
-zstdcat games.pgn.zst | gambit -
+gambit doctor games.pgn
+zstdcat games.pgn.zst | gambit doctor -
 ```
+
+Doctor reports malformed PGN, invalid FEN starting positions, malformed or
+illegal SAN, ambiguous moves, and incorrect check or mate suffixes. It exits
+with status 0 for valid input, 1 for invalid chess data, 2 for command-line
+usage errors, and 3 for input or reporting failures.
+
+Use JSON output in scripts, check only PGN structure, allow a missing final
+outcome marker, or suppress a successful report:
+
+```console
+gambit doctor --format json games.pgn
+gambit doctor --syntax-only games.pgn
+gambit doctor --lenient fragment.pgn
+gambit doctor --quiet games.pgn
+```
+
+The original `gambit games.pgn` form remains available as a compatibility
+alias for semantic validation.
 
 ## Parser design
 
