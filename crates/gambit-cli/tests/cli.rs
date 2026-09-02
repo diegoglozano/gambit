@@ -28,7 +28,9 @@ fn help_describes_doctor() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("gambit doctor"));
-    assert!(stdout.contains("--format <human|json>"));
+    assert!(stdout.contains("--format <human|json|jsonl>"));
+    assert!(stdout.contains("--keep-going"));
+    assert!(stdout.contains("--max-errors <N>"));
 }
 
 #[test]
@@ -174,4 +176,82 @@ fn input_errors_respect_json_output() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["status"], "error");
     assert_eq!(report["diagnostic"]["category"], "input");
+}
+
+#[test]
+fn keep_going_reports_errors_from_multiple_games() {
+    let output = run_with_stdin(
+        &["doctor", "--keep-going", "--format=json", "-"],
+        b"[Event \"First\"]\n\n1. e5 *\n\n[Event \"Second\"]\n\n1. d5 *\n\n1. e4 e5 *\n",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["games"], 3);
+    assert_eq!(report["diagnostic_count"], 2);
+    assert_eq!(report["diagnostic"]["game"], 1);
+    assert_eq!(report["diagnostic"]["headers"]["event"], "First");
+    assert_eq!(report["additional_diagnostics"][0]["game"], 2);
+    assert_eq!(
+        report["additional_diagnostics"][0]["headers"]["event"],
+        "Second"
+    );
+    assert_eq!(report["additional_diagnostics"][0]["line"], 7);
+    assert_eq!(report["error_limit_reached"], false);
+}
+
+#[test]
+fn max_errors_limits_a_complete_scan() {
+    let output = run_with_stdin(
+        &["doctor", "--max-errors=2", "--format=json", "-"],
+        b"1. e5 *\n1. d5 *\n1. c5 *\n",
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["games"], 2);
+    assert_eq!(report["diagnostic_count"], 2);
+    assert_eq!(report["error_limit_reached"], true);
+}
+
+#[test]
+fn jsonl_emits_diagnostics_followed_by_a_summary() {
+    let output = run_with_stdin(
+        &["doctor", "--keep-going", "--format=jsonl", "-"],
+        b"1. e5 *\n1. d5 *\n",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let records = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["record"], "diagnostic");
+    assert_eq!(records[0]["diagnostic"]["game"], 1);
+    assert_eq!(records[1]["record"], "diagnostic");
+    assert_eq!(records[1]["diagnostic"]["game"], 2);
+    assert_eq!(records[2]["record"], "summary");
+    assert_eq!(records[2]["diagnostic_count"], 2);
+}
+
+#[test]
+fn complete_lenient_scan_accepts_a_final_game_without_an_outcome() {
+    let output = run_with_stdin(
+        &["doctor", "--keep-going", "--lenient", "--format=json", "-"],
+        b"1. e4 *\n1. d4 d5\n",
+    );
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["games"], 2);
+    assert_eq!(report["moves"], 3);
+    assert_eq!(report["diagnostic_count"], 0);
+}
+
+#[test]
+fn rejects_zero_as_an_error_limit() {
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--max-errors", "0", "-"])
+        .output()
+        .expect("run gambit");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("positive integer"));
 }

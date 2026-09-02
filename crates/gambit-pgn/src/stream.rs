@@ -194,6 +194,15 @@ impl<R: Read> GameReader<R> {
         self.buffer.len() - self.frame_start
     }
 
+    /// Returns bytes retained for the game currently being framed.
+    ///
+    /// This is primarily useful after [`FrameError::MissingOutcome`], when a
+    /// lenient consumer may still choose to process the final record.
+    #[must_use]
+    pub fn pending_game(&self) -> &[u8] {
+        &self.buffer[self.frame_start..]
+    }
+
     #[must_use]
     pub fn into_inner(self) -> R {
         self.reader
@@ -366,6 +375,7 @@ mod tests {
             incomplete.read_game(),
             Err(FrameError::MissingOutcome { buffered: 8, .. })
         ));
+        assert_eq!(incomplete.pending_game(), b"1. e4 e5");
 
         let mut oversized = GameReader::with_options(
             Cursor::new(b"1. e4 e5 e6 e7 e8"),

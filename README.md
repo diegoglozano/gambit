@@ -35,11 +35,20 @@ and a source-line excerpt. Lines and byte columns are one-based. Doctor exits
 with status 0 for valid input, 1 for invalid chess data, 2 for command-line
 usage errors, and 3 for input or reporting failures.
 
-Use JSON output in scripts, check only PGN structure, allow a missing final
-outcome marker, or suppress a successful report:
+By default Doctor stops at the first error, preserving its fastest streaming
+path. Use `--keep-going` to scan later outcome-delimited games (up to 100
+diagnostics), or set an explicit positive limit with `--max-errors`. JSON keeps
+the first diagnostic in `diagnostic` for compatibility and places later ones in
+`additional_diagnostics`; JSONL emits one diagnostic record per line followed
+by a summary record.
+
+Use machine-readable output in scripts, check only PGN structure, allow a
+missing final outcome marker, or suppress a successful report:
 
 ```console
 gambit doctor --format json games.pgn
+gambit doctor --keep-going --format jsonl games.pgn
+gambit doctor --max-errors 20 games.pgn
 gambit doctor --syntax-only games.pgn
 gambit doctor --lenient fragment.pgn
 gambit doctor --quiet games.pgn
