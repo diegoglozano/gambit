@@ -4,6 +4,11 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added recursive directory inputs to `gambit doctor`, with deterministic
+  discovery of `.pgn` and `.pgn.zst` files and explicit empty-directory errors.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

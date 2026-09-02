@@ -1,10 +1,10 @@
 mod doctor;
 
 use std::env;
-use std::ffi::OsString;
-use std::fs::File;
+use std::ffi::{OsStr, OsString};
+use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use doctor::{
@@ -13,7 +13,7 @@ use doctor::{
 use serde::Serialize;
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <FILE.pgn|FILE.pgn.zst|->...\n  gambit <FILE.pgn|FILE.pgn.zst|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct file form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Use - alone to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl>  Select output format [default: human]\n      --syntax-only                Check PGN structure without executing moves\n      --lenient                    Allow a final game without an outcome marker\n      --keep-going                 Continue after errors [default limit: 100]\n      --max-errors <N>             Continue until N errors have been reported per input\n  -q, --quiet                      Print nothing when the input is valid\n  -h, --help                       Print help\n  -V, --version                    Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl>  Select output format [default: human]\n      --syntax-only                Check PGN structure without executing moves\n      --lenient                    Allow a final game without an outcome marker\n      --keep-going                 Continue after errors [default limit: 100]\n      --max-errors <N>             Continue until N errors have been reported per input\n  -q, --quiet                      Print nothing when the input is valid\n  -h, --help                       Print help\n  -V, --version                    Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -70,7 +70,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
         _ => {
             if arguments.next().is_some() {
                 return Err(String::from(
-                    "the compatibility form accepts exactly one PGN file; use 'gambit doctor' for options",
+                    "the compatibility form accepts exactly one input path; use 'gambit doctor' for options",
                 ));
             }
             Ok(Action::Doctor(DoctorCommand {
@@ -150,11 +150,11 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
         ));
     }
     if paths.is_empty() {
-        return Err(String::from("doctor requires at least one PGN file"));
+        return Err(String::from("doctor requires at least one input path"));
     }
     if paths.len() > 1 && paths.iter().any(|path| path == "-") {
         return Err(String::from(
-            "standard input cannot be combined with other PGN files",
+            "standard input cannot be combined with other input paths",
         ));
     }
     Ok(Action::Doctor(DoctorCommand {
@@ -197,11 +197,7 @@ fn run_doctor(command: &DoctorCommand) -> ExitCode {
             command.options,
         )]
     } else {
-        command
-            .paths
-            .iter()
-            .map(|path| inspect_path(path, command.options))
-            .collect::<Vec<_>>()
+        inspect_paths(&command.paths, command.options)
     };
     let exit_code = reports.iter().map(Report::exit_code).max().unwrap_or(0);
     if let Err(error) = render_reports(&reports, command.format, command.quiet) {
@@ -209,6 +205,119 @@ fn run_doctor(command: &DoctorCommand) -> ExitCode {
         return ExitCode::from(3);
     }
     ExitCode::from(exit_code)
+}
+
+#[derive(Debug)]
+enum DiscoveredInput {
+    File(PathBuf),
+    Error { source: PathBuf, message: String },
+}
+
+impl DiscoveredInput {
+    fn source(&self) -> &Path {
+        match self {
+            Self::File(path) | Self::Error { source: path, .. } => path,
+        }
+    }
+}
+
+fn inspect_paths(paths: &[OsString], options: DoctorOptions) -> Vec<Report> {
+    let mut reports = Vec::new();
+    for path in paths {
+        let path = Path::new(path);
+        if path.is_dir() {
+            reports.extend(inspect_directory(path, options));
+        } else {
+            reports.push(inspect_path(path.as_os_str(), options));
+        }
+    }
+    reports
+}
+
+fn inspect_directory(root: &Path, options: DoctorOptions) -> Vec<Report> {
+    let mut inputs = discover_directory(root);
+    if inputs.is_empty() {
+        let source = root.to_string_lossy().into_owned();
+        return vec![Report::input_error(
+            source,
+            options,
+            format!("no .pgn or .pgn.zst files found under {}", root.display()),
+        )];
+    }
+    inputs.sort_by(|left, right| left.source().cmp(right.source()));
+    inputs
+        .into_iter()
+        .map(|input| match input {
+            DiscoveredInput::File(path) => inspect_path(path.as_os_str(), options),
+            DiscoveredInput::Error { source, message } => {
+                Report::input_error(source.to_string_lossy().into_owned(), options, message)
+            }
+        })
+        .collect()
+}
+
+fn discover_directory(root: &Path) -> Vec<DiscoveredInput> {
+    let mut inputs = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) => {
+                inputs.push(DiscoveredInput::Error {
+                    source: directory.clone(),
+                    message: format!("failed to read directory {}: {error}", directory.display()),
+                });
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    inputs.push(DiscoveredInput::Error {
+                        source: directory.clone(),
+                        message: format!(
+                            "failed to read an entry in {}: {error}",
+                            directory.display()
+                        ),
+                    });
+                    continue;
+                }
+            };
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(file_type) if file_type.is_dir() => pending.push(path),
+                Ok(file_type)
+                    if (file_type.is_file() || file_type.is_symlink())
+                        && is_discoverable_pgn_path(&path) =>
+                {
+                    inputs.push(DiscoveredInput::File(path));
+                }
+                Ok(_) => {}
+                Err(error) => inputs.push(DiscoveredInput::Error {
+                    source: path.clone(),
+                    message: format!("failed to inspect {}: {error}", path.display()),
+                }),
+            }
+        }
+    }
+    inputs
+}
+
+fn is_discoverable_pgn_path(path: &Path) -> bool {
+    if extension_is(path, "pgn") {
+        return true;
+    }
+    extension_is(path, "zst")
+        && path
+            .file_stem()
+            .is_some_and(|stem| extension_is(Path::new(stem), "pgn"))
+}
+
+fn extension_is(path: &Path, expected: &str) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(expected))
 }
 
 fn inspect_path(path: &std::ffi::OsStr, options: DoctorOptions) -> Report {
