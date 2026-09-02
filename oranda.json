@@ -1,0 +1,24 @@
+{
+  "project": {
+    "name": "Gambit",
+    "description": "Fast, dependency-light PGN validation and chess semantics in Rust",
+    "homepage": "https://diegoglozano.github.io/gambit/",
+    "repository": "https://github.com/diegoglozano/gambit",
+    "readme_path": "README.md",
+    "license": "MIT OR Apache-2.0"
+  },
+  "build": {
+    "dist_dir": "public",
+    "static_dir": "static",
+    "path_prefix": "gambit"
+  },
+  "styles": {
+    "theme": "axodark"
+  },
+  "components": {
+    "changelog": true,
+    "artifacts": {
+      "cargo_dist": true
+    }
+  }
+}

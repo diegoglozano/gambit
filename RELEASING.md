@@ -14,6 +14,8 @@ workflow. The tag version must match the `gambit` package version.
    cargo test --workspace
    cargo dist generate --check
    cargo dist plan --tag=v0.2.0
+   oranda build
+   mkdocs build --strict
    ```
 
 3. Merge the release-preparation pull request and update local `main`.
@@ -25,7 +27,9 @@ workflow. The tag version must match the `gambit` package version.
    ```
 
 5. Watch the `Release` workflow through artifact builds and publication.
-6. Verify `gambit --version` from an installed artifact and run Doctor against
+6. Watch the `Web` workflow rebuild the Oranda install page after `Release`
+   completes.
+7. Verify `gambit --version` from an installed artifact and run Doctor against
    one plain PGN plus one `.pgn.zst` file.
 
 Do not reuse or move a published version tag. If publication fails after the
