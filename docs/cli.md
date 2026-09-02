@@ -3,12 +3,27 @@
 ## Synopsis
 
 ```text
-gambit doctor [OPTIONS] <FILE.pgn|FILE.pgn.zst|->...
-gambit <FILE.pgn|FILE.pgn.zst|->
+gambit doctor [OPTIONS] <PATH|->...
+gambit <PATH|->
 ```
 
-The direct file form is a compatibility alias for `gambit doctor` and accepts
+The direct path form is a compatibility alias for `gambit doctor` and accepts
 exactly one input. Use the `doctor` command for options or batch validation.
+
+## Inputs
+
+A path can name a file or a directory. Files ending in `.zst` are decompressed
+automatically. Directory inputs are scanned recursively and include regular
+files or file symlinks ending in `.pgn` or `.pgn.zst`, case-insensitively.
+Other directory entries are ignored, and directory symlinks are not followed.
+
+Discovered files are processed in deterministic path order. An empty directory
+is an input error, as is a directory entry that cannot be read or inspected.
+When several paths are supplied, each directory is expanded in its argument
+position.
+
+Use `-` alone to read decompressed PGN from standard input. Standard input
+cannot be combined with any other input path.
 
 ## Options
 
@@ -40,16 +55,17 @@ check or mate suffixes. It also verifies that:
 
 ## Machine-readable reports
 
-JSON emits one report for a single input. For a batch, it wraps the per-file
-reports in a batch summary. The first diagnostic remains in `diagnostic`, while
-later diagnostics appear in `additional_diagnostics`.
+JSON emits one report when exactly one file is resolved. For a multi-file or
+directory batch, it wraps the per-file reports in a batch summary. The first
+diagnostic remains in `diagnostic`, while later diagnostics appear in
+`additional_diagnostics`.
 
 ```console
 gambit doctor --format json games.pgn
 ```
 
 JSONL emits one diagnostic record per line followed by a summary record. A
-multi-file invocation ends with an additional `batch_summary` record, making it
+batch invocation ends with an additional `batch_summary` record, making it
 suitable for incremental consumers:
 
 ```console

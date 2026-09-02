@@ -39,6 +39,20 @@ file independently, and Gambit exits with the most severe status it encounters:
 gambit doctor january.pgn february.pgn.zst
 ```
 
+## Validate a corpus directory
+
+Pass a directory to discover every `.pgn` and `.pgn.zst` file below it:
+
+```console
+gambit doctor ./corpus
+```
+
+Discovery is recursive and case-insensitive. Gambit ignores unrelated files and
+processes the matches in deterministic path order, making the output stable for
+scripts and CI. Each discovered file keeps its own report and error limit. A
+directory with no matching PGN files exits with status 3 instead of silently
+succeeding.
+
 ## Read from standard input
 
 Use `-` as the only input to read decompressed PGN from a pipe:

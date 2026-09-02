@@ -1,9 +1,9 @@
 # Gambit documentation
 
 Gambit validates PGN syntax and chess semantics while streaming plain or
-Zstandard-compressed files. It reports the exact game, move, byte, line, and
-column where a problem occurs and provides JSON and JSONL output for automated
-pipelines.
+Zstandard-compressed files. Point it at one file, several files, or an entire
+corpus directory. It reports the exact game, move, byte, line, and column where
+a problem occurs and provides JSON and JSONL output for automated pipelines.
 
 [Install Gambit](https://diegoglozano.github.io/gambit/artifacts/){ .md-button }
 [Get started](getting-started.md){ .md-button }
