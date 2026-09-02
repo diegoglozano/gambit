@@ -79,7 +79,7 @@ fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
 }
 
 #[test]
-fn help_describes_doctor() {
+fn help_describes_commands() {
     let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
         .arg("--help")
         .output()
@@ -88,10 +88,161 @@ fn help_describes_doctor() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("gambit doctor"));
+    assert!(stdout.contains("gambit stats"));
     assert!(stdout.contains("--format <human|json|jsonl|github>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));
     assert!(stdout.contains("Directories are scanned recursively"));
+}
+
+#[test]
+fn stats_summarizes_mainlines_and_results_as_json() {
+    let output = run_with_stdin(
+        &["stats", "--format=json", "-"],
+        b"1. e4 (1. d4 d5 1/2-1/2) e5 1-0\n\n1. d4 0-1\n\n*\n",
+    );
+
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["status"], "valid");
+    assert_eq!(report["source"], "stdin");
+    assert_eq!(report["outcome_required"], true);
+    assert_eq!(report["games"], 3);
+    assert_eq!(report["mainline_plies"], 3);
+    assert_eq!(report["results"]["white_wins"], 1);
+    assert_eq!(report["results"]["black_wins"], 1);
+    assert_eq!(report["results"]["draws"], 0);
+    assert_eq!(report["results"]["unfinished"], 1);
+    assert_eq!(report["game_length"]["minimum_plies"], 0);
+    assert_eq!(report["game_length"]["average_plies"], 1.0);
+    assert_eq!(report["game_length"]["maximum_plies"], 2);
+}
+
+#[test]
+fn stats_human_output_is_a_compact_summary() {
+    let output = run_with_stdin(&["stats", "-"], b"1. e4 e5 1/2-1/2\n");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("stats: valid"));
+    assert!(stdout.contains("games: 1"));
+    assert!(stdout.contains("mainline plies: 2"));
+    assert!(stdout.contains("0 white wins, 0 black wins, 1 draws, 0 unfinished"));
+    assert!(stdout.contains("min 2, avg 2.00, max 2"));
+}
+
+#[test]
+fn stats_returns_partial_counts_for_invalid_pgn() {
+    let output = run_with_stdin(&["stats", "--format=json", "-"], b"1. e4 *\n\n1. d4\n");
+
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "invalid");
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["mainline_plies"], 1);
+    assert_eq!(report["diagnostic"]["category"], "syntax");
+    assert_eq!(report["diagnostic"]["byte"], 15);
+}
+
+#[test]
+fn stats_lenient_mode_counts_a_final_game_without_an_outcome() {
+    let output = run_with_stdin(&["stats", "--lenient", "--format=json", "-"], b"1. e4 e5\n");
+
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["mainline_plies"], 2);
+    assert_eq!(report["results"]["unfinished"], 1);
+    assert_eq!(report["outcome_required"], false);
+}
+
+#[test]
+fn stats_is_lexical_and_does_not_reject_illegal_chess_moves() {
+    let output = run_with_stdin(&["stats", "--format=json", "-"], b"1. e5 Ke7 2. Ke2 1-0\n");
+
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "valid");
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["mainline_plies"], 3);
+}
+
+#[test]
+fn stats_reads_zstd_files() {
+    let pgn = b"1. e4 e5 1-0\n";
+    let compressed = zstd::stream::encode_all(&pgn[..], 1).expect("compress PGN");
+    let file = TestFile::new("pgn.zst", &compressed);
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["stats", "--format=json"])
+        .arg(file.path())
+        .output()
+        .expect("run gambit");
+
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["bytes"], pgn.len());
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["results"]["white_wins"], 1);
+}
+
+#[test]
+fn stats_aggregates_a_directory_batch() {
+    let directory = TestDirectory::new();
+    directory.write("one.pgn", b"1. e4 *\n");
+    directory.write("nested/two.pgn", b"1. d4 d5 0-1\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["stats", "--format=json"])
+        .arg(directory.path())
+        .output()
+        .expect("run gambit");
+
+    assert!(output.status.success());
+    let batch: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(batch["status"], "valid");
+    assert_eq!(batch["input_count"], 2);
+    assert_eq!(batch["valid_input_count"], 2);
+    assert_eq!(batch["games"], 2);
+    assert_eq!(batch["mainline_plies"], 3);
+    assert_eq!(batch["results"]["black_wins"], 1);
+    assert_eq!(batch["game_length"]["average_plies"], 1.5);
+    assert_eq!(batch["reports"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn stats_batch_preserves_counts_and_most_severe_status() {
+    let valid = TestFile::new("pgn", b"1. e4 *\n");
+    let invalid = TestFile::new("pgn", b"1. d4\n");
+    let missing = std::env::temp_dir().join(format!(
+        "gambit-cli-missing-{}-{}.pgn",
+        std::process::id(),
+        NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["stats", "--format=json"])
+        .arg(valid.path())
+        .arg(invalid.path())
+        .arg(&missing)
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(3));
+    let batch: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(batch["status"], "error");
+    assert_eq!(batch["valid_input_count"], 1);
+    assert_eq!(batch["invalid_input_count"], 1);
+    assert_eq!(batch["error_input_count"], 1);
+    assert_eq!(batch["games"], 1);
+    assert_eq!(batch["mainline_plies"], 1);
+}
+
+#[test]
+fn stats_rejects_streaming_jsonl_until_it_has_a_record_contract() {
+    let output = run_with_stdin(&["stats", "--format=jsonl", "-"], b"1. e4 *\n");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown stats output format"));
 }
 
 #[test]

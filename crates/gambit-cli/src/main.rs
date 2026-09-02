@@ -1,4 +1,5 @@
 mod doctor;
+mod stats;
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -11,9 +12,13 @@ use doctor::{
     Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
 };
 use serde::Serialize;
+use stats::{
+    GameLengthStats, ResultCounts, StatsDiagnostic, StatsOptions, StatsReport, StatsStatus,
+    inspect as inspect_stats,
+};
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -21,6 +26,12 @@ enum OutputFormat {
     Json,
     Jsonl,
     Github,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StatsOutputFormat {
+    Human,
+    Json,
 }
 
 #[derive(Debug)]
@@ -32,10 +43,18 @@ struct DoctorCommand {
 }
 
 #[derive(Debug)]
+struct StatsCommand {
+    paths: Vec<OsString>,
+    format: StatsOutputFormat,
+    options: StatsOptions,
+}
+
+#[derive(Debug)]
 enum Action {
     Help,
     Version,
     Doctor(DoctorCommand),
+    Stats(StatsCommand),
 }
 
 fn main() -> ExitCode {
@@ -49,6 +68,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Action::Doctor(command)) => run_doctor(&command),
+        Ok(Action::Stats(command)) => run_stats(&command),
         Err(error) => {
             eprintln!("{error}\n\n{USAGE}");
             ExitCode::from(2)
@@ -65,6 +85,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
         Some("-h" | "--help") => no_more(arguments, Action::Help),
         Some("-V" | "--version") => no_more(arguments, Action::Version),
         Some("doctor") => parse_doctor_arguments(arguments),
+        Some("stats") => parse_stats_arguments(arguments),
         Some(value) if value.starts_with('-') && value != "-" => {
             Err(format!("unknown option or command: {value}"))
         }
@@ -170,6 +191,65 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
     }))
 }
 
+fn parse_stats_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
+    let mut paths = Vec::new();
+    let mut format = StatsOutputFormat::Human;
+    let mut require_outcome = true;
+    let mut arguments = arguments.peekable();
+
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-h" | "--help") => return no_more(arguments, Action::Help),
+            Some("--lenient") => require_outcome = false,
+            Some("--format") => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| String::from("--format requires a value"))?;
+                format = parse_stats_format(&value)?;
+            }
+            Some("--") => {
+                paths.extend(arguments);
+                break;
+            }
+            Some(value) if value.starts_with("--format=") => {
+                format = parse_stats_format(OsStr::new(&value["--format=".len()..]))?;
+            }
+            Some(value) if value.starts_with('-') && value != "-" => {
+                return Err(format!("unknown stats option: {value}"));
+            }
+            _ => paths.push(argument),
+        }
+    }
+
+    validate_input_paths("stats", &paths)?;
+    Ok(Action::Stats(StatsCommand {
+        paths,
+        format,
+        options: StatsOptions { require_outcome },
+    }))
+}
+
+fn validate_input_paths(command: &str, paths: &[OsString]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err(format!("{command} requires at least one input path"));
+    }
+    if paths.len() > 1 && paths.iter().any(|path| path == "-") {
+        return Err(String::from(
+            "standard input cannot be combined with other input paths",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_stats_format(value: &OsStr) -> Result<StatsOutputFormat, String> {
+    match value.to_str() {
+        Some("human") => Ok(StatsOutputFormat::Human),
+        Some("json") => Ok(StatsOutputFormat::Json),
+        Some(value) => Err(format!("unknown stats output format: {value}")),
+        None => Err(String::from("output format must be valid UTF-8")),
+    }
+}
+
 fn parse_format(value: &std::ffi::OsStr) -> Result<OutputFormat, String> {
     match value.to_str() {
         Some("human") => Ok(OutputFormat::Human),
@@ -209,6 +289,28 @@ fn run_doctor(command: &DoctorCommand) -> ExitCode {
     ExitCode::from(exit_code)
 }
 
+fn run_stats(command: &StatsCommand) -> ExitCode {
+    let reports = if command.paths[0] == "-" {
+        vec![inspect_stats(
+            io::stdin().lock(),
+            String::from("stdin"),
+            command.options,
+        )]
+    } else {
+        inspect_stats_paths(&command.paths, command.options)
+    };
+    let exit_code = reports
+        .iter()
+        .map(StatsReport::exit_code)
+        .max()
+        .unwrap_or(0);
+    if let Err(error) = render_stats_reports(&reports, command.format) {
+        eprintln!("failed to write stats: {error}");
+        return ExitCode::from(3);
+    }
+    ExitCode::from(exit_code)
+}
+
 #[derive(Debug)]
 enum DiscoveredInput {
     File(PathBuf),
@@ -224,30 +326,7 @@ impl DiscoveredInput {
 }
 
 fn inspect_paths(paths: &[OsString], options: DoctorOptions) -> Vec<Report> {
-    let mut reports = Vec::new();
-    for path in paths {
-        let path = Path::new(path);
-        if path.is_dir() {
-            reports.extend(inspect_directory(path, options));
-        } else {
-            reports.push(inspect_path(path.as_os_str(), options));
-        }
-    }
-    reports
-}
-
-fn inspect_directory(root: &Path, options: DoctorOptions) -> Vec<Report> {
-    let mut inputs = discover_directory(root);
-    if inputs.is_empty() {
-        let source = root.to_string_lossy().into_owned();
-        return vec![Report::input_error(
-            source,
-            options,
-            format!("no .pgn or .pgn.zst files found under {}", root.display()),
-        )];
-    }
-    inputs.sort_by(|left, right| left.source().cmp(right.source()));
-    inputs
+    discover_inputs(paths)
         .into_iter()
         .map(|input| match input {
             DiscoveredInput::File(path) => inspect_path(path.as_os_str(), options),
@@ -256,6 +335,40 @@ fn inspect_directory(root: &Path, options: DoctorOptions) -> Vec<Report> {
             }
         })
         .collect()
+}
+
+fn inspect_stats_paths(paths: &[OsString], options: StatsOptions) -> Vec<StatsReport> {
+    discover_inputs(paths)
+        .into_iter()
+        .map(|input| match input {
+            DiscoveredInput::File(path) => inspect_stats_path(path.as_os_str(), options),
+            DiscoveredInput::Error { source, message } => {
+                StatsReport::input_error(source.to_string_lossy().into_owned(), options, message)
+            }
+        })
+        .collect()
+}
+
+fn discover_inputs(paths: &[OsString]) -> Vec<DiscoveredInput> {
+    let mut discovered = Vec::new();
+    for path in paths {
+        let path = Path::new(path);
+        if !path.is_dir() {
+            discovered.push(DiscoveredInput::File(path.to_path_buf()));
+            continue;
+        }
+        let mut inputs = discover_directory(path);
+        if inputs.is_empty() {
+            inputs.push(DiscoveredInput::Error {
+                source: path.to_path_buf(),
+                message: format!("no .pgn or .pgn.zst files found under {}", path.display()),
+            });
+        } else {
+            inputs.sort_by(|left, right| left.source().cmp(right.source()));
+        }
+        discovered.extend(inputs);
+    }
+    discovered
 }
 
 fn discover_directory(root: &Path) -> Vec<DiscoveredInput> {
@@ -351,6 +464,35 @@ fn inspect_path(path: &std::ffi::OsStr, options: DoctorOptions) -> Report {
     }
 }
 
+fn inspect_stats_path(path: &OsStr, options: StatsOptions) -> StatsReport {
+    let source = path.to_string_lossy().into_owned();
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            return StatsReport::input_error(
+                source,
+                options,
+                format!("failed to open {}: {error}", path.to_string_lossy()),
+            );
+        }
+    };
+    if is_zstd_path(path) {
+        match zstd::stream::read::Decoder::new(file) {
+            Ok(decoder) => inspect_stats(decoder, source, options),
+            Err(error) => StatsReport::input_error(
+                source,
+                options,
+                format!(
+                    "failed to initialize zstd decoder for {}: {error}",
+                    path.to_string_lossy()
+                ),
+            ),
+        }
+    } else {
+        inspect_stats(file, source, options)
+    }
+}
+
 fn is_zstd_path(path: &std::ffi::OsStr) -> bool {
     Path::new(path)
         .extension()
@@ -413,6 +555,214 @@ impl<'a> BatchReport<'a> {
             diagnostic_count: reports.iter().map(|report| report.diagnostic_count).sum(),
             reports,
         }
+    }
+}
+
+#[derive(Serialize)]
+struct StatsBatchReport<'a> {
+    schema_version: u8,
+    status: StatsStatus,
+    outcome_required: bool,
+    input_count: usize,
+    valid_input_count: usize,
+    invalid_input_count: usize,
+    error_input_count: usize,
+    bytes: u64,
+    games: u64,
+    mainline_plies: u64,
+    results: ResultCounts,
+    game_length: GameLengthStats,
+    elapsed_seconds: f64,
+    throughput_mib_per_second: f64,
+    reports: &'a [StatsReport],
+}
+
+impl<'a> StatsBatchReport<'a> {
+    fn new(reports: &'a [StatsReport]) -> Self {
+        let bytes = reports.iter().map(|report| report.bytes).sum();
+        let games = reports.iter().map(|report| report.games).sum();
+        let mainline_plies = reports.iter().map(|report| report.mainline_plies).sum();
+        let elapsed_seconds = reports
+            .iter()
+            .map(|report| report.elapsed_seconds)
+            .sum::<f64>();
+        let mut results = ResultCounts::default();
+        let mut minimum_plies = None;
+        let mut maximum_plies = None;
+        for report in reports {
+            results.add(report.results);
+            if let Some(value) = report.game_length.minimum_plies {
+                minimum_plies =
+                    Some(minimum_plies.map_or(value, |current: u64| current.min(value)));
+            }
+            if let Some(value) = report.game_length.maximum_plies {
+                maximum_plies =
+                    Some(maximum_plies.map_or(value, |current: u64| current.max(value)));
+            }
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let average_plies = if games == 0 {
+            0.0
+        } else {
+            mainline_plies as f64 / games as f64
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let throughput_mib_per_second = if elapsed_seconds > 0.0 {
+            bytes as f64 / (1024.0 * 1024.0) / elapsed_seconds
+        } else {
+            0.0
+        };
+        let status = if reports
+            .iter()
+            .any(|report| report.status == StatsStatus::Error)
+        {
+            StatsStatus::Error
+        } else if reports
+            .iter()
+            .any(|report| report.status == StatsStatus::Invalid)
+        {
+            StatsStatus::Invalid
+        } else {
+            StatsStatus::Valid
+        };
+        Self {
+            schema_version: 1,
+            status,
+            outcome_required: reports.first().is_none_or(|report| report.outcome_required),
+            input_count: reports.len(),
+            valid_input_count: reports
+                .iter()
+                .filter(|report| report.status == StatsStatus::Valid)
+                .count(),
+            invalid_input_count: reports
+                .iter()
+                .filter(|report| report.status == StatsStatus::Invalid)
+                .count(),
+            error_input_count: reports
+                .iter()
+                .filter(|report| report.status == StatsStatus::Error)
+                .count(),
+            bytes,
+            games,
+            mainline_plies,
+            results,
+            game_length: GameLengthStats {
+                minimum_plies,
+                average_plies,
+                maximum_plies,
+            },
+            elapsed_seconds,
+            throughput_mib_per_second,
+            reports,
+        }
+    }
+}
+
+fn render_stats_reports(reports: &[StatsReport], format: StatsOutputFormat) -> io::Result<()> {
+    if format == StatsOutputFormat::Json {
+        let mut output = io::stdout().lock();
+        if let [report] = reports {
+            serde_json::to_writer(&mut output, report)?;
+        } else {
+            serde_json::to_writer(&mut output, &StatsBatchReport::new(reports))?;
+        }
+        return writeln!(output);
+    }
+
+    for report in reports {
+        if let Some(diagnostic) = &report.diagnostic {
+            render_stats_diagnostic(report, diagnostic)?;
+        }
+    }
+    let mut output = io::stdout().lock();
+    if let [report] = reports {
+        writeln!(output, "stats: {}", stats_status_label(report.status))?;
+        writeln!(output, "source: {}", report.source)?;
+        render_stats_metrics(
+            &mut output,
+            report.bytes,
+            report.games,
+            report.mainline_plies,
+            report.results,
+            report.game_length,
+            report.elapsed_seconds,
+            report.throughput_mib_per_second,
+        )
+    } else {
+        let batch = StatsBatchReport::new(reports);
+        writeln!(output, "stats: {}", stats_status_label(batch.status))?;
+        writeln!(output, "inputs: {}", batch.input_count)?;
+        writeln!(
+            output,
+            "input status: {} valid, {} invalid, {} errors",
+            batch.valid_input_count, batch.invalid_input_count, batch.error_input_count
+        )?;
+        render_stats_metrics(
+            &mut output,
+            batch.bytes,
+            batch.games,
+            batch.mainline_plies,
+            batch.results,
+            batch.game_length,
+            batch.elapsed_seconds,
+            batch.throughput_mib_per_second,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_stats_metrics(
+    output: &mut impl Write,
+    bytes: u64,
+    games: u64,
+    mainline_plies: u64,
+    results: ResultCounts,
+    game_length: GameLengthStats,
+    elapsed_seconds: f64,
+    throughput_mib_per_second: f64,
+) -> io::Result<()> {
+    writeln!(output, "bytes: {bytes}")?;
+    writeln!(output, "games: {games}")?;
+    writeln!(output, "mainline plies: {mainline_plies}")?;
+    writeln!(
+        output,
+        "results: {} white wins, {} black wins, {} draws, {} unfinished",
+        results.white_wins, results.black_wins, results.draws, results.unfinished
+    )?;
+    match (game_length.minimum_plies, game_length.maximum_plies) {
+        (Some(minimum), Some(maximum)) => writeln!(
+            output,
+            "game length (plies): min {minimum}, avg {:.2}, max {maximum}",
+            game_length.average_plies
+        )?,
+        _ => writeln!(output, "game length (plies): n/a")?,
+    }
+    writeln!(output, "elapsed: {elapsed_seconds:.3}s")?;
+    writeln!(output, "throughput: {throughput_mib_per_second:.2} MiB/s")
+}
+
+fn render_stats_diagnostic(report: &StatsReport, diagnostic: &StatsDiagnostic) -> io::Result<()> {
+    let mut output = io::stderr().lock();
+    write!(
+        output,
+        "{}: {}: {}",
+        stats_status_label(report.status),
+        report.source,
+        diagnostic.category.label()
+    )?;
+    if diagnostic.category != stats::StatsDiagnosticCategory::Syntax {
+        if let Some(byte) = diagnostic.byte {
+            write!(output, " at byte {byte}")?;
+        }
+    }
+    writeln!(output, ": {}", diagnostic.message)
+}
+
+const fn stats_status_label(status: StatsStatus) -> &'static str {
+    match status {
+        StatsStatus::Valid => "valid",
+        StatsStatus::Invalid => "invalid",
+        StatsStatus::Error => "error",
     }
 }
 

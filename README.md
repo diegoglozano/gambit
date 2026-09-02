@@ -1,13 +1,34 @@
 # Gambit
 
-Gambit is the beginning of a high-performance chess analysis stack in Rust. It
-currently contains a dependency-free PGN ingestion layer and a compact semantic
-chess core.
+Gambit is a high-performance PGN inspection and validation tool backed by a
+dependency-free ingestion layer and a compact semantic chess core.
 
 [Read the documentation](https://diegoglozano.github.io/gambit/docs/) or
 [download the latest release](https://diegoglozano.github.io/gambit/artifacts/).
 
 ![Gambit Doctor validating PGN files](./static/gambit-doctor.gif)
+
+## Gambit Stats
+
+Inventory a plain or Zstandard-compressed PGN corpus in one streaming,
+bounded-memory pass:
+
+```shell
+gambit stats games.pgn.zst
+gambit stats ./sharded-corpus
+gambit stats --format json january.pgn february.pgn.zst
+```
+
+Stats reports decompressed bytes, complete games, mainline plies, result
+distribution, and minimum/average/maximum game length. Recursive-variation
+moves are excluded. It is deliberately lexical and does not execute moves; use
+Doctor when chess-semantic validity matters.
+
+The hot path uses fixed-size counters over the fused incremental parser. Input
+is read once with a 64 KiB reusable buffer, memory does not grow with corpus
+size, and `.pgn.zst` is decompressed in-process. See the
+[Stats guide](https://diegoglozano.github.io/gambit/docs/statistics/) for metric
+semantics, JSON output, partial results, and HPC behavior.
 
 ## Gambit Doctor
 

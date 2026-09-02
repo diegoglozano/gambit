@@ -190,6 +190,49 @@ reported 1,753,088 bytes maximum RSS for Gambit, excluding the separate
 decompressor. The parser therefore keeps essentially the same bounded memory
 footprint as `GameReader` while eliminating its duplicate scan.
 
+## Gambit Stats result
+
+`gambit stats` exposes the fused incremental path as a product workflow. Its
+callback keeps only corpus counters: complete games, mainline plies, outcomes,
+and game-length extrema and sum. The `.pgn.zst` path also performs Zstandard
+decompression in the Gambit process.
+
+Build Stats and run it five times against both representations:
+
+```console
+cargo build --release -p gambit
+
+for run_number in 1 2 3 4 5; do
+  target/release/gambit stats --format json \
+    "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn"
+done
+
+for run_number in 1 2 3 4 5; do
+  target/release/gambit stats --format json \
+    "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn.zst"
+done
+```
+
+Both paths reproduced the baseline's 701,772,510 decompressed bytes, 810,463
+games, and 54,748,499 mainline SAN tokens. Stats additionally reported 410,370
+white wins, 372,707 black wins, 27,386 draws, and no unfinished games. Game
+lengths ranged from 0 to 344 plies with an average of 67.5521.
+
+| Input | Runs (MiB/s) | Median (MiB/s) | Maximum RSS |
+| --- | --- | ---: | ---: |
+| Decompressed file | 402.02, 443.30, 482.23, 489.95, 475.62 | **475.62** | 1,884,160 bytes |
+| In-process `.pgn.zst` | 359.79, 351.54, 362.47, 339.50, 340.05 | **351.54** | 10,911,744 bytes |
+
+The Stats timer includes file reads, event parsing, aggregation, and—in the
+compressed row—in-process decompression. The first decompressed-file run also
+includes a cold page-cache effect; all five values remain visible rather than
+discarding it. Maximum RSS comes from a separate `/usr/bin/time -l` run.
+
+The decompressed path retains a sub-2 MB resident footprint independent of the
+669 MiB corpus. Direct compressed input trades roughly 9 MB of additional
+resident memory and lower byte throughput for eliminating a separate
+decompression process and the 701 MB decompressed file.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row

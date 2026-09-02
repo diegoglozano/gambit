@@ -4,6 +4,7 @@
 
 ```text
 gambit doctor [OPTIONS] <PATH|->...
+gambit stats [OPTIONS] <PATH|->...
 gambit <PATH|->
 ```
 
@@ -25,7 +26,7 @@ position.
 Use `-` alone to read decompressed PGN from standard input. Standard input
 cannot be combined with any other input path.
 
-## Options
+## Doctor options
 
 | Option | Description |
 | --- | --- |
@@ -39,6 +40,19 @@ cannot be combined with any other input path.
 | `-V`, `--version` | Print the version. |
 
 `--quiet` cannot be combined with a machine-readable format.
+
+## Stats options
+
+| Option | Description |
+| --- | --- |
+| `--format <human|json>` | Select the report format. The default is `human`. |
+| `--lenient` | Allow a final game without an outcome marker and count it as unfinished. |
+| `-h`, `--help` | Print help. |
+
+Stats accepts the same file, directory, compressed, and standard-input forms as
+Doctor. It performs structural parsing without executing chess moves. See
+[Corpus statistics](statistics.md) for metric definitions, JSON shape, and HPC
+behavior.
 
 ## Validation modes
 

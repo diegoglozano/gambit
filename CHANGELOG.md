@@ -4,6 +4,20 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added `gambit stats` for single-pass corpus summaries: decompressed bytes,
+  complete games, mainline plies, result distribution, and game-length range
+  and average.
+- Added human and JSON Stats reports for files, recursive directories,
+  `.pgn.zst` streams, and standard input, including aggregate batch metrics and
+  partial counters when an input is malformed.
+
+### Changed
+
+- Exposed incremental-parser I/O statistics after an error so streaming callers
+  can report partial progress without a second pass.
+
 ## [0.3.0] - 2026-09-02
 
 ### Added
