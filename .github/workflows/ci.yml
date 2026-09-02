@@ -21,14 +21,26 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.1
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run tests
         run: cargo test --workspace
+
+  minimum-rust:
+    name: Minimum Rust 1.85
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust 1.85
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          rustup default 1.85.0
+      - name: Check the workspace
+        run: cargo check --workspace --all-targets
 
   cli-platforms:
     name: CLI tests (${{ matrix.os }})
@@ -43,7 +55,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install 1.93.1 --profile minimal
+          rustup default 1.93.1
       - name: Run CLI tests
         run: cargo test -p gambit --test cli
