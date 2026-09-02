@@ -722,10 +722,36 @@ four-worker run used 14,228 KiB maximum RSS. The smaller bounded-path gain is
 consistent with the serial framer and queue becoming a larger share of total
 time as worker-local semantic validation gets faster.
 
-The next isolated semantic candidate is retaining the captured piece type in
-the unused high bits of `Move`. SAN resolution already discovers that type, so
-carrying it forward could remove the remaining captured-piece bitboard scan in
-`play_unchecked` without widening the 4-byte move representation.
+## Captured-piece metadata experiment on Apple M3
+
+The next isolated candidate stored the captured piece type in three unused high
+bits of `Move`. SAN resolution already discovers that type, so annotated
+captures could bypass the remaining captured-piece bitboard scan in
+`play_unchecked` without widening the 4-byte move representation. Zero retained
+the metadata-free fallback for generated and default moves.
+
+A broad variant also discovered and stored capture types during generic move
+generation. It improved capture-heavy Kiwipete perft by 4.14%, but regressed
+initial-position perft by 3.41%; its fused semantic median improved by only
+0.57%. Moving the bitboard search into generation was therefore workload
+dependent rather than a general reduction.
+
+The final narrowed candidate annotated only SAN captures and en passant, where
+the type was already available without another search. Five paired foreground
+runs against merged `main` at `6602e08` produced:
+
+| Path | Baseline runs | Baseline median | Candidate runs | Candidate median | Change |
+| --- | --- | ---: | --- | ---: | ---: |
+| Initial perft, depth 6 (Mnodes/s) | 73.62, 73.28, 73.21, 73.55, 73.63 | **73.55** | 70.07, 71.84, 71.73, 71.80, 71.87 | **71.80** | **-2.38%** |
+| Kiwipete perft, depth 5 (Mnodes/s) | 70.78, 70.74, 70.85, 66.89, 70.01 | **70.74** | 70.63, 70.69, 70.52, 70.62, 70.36 | **70.62** | **-0.17%** |
+| Fused semantic (MiB/s) | 142.28, 142.76, 145.09, 146.90, 146.52 | **145.09** | 143.64, 142.30, 145.35, 144.49, 144.15 | **144.15** | **-0.65%** |
+
+Every semantic run reproduced exactly 810,463 games and 54,748,499 legal SAN
+moves, while perft reproduced the canonical node totals. The extra decode and
+fallback branch outweighed the saved scan at this corpus's capture frequency,
+so the experiment was removed. Captured-piece metadata should not be revisited
+without a separate SAN-specialized application path or a deployment profile
+showing capture lookup as a material hotspot.
 
 Before changing I/O backends, profile on the deployment platform. `io_uring` is
 Linux-only and is unlikely to improve this cached, sequential workload unless
