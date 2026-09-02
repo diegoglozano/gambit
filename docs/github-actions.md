@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/diegoglozano/gambit/releases/latest/download/gambit-installer.sh | sh
+            https://github.com/diegoglozano/gambit/releases/download/v0.3.0/gambit-installer.sh | sh
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Validate PGN corpus
         run: gambit doctor --keep-going --format github games/
@@ -47,9 +47,9 @@ Use repository-relative input paths so GitHub can link annotations back to the
 checked-out files. If another step downloads or generates the corpus, point
 Doctor at that step's output directory instead.
 
-The installer URL above follows the latest stable release. For reproducible
-builds, replace `latest` with a release tag such as `v0.3.0` after choosing the
-version you want to pin.
+The workflow pins Gambit v0.3.0 so its behavior cannot change unexpectedly.
+Update the tag deliberately when adopting a newer release, or use `latest` in
+the URL if automatic upgrades are preferable.
 
 The output follows GitHub's
 [workflow-command annotation syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#setting-an-error-message).
