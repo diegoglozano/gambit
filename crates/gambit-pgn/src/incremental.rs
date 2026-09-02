@@ -205,6 +205,15 @@ impl<R: Read> IncrementalParser<R> {
         }
     }
 
+    /// Returns the I/O statistics observed so far.
+    ///
+    /// Unlike the value returned by [`Self::parse`], this remains available
+    /// after a parse or I/O error so callers can report partial progress.
+    #[must_use]
+    pub const fn stats(&self) -> StreamStats {
+        self.stats
+    }
+
     /// Returns the underlying reader.
     #[must_use]
     pub fn into_inner(self) -> R {
@@ -918,6 +927,15 @@ mod tests {
                 assert!(matches!(error, StreamParseError::Parse(actual) if actual == expected));
             }
         }
+    }
+
+    #[test]
+    fn exposes_bytes_read_after_a_parse_error() {
+        let input = b"1. e4";
+        let mut parser = IncrementalParser::new(&input[..]);
+
+        assert!(parser.parse(|_| {}).is_err());
+        assert_eq!(parser.stats().bytes_read, input.len() as u64);
     }
 
     #[test]

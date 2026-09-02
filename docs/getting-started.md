@@ -19,6 +19,19 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/diegoglozano/gambi
 Prebuilt archives and checksums are also available on the
 [install page](https://diegoglozano.github.io/gambit/artifacts/).
 
+## Summarize a corpus
+
+Use Stats for a fast structural inventory before deeper validation or analysis:
+
+```console
+gambit stats ./corpus
+gambit stats --format json games.pgn.zst
+```
+
+Stats counts complete games, mainline plies, outcomes, and game lengths in one
+bounded-memory pass. See [Corpus statistics](statistics.md) for exact metric
+semantics and performance behavior.
+
 ## Validate a file
 
 ```console
