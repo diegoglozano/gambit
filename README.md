@@ -34,11 +34,16 @@ Use `-` alone to read decompressed PGN from standard input. Standard input
 cannot be mixed with file paths in the same invocation.
 
 Doctor reports malformed PGN, invalid FEN starting positions, malformed or
-illegal SAN, ambiguous moves, and incorrect check or mate suffixes. Diagnostics
-include the game number and identifying headers, ply, byte offset, line, column,
-and a source-line excerpt. Lines and byte columns are one-based. Doctor exits
-with status 0 for valid input, 1 for invalid chess data, 2 for command-line
-usage errors, and 3 for input or reporting failures.
+illegal SAN, ambiguous moves, and incorrect check or mate suffixes. Semantic
+mode also verifies that `Result` matches the movetext outcome, `SetUp` and `FEN`
+appear together correctly, and explicit move numbers match the live position
+and side to move. These cross-field checks include recursive variations and FEN
+starts; `--syntax-only` intentionally skips them.
+
+Diagnostics include the game number and identifying headers, ply, byte offset,
+line, column, and a source-line excerpt. Lines and byte columns are one-based.
+Doctor exits with status 0 for valid input, 1 for invalid chess data, 2 for
+command-line usage errors, and 3 for input or reporting failures.
 
 By default Doctor stops at the first error, preserving its fastest streaming
 path. Use `--keep-going` to scan later outcome-delimited games (up to 100
