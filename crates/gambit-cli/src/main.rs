@@ -13,13 +13,14 @@ use doctor::{
 use serde::Serialize;
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl>  Select output format [default: human]\n      --syntax-only                Check PGN structure without executing moves\n      --lenient                    Allow a final game without an outcome marker\n      --keep-going                 Continue after errors [default limit: 100]\n      --max-errors <N>             Continue until N errors have been reported per input\n  -q, --quiet                      Print nothing when the input is valid\n  -h, --help                       Print help\n  -V, --version                    Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
     Human,
     Json,
     Jsonl,
+    Github,
 }
 
 #[derive(Debug)]
@@ -174,6 +175,7 @@ fn parse_format(value: &std::ffi::OsStr) -> Result<OutputFormat, String> {
         Some("human") => Ok(OutputFormat::Human),
         Some("json") => Ok(OutputFormat::Json),
         Some("jsonl") => Ok(OutputFormat::Jsonl),
+        Some("github") => Ok(OutputFormat::Github),
         Some(value) => Err(format!("unknown output format: {value}")),
         None => Err(String::from("output format must be valid UTF-8")),
     }
@@ -431,6 +433,7 @@ fn render_reports(reports: &[Report], format: OutputFormat, quiet: bool) -> io::
             writeln!(output)
         }
         OutputFormat::Jsonl => render_jsonl_batch(reports),
+        OutputFormat::Github => render_github(reports),
     }
 }
 
@@ -442,6 +445,7 @@ fn render_report(report: &Report, format: OutputFormat, quiet: bool) -> io::Resu
             writeln!(output)
         }
         OutputFormat::Jsonl => render_jsonl(report),
+        OutputFormat::Github => render_github(std::slice::from_ref(report)),
         OutputFormat::Human if report.status == ReportStatus::Valid && quiet => Ok(()),
         OutputFormat::Human if report.status == ReportStatus::Valid => {
             let mut output = io::stdout().lock();
@@ -484,6 +488,135 @@ fn render_report(report: &Report, format: OutputFormat, quiet: bool) -> io::Resu
             )
         }
     }
+}
+
+fn render_github(reports: &[Report]) -> io::Result<()> {
+    let mut output = io::stdout().lock();
+    for report in reports {
+        for diagnostic in report.diagnostics() {
+            write_github_annotation(&mut output, &report.source, diagnostic)?;
+        }
+    }
+
+    let batch = BatchReport::new(reports);
+    let limit_reached = reports.iter().any(|report| report.error_limit_reached);
+    let limit_note = if limit_reached {
+        "; error limit reached"
+    } else {
+        ""
+    };
+    if let [report] = reports {
+        writeln!(
+            output,
+            "Gambit Doctor: {} - {}; {} diagnostic{}, {} complete game{}, {} move{}{}",
+            status_label(report.status),
+            single_line(&report.source),
+            report.diagnostic_count,
+            plural_suffix_usize(report.diagnostic_count),
+            report.games,
+            plural_suffix_u64(report.games),
+            report.moves,
+            plural_suffix_u64(report.moves),
+            limit_note,
+        )
+    } else {
+        writeln!(
+            output,
+            "Gambit Doctor: {} - {} input{}; {} diagnostic{}, {} complete game{}, {} move{}{}",
+            status_label(batch.status),
+            batch.input_count,
+            plural_suffix_usize(batch.input_count),
+            batch.diagnostic_count,
+            plural_suffix_usize(batch.diagnostic_count),
+            batch.games,
+            plural_suffix_u64(batch.games),
+            batch.moves,
+            plural_suffix_u64(batch.moves),
+            limit_note,
+        )
+    }
+}
+
+fn write_github_annotation(
+    output: &mut impl Write,
+    source: &str,
+    diagnostic: &Diagnostic,
+) -> io::Result<()> {
+    write!(output, "::error ")?;
+    if source != "stdin" {
+        write!(output, "file={},", escape_github_property(source))?;
+        if let Some(line) = diagnostic.line {
+            write!(output, "line={line},")?;
+            if let Some(column) = diagnostic.column {
+                write!(output, "col={column},")?;
+            }
+        }
+    }
+    let title = format!(
+        "Gambit Doctor: {}",
+        diagnostic.category.label().replace('_', " ")
+    );
+    let message = github_annotation_message(diagnostic);
+    writeln!(
+        output,
+        "title={}::{}",
+        escape_github_property(&title),
+        escape_github_data(&message)
+    )
+}
+
+fn github_annotation_message(diagnostic: &Diagnostic) -> String {
+    let mut location = Vec::new();
+    if let Some(game) = diagnostic.game {
+        location.push(format!("game {game}"));
+    }
+    if let Some(ply) = diagnostic.ply {
+        location.push(format!("ply {ply}"));
+    }
+    let mut message = if location.is_empty() {
+        diagnostic.message.clone()
+    } else {
+        format!("{}: {}", location.join(", "), diagnostic.message)
+    };
+    if let Some(context) = &diagnostic.context {
+        message.push_str(" (");
+        message.push_str(context);
+        message.push(')');
+    }
+    message
+}
+
+fn escape_github_data(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+fn escape_github_property(value: &str) -> String {
+    escape_github_data(value)
+        .replace(':', "%3A")
+        .replace(',', "%2C")
+}
+
+fn single_line(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
+}
+
+const fn status_label(status: ReportStatus) -> &'static str {
+    match status {
+        ReportStatus::Valid => "valid",
+        ReportStatus::Invalid => "invalid",
+        ReportStatus::Error => "error",
+    }
+}
+
+const fn plural_suffix_usize(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+const fn plural_suffix_u64(count: u64) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
 
 #[derive(Serialize)]
@@ -694,6 +827,25 @@ mod tests {
         assert_eq!(
             command.paths,
             [OsString::from("one.pgn"), OsString::from("two.pgn.zst")]
+        );
+    }
+
+    #[test]
+    fn parses_github_output_format() {
+        let Action::Doctor(command) =
+            parse_arguments(args(&["doctor", "--format=github", "games.pgn"])).unwrap()
+        else {
+            panic!("expected doctor action");
+        };
+        assert_eq!(command.format, OutputFormat::Github);
+    }
+
+    #[test]
+    fn escapes_github_workflow_commands() {
+        assert_eq!(escape_github_data("50%\r\nnext"), "50%25%0D%0Anext");
+        assert_eq!(
+            escape_github_property("C:\\games,2026.pgn"),
+            "C%3A\\games%2C2026.pgn"
         );
     }
 

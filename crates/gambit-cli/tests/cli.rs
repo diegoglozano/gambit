@@ -88,7 +88,7 @@ fn help_describes_doctor() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("gambit doctor"));
-    assert!(stdout.contains("--format <human|json|jsonl>"));
+    assert!(stdout.contains("--format <human|json|jsonl|github>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));
     assert!(stdout.contains("Directories are scanned recursively"));
@@ -137,6 +137,41 @@ fn emits_a_json_success_report() {
     assert_eq!(report["games"], 1);
     assert_eq!(report["moves"], 2);
     assert!(report["diagnostic"].is_null());
+}
+
+#[test]
+fn github_format_emits_an_annotation_and_summary() {
+    let file = TestFile::new("bad,name.pgn", b"1. e5 *\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=github"])
+        .arg(file.path())
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with("::error file="));
+    assert!(lines[0].contains("%2C"));
+    assert!(lines[0].contains(
+        ",line=1,col=4,title=Gambit Doctor%3A illegal move::game 1, ply 1: SAN does not identify a legal move (e5)"
+    ));
+    assert!(lines[1].starts_with("Gambit Doctor: invalid - "));
+    assert!(lines[1].ends_with("; 1 diagnostic, 0 complete games, 0 moves"));
+}
+
+#[test]
+fn github_format_summarizes_valid_input_without_an_annotation() {
+    let output = run_with_stdin(&["doctor", "--format=github", "-"], b"1. e4 *\n");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        output.stdout,
+        b"Gambit Doctor: valid - stdin; 0 diagnostics, 1 complete game, 1 move\n"
+    );
 }
 
 #[test]

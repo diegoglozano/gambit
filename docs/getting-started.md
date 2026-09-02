@@ -63,6 +63,12 @@ curl -sS https://example.com/game.pgn | gambit doctor -
 
 Standard input cannot be mixed with file paths in the same invocation.
 
+## Run Doctor in CI
+
+The `github` output format turns diagnostics into annotations on files and
+lines in a pull request while retaining Doctor's normal failure exit status.
+See [GitHub Actions](github-actions.md) for a complete workflow.
+
 ## Find more than the first problem
 
 The default stops at the first error. `--keep-going` scans later

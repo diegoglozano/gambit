@@ -29,7 +29,7 @@ cannot be combined with any other input path.
 
 | Option | Description |
 | --- | --- |
-| `--format <human|json|jsonl>` | Select the report format. The default is `human`. |
+| `--format <human|json|jsonl|github>` | Select the report format. The default is `human`. |
 | `--syntax-only` | Parse PGN structure without executing moves. |
 | `--lenient` | Allow a final game without an outcome marker. |
 | `--keep-going` | Continue after errors, up to 100 per input. |
@@ -71,6 +71,19 @@ suitable for incremental consumers:
 ```console
 gambit doctor --keep-going --format jsonl games.pgn.zst
 ```
+
+The `github` format writes one GitHub Actions `error` workflow command per
+diagnostic, including the source path, line, and column when available. It ends
+with one plain-text summary and retains the standard exit status, so invalid
+PGN fails the workflow step automatically:
+
+```console
+gambit doctor --keep-going --format github ./corpus
+```
+
+Workflow-command data and properties are escaped according to GitHub's command
+protocol. Outside GitHub Actions the command records are printed literally;
+use `human`, `json`, or `jsonl` for other consumers.
 
 ## Diagnostic locations
 
