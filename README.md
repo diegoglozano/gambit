@@ -4,6 +4,29 @@ Gambit is the beginning of a high-performance chess analysis stack in Rust. It
 currently contains a dependency-free PGN ingestion layer and a compact semantic
 chess core.
 
+## Install the command-line validator
+
+Release archives and installers are built for Linux, macOS, and Windows. On
+Linux or macOS, install the latest release with:
+
+```console
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/diegoglozano/gambit/releases/latest/download/gambit-installer.sh | sh
+```
+
+On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/diegoglozano/gambit/releases/latest/download/gambit-installer.ps1 | iex"
+```
+
+Validate a PGN file, or stream decompressed PGN through standard input:
+
+```console
+gambit games.pgn
+zstdcat games.pgn.zst | gambit -
+```
+
 ## Parser design
 
 - Single-pass pull parser over `&[u8]`

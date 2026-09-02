@@ -1,0 +1,23 @@
+[package]
+name = "gambit"
+version = "0.1.0"
+description = "Validate the syntax and chess semantics of PGN files"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[package.metadata.dist]
+dist = true
+
+[[bin]]
+name = "gambit"
+path = "src/main.rs"
+
+[dependencies]
+gambit-chess = { path = "../gambit-chess" }
+gambit-pgn = { path = "../gambit-pgn" }
+
+[lints]
+workspace = true
