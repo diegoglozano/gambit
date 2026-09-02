@@ -3,10 +3,10 @@ use std::io::Read;
 use std::rc::Rc;
 use std::time::Instant;
 
-use gambit_chess::{Position, SanErrorKind};
+use gambit_chess::{Color, Position, SanErrorKind};
 use gambit_pgn::{
-    Event, FrameError, GameReader, IncrementalParser, IncrementalParserOptions, ParseError, Parser,
-    ParserOptions, StreamParseError, Tag,
+    Event, FrameError, GameReader, IncrementalParser, IncrementalParserOptions, Outcome,
+    ParseError, Parser, ParserOptions, StreamParseError, Tag, Token,
 };
 use serde::Serialize;
 
@@ -51,6 +51,9 @@ pub(crate) enum DiagnosticCategory {
     IllegalMove,
     AmbiguousMove,
     InvalidCheckSuffix,
+    InconsistentResult,
+    InconsistentSetup,
+    IncorrectMoveNumber,
     Input,
     Limit,
 }
@@ -64,6 +67,9 @@ impl DiagnosticCategory {
             Self::IllegalMove => "illegal_move",
             Self::AmbiguousMove => "ambiguous_move",
             Self::InvalidCheckSuffix => "invalid_check_suffix",
+            Self::InconsistentResult => "inconsistent_result",
+            Self::InconsistentSetup => "inconsistent_setup",
+            Self::IncorrectMoveNumber => "incorrect_move_number",
             Self::Input => "input",
             Self::Limit => "limit",
         }
@@ -776,13 +782,20 @@ struct Validator {
     position: Position,
     before_last_move: Position,
     variation_stack: Vec<(Position, Position)>,
-    fen: Option<(Vec<u8>, usize)>,
+    fen: Option<TagValue>,
+    setup: Option<TagValue>,
+    declared_result: Option<TagValue>,
     games: u64,
     moves: u64,
     game_ply: u64,
     headers: GameHeaders,
     error: Option<Diagnostic>,
     offset_base: u64,
+}
+
+struct TagValue {
+    value: Vec<u8>,
+    offset: usize,
 }
 
 impl Validator {
@@ -799,6 +812,8 @@ impl Validator {
             before_last_move: Position::initial(),
             variation_stack: Vec::new(),
             fen: None,
+            setup: None,
+            declared_result: None,
             games: completed_games,
             moves: 0,
             game_ply: 0,
@@ -813,77 +828,15 @@ impl Validator {
             return;
         }
         match event {
-            Event::GameStart { .. } => {
-                self.position = Position::initial();
-                self.before_last_move = self.position;
-                self.variation_stack.clear();
-                self.fen = None;
-                self.game_ply = 0;
-                self.headers = GameHeaders::default();
-            }
-            Event::Tag(tag) => {
-                self.record_tag(tag);
-            }
+            Event::GameStart { .. } => self.start_game(),
+            Event::Tag(tag) => self.record_tag(tag),
             Event::MovetextStart { .. } if self.mode == ValidationMode::Semantic => {
-                if let Some((fen, offset)) = &self.fen {
-                    match Position::from_fen(fen) {
-                        Ok(position) => self.position = position,
-                        Err(error) => {
-                            self.error = Some(located_diagnostic(
-                                DiagnosticDetails {
-                                    category: DiagnosticCategory::InvalidFen,
-                                    game: self.games + 1,
-                                    ply: Some(0),
-                                    offset: self.offset_base + *offset as u64,
-                                    context: Some(String::from_utf8_lossy(fen).into_owned()),
-                                    message: error.to_string(),
-                                },
-                                &self.headers,
-                                &self.tracker.borrow(),
-                            ));
-                            return;
-                        }
-                    }
-                }
-                self.before_last_move = self.position;
+                self.start_movetext();
             }
-            Event::San(token) => {
-                self.game_ply += 1;
-                if self.mode == ValidationMode::Syntax {
-                    self.moves += 1;
-                    return;
-                }
-                self.before_last_move = self.position;
-                match self.position.play_san(token.as_bytes()) {
-                    Ok(_) => self.moves += 1,
-                    Err(error) => {
-                        let category = match error.kind {
-                            SanErrorKind::Empty | SanErrorKind::InvalidSyntax => {
-                                DiagnosticCategory::InvalidSan
-                            }
-                            SanErrorKind::IllegalMove => DiagnosticCategory::IllegalMove,
-                            SanErrorKind::AmbiguousMove => DiagnosticCategory::AmbiguousMove,
-                            SanErrorKind::InvalidCheckSuffix => {
-                                DiagnosticCategory::InvalidCheckSuffix
-                            }
-                        };
-                        self.error = Some(located_diagnostic(
-                            DiagnosticDetails {
-                                category,
-                                game: self.games + 1,
-                                ply: Some(self.game_ply),
-                                offset: self.offset_base + token.span().start as u64,
-                                context: Some(
-                                    String::from_utf8_lossy(token.as_bytes()).into_owned(),
-                                ),
-                                message: error.to_string(),
-                            },
-                            &self.headers,
-                            &self.tracker.borrow(),
-                        ));
-                    }
-                }
+            Event::MoveNumber { number, dots, span } if self.mode == ValidationMode::Semantic => {
+                self.validate_move_number(number, dots, span.start);
             }
+            Event::San(token) => self.validate_san(token),
             Event::VariationStart(_) if self.mode == ValidationMode::Semantic => {
                 self.variation_stack
                     .push((self.position, self.before_last_move));
@@ -895,6 +848,11 @@ impl Validator {
                 if let Some((position, before_last_move)) = self.variation_stack.pop() {
                     self.position = position;
                     self.before_last_move = before_last_move;
+                }
+            }
+            Event::Outcome { outcome, span } if self.mode == ValidationMode::Semantic => {
+                if self.variation_stack.is_empty() {
+                    self.validate_outcome(outcome, span.start);
                 }
             }
             Event::GameEnd { .. } => {
@@ -911,11 +869,212 @@ impl Validator {
         }
     }
 
+    fn start_game(&mut self) {
+        self.position = Position::initial();
+        self.before_last_move = self.position;
+        self.variation_stack.clear();
+        self.fen = None;
+        self.setup = None;
+        self.declared_result = None;
+        self.game_ply = 0;
+        self.headers = GameHeaders::default();
+    }
+
+    fn start_movetext(&mut self) {
+        if let Some(fen) = &self.fen {
+            match Position::from_fen(&fen.value) {
+                Ok(position) => self.position = position,
+                Err(error) => {
+                    self.error = Some(located_diagnostic(
+                        DiagnosticDetails {
+                            category: DiagnosticCategory::InvalidFen,
+                            game: self.games + 1,
+                            ply: Some(0),
+                            offset: self.offset_base + fen.offset as u64,
+                            context: Some(String::from_utf8_lossy(&fen.value).into_owned()),
+                            message: error.to_string(),
+                        },
+                        &self.headers,
+                        &self.tracker.borrow(),
+                    ));
+                    return;
+                }
+            }
+        }
+        if let Some(diagnostic) = self.validate_metadata() {
+            self.error = Some(diagnostic);
+            return;
+        }
+        self.before_last_move = self.position;
+    }
+
+    fn validate_san(&mut self, token: Token<'_>) {
+        self.game_ply += 1;
+        if self.mode == ValidationMode::Syntax {
+            self.moves += 1;
+            return;
+        }
+        self.before_last_move = self.position;
+        match self.position.play_san(token.as_bytes()) {
+            Ok(_) => self.moves += 1,
+            Err(error) => {
+                let category = match error.kind {
+                    SanErrorKind::Empty | SanErrorKind::InvalidSyntax => {
+                        DiagnosticCategory::InvalidSan
+                    }
+                    SanErrorKind::IllegalMove => DiagnosticCategory::IllegalMove,
+                    SanErrorKind::AmbiguousMove => DiagnosticCategory::AmbiguousMove,
+                    SanErrorKind::InvalidCheckSuffix => DiagnosticCategory::InvalidCheckSuffix,
+                };
+                self.error = Some(located_diagnostic(
+                    DiagnosticDetails {
+                        category,
+                        game: self.games + 1,
+                        ply: Some(self.game_ply),
+                        offset: self.offset_base + token.span().start as u64,
+                        context: Some(String::from_utf8_lossy(token.as_bytes()).into_owned()),
+                        message: error.to_string(),
+                    },
+                    &self.headers,
+                    &self.tracker.borrow(),
+                ));
+            }
+        }
+    }
+
+    fn validate_metadata(&self) -> Option<Diagnostic> {
+        let setup_issue = match (&self.setup, &self.fen) {
+            (Some(setup), _) if !matches!(setup.value.as_slice(), b"0" | b"1") => Some((
+                setup,
+                format!(
+                    "SetUp tag must be \"0\" or \"1\", found {:?}",
+                    String::from_utf8_lossy(&setup.value)
+                ),
+            )),
+            (Some(setup), None) if setup.value == b"1" => Some((
+                setup,
+                String::from("SetUp tag is \"1\" but the game has no FEN tag"),
+            )),
+            (Some(setup), Some(_)) if setup.value != b"1" => Some((
+                setup,
+                String::from("a game with a FEN tag must have SetUp set to \"1\""),
+            )),
+            (None, Some(fen)) => Some((
+                fen,
+                String::from("a game with a FEN tag must also have SetUp set to \"1\""),
+            )),
+            _ => None,
+        };
+        if let Some((tag, message)) = setup_issue {
+            return Some(self.tag_diagnostic(DiagnosticCategory::InconsistentSetup, tag, message));
+        }
+
+        self.declared_result.as_ref().and_then(|result| {
+            (!is_result_value(&result.value)).then(|| {
+                self.tag_diagnostic(
+                    DiagnosticCategory::InconsistentResult,
+                    result,
+                    format!(
+                        "Result tag must be one of \"1-0\", \"0-1\", \"1/2-1/2\", or \"*\", found {:?}",
+                        String::from_utf8_lossy(&result.value)
+                    ),
+                )
+            })
+        })
+    }
+
+    fn validate_move_number(&mut self, number: u32, dots: u8, offset: usize) {
+        let expected_number = u32::from(self.position.fullmove_number());
+        let (expected_dots, side) = match self.position.side_to_move() {
+            Color::White => (1, "White"),
+            Color::Black => (3, "Black"),
+        };
+        if number == expected_number && dots == expected_dots {
+            return;
+        }
+        let actual = format!("{number}{}", ".".repeat(usize::from(dots)));
+        let expected = format!(
+            "{expected_number}{}",
+            ".".repeat(usize::from(expected_dots))
+        );
+        self.error = Some(located_diagnostic(
+            DiagnosticDetails {
+                category: DiagnosticCategory::IncorrectMoveNumber,
+                game: self.games + 1,
+                ply: Some(self.game_ply + 1),
+                offset: self.offset_base + offset as u64,
+                context: Some(actual.clone()),
+                message: format!(
+                    "move number {actual} does not match the position; expected {expected} for {side} to move"
+                ),
+            },
+            &self.headers,
+            &self.tracker.borrow(),
+        ));
+    }
+
+    fn validate_outcome(&mut self, outcome: Outcome, offset: usize) {
+        let Some(result) = &self.declared_result else {
+            return;
+        };
+        let marker = outcome_value(outcome);
+        if result.value == marker {
+            return;
+        }
+        let declared = String::from_utf8_lossy(&result.value);
+        let marker = String::from_utf8_lossy(marker);
+        self.error = Some(located_diagnostic(
+            DiagnosticDetails {
+                category: DiagnosticCategory::InconsistentResult,
+                game: self.games + 1,
+                ply: None,
+                offset: self.offset_base + offset as u64,
+                context: Some(format!("Result={declared:?}, movetext={marker:?}")),
+                message: format!(
+                    "Result tag {declared:?} does not match movetext outcome {marker:?}"
+                ),
+            },
+            &self.headers,
+            &self.tracker.borrow(),
+        ));
+    }
+
+    fn tag_diagnostic(
+        &self,
+        category: DiagnosticCategory,
+        tag: &TagValue,
+        message: String,
+    ) -> Diagnostic {
+        located_diagnostic(
+            DiagnosticDetails {
+                category,
+                game: self.games + 1,
+                ply: Some(0),
+                offset: self.offset_base + tag.offset as u64,
+                context: Some(String::from_utf8_lossy(&tag.value).into_owned()),
+                message,
+            },
+            &self.headers,
+            &self.tracker.borrow(),
+        )
+    }
+
     fn record_tag(&mut self, tag: Tag<'_>) {
         let name = tag.name();
-        if name == b"FEN" && self.mode == ValidationMode::Semantic {
-            self.fen = Some((tag.value().into_owned(), tag.span().start));
-            return;
+        if self.mode == ValidationMode::Semantic {
+            let destination = match name {
+                b"FEN" => Some(&mut self.fen),
+                b"SetUp" => Some(&mut self.setup),
+                b"Result" => Some(&mut self.declared_result),
+                _ => None,
+            };
+            if let Some(destination) = destination {
+                *destination = Some(TagValue {
+                    value: tag.value().into_owned(),
+                    offset: tag.span().start,
+                });
+                return;
+            }
         }
         let destination = match name {
             b"Event" => &mut self.headers.event,
@@ -927,6 +1086,19 @@ impl Validator {
         };
         let value = tag.value();
         *destination = Some(String::from_utf8_lossy(&value).into_owned());
+    }
+}
+
+fn is_result_value(value: &[u8]) -> bool {
+    matches!(value, b"1-0" | b"0-1" | b"1/2-1/2" | b"*")
+}
+
+const fn outcome_value(outcome: Outcome) -> &'static [u8] {
+    match outcome {
+        Outcome::WhiteWins => b"1-0",
+        Outcome::BlackWins => b"0-1",
+        Outcome::Draw => b"1/2-1/2",
+        Outcome::Unknown => b"*",
     }
 }
 
@@ -1018,5 +1190,99 @@ mod tests {
         assert_eq!(report.games, 2);
         assert_eq!(report.diagnostic_count, 2);
         assert!(report.error_limit_reached);
+    }
+
+    #[test]
+    fn rejects_a_result_that_disagrees_with_movetext() {
+        let report = inspect_bytes(
+            b"[Event \"Example\"]\n[Result \"1-0\"]\n\n1. e4 0-1\n",
+            ValidationMode::Semantic,
+        );
+        let diagnostic = report.diagnostic.unwrap();
+        assert_eq!(diagnostic.category, DiagnosticCategory::InconsistentResult);
+        assert_eq!(diagnostic.game, Some(1));
+        assert_eq!(diagnostic.line, Some(4));
+        assert_eq!(
+            diagnostic.context.as_deref(),
+            Some("Result=\"1-0\", movetext=\"0-1\"")
+        );
+    }
+
+    #[test]
+    fn rejects_an_unknown_result_tag_value() {
+        let report = inspect_bytes(b"[Result \"win\"]\n\n*\n", ValidationMode::Semantic);
+        let diagnostic = report.diagnostic.unwrap();
+        assert_eq!(diagnostic.category, DiagnosticCategory::InconsistentResult);
+        assert_eq!(diagnostic.line, Some(1));
+        assert_eq!(diagnostic.context.as_deref(), Some("win"));
+    }
+
+    #[test]
+    fn requires_setup_for_a_fen_start() {
+        let report = inspect_bytes(
+            b"[FEN \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\"]\n\n*\n",
+            ValidationMode::Semantic,
+        );
+        assert_eq!(
+            report.diagnostic.unwrap().category,
+            DiagnosticCategory::InconsistentSetup
+        );
+    }
+
+    #[test]
+    fn requires_fen_when_setup_is_enabled() {
+        let report = inspect_bytes(b"[SetUp \"1\"]\n\n*\n", ValidationMode::Semantic);
+        assert_eq!(
+            report.diagnostic.unwrap().category,
+            DiagnosticCategory::InconsistentSetup
+        );
+    }
+
+    #[test]
+    fn validates_move_numbers_against_the_position() {
+        let report = inspect_bytes(b"1. e4 e5 3. Nf3 *\n", ValidationMode::Semantic);
+        let diagnostic = report.diagnostic.unwrap();
+        assert_eq!(diagnostic.category, DiagnosticCategory::IncorrectMoveNumber);
+        assert_eq!(diagnostic.ply, Some(3));
+        assert_eq!(diagnostic.context.as_deref(), Some("3."));
+        assert!(diagnostic.message.contains("expected 2."));
+    }
+
+    #[test]
+    fn validates_move_number_dots_against_the_side_to_move() {
+        let report = inspect_bytes(b"1... e4 *\n", ValidationMode::Semantic);
+        let diagnostic = report.diagnostic.unwrap();
+        assert_eq!(diagnostic.category, DiagnosticCategory::IncorrectMoveNumber);
+        assert!(diagnostic.message.contains("expected 1. for White"));
+    }
+
+    #[test]
+    fn fen_move_numbers_and_variations_follow_live_positions() {
+        let fen_game = inspect_bytes(
+            b"[SetUp \"1\"]\n[FEN \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 42\"]\n\n42... e5 *\n",
+            ValidationMode::Semantic,
+        );
+        assert_eq!(fen_game.status, ReportStatus::Valid);
+
+        let variation = inspect_bytes(b"1. e4 e5 (1... c5) 2. Nf3 *\n", ValidationMode::Semantic);
+        assert_eq!(variation.status, ReportStatus::Valid);
+    }
+
+    #[test]
+    fn result_check_ignores_outcomes_inside_variations() {
+        let report = inspect_bytes(
+            b"[Result \"1-0\"]\n\n1. e4 e5 (1... c5 *) 2. Nf3 1-0\n",
+            ValidationMode::Semantic,
+        );
+        assert_eq!(report.status, ReportStatus::Valid);
+    }
+
+    #[test]
+    fn syntax_mode_ignores_cross_field_consistency() {
+        let report = inspect_bytes(
+            b"[SetUp \"1\"]\n[Result \"1-0\"]\n\n9... e5 0-1\n",
+            ValidationMode::Syntax,
+        );
+        assert_eq!(report.status, ReportStatus::Valid);
     }
 }

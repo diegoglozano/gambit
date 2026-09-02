@@ -392,3 +392,24 @@ fn multi_file_jsonl_ends_with_a_batch_summary() {
     assert_eq!(records[2]["input_count"], 2);
     assert_eq!(records[2]["games"], 2);
 }
+
+#[test]
+fn reports_cross_field_consistency_errors() {
+    let output = run_with_stdin(
+        &["doctor", "--keep-going", "--format=json", "-"],
+        b"[Result \"1-0\"]\n\n*\n\n[SetUp \"1\"]\n\n*\n\n1. e4 e5 4. Nf3 *\n",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["diagnostic_count"], 3);
+    assert_eq!(report["diagnostic"]["category"], "inconsistent_result");
+    assert_eq!(
+        report["additional_diagnostics"][0]["category"],
+        "inconsistent_setup"
+    );
+    assert_eq!(
+        report["additional_diagnostics"][1]["category"],
+        "incorrect_move_number"
+    );
+    assert_eq!(report["additional_diagnostics"][1]["context"], "4.");
+}
