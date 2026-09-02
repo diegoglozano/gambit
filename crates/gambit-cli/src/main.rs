@@ -750,10 +750,10 @@ fn render_stats_diagnostic(report: &StatsReport, diagnostic: &StatsDiagnostic) -
         report.source,
         diagnostic.category.label()
     )?;
-    if diagnostic.category != stats::StatsDiagnosticCategory::Syntax
-        && let Some(byte) = diagnostic.byte
-    {
-        write!(output, " at byte {byte}")?;
+    if diagnostic.category != stats::StatsDiagnosticCategory::Syntax {
+        if let Some(byte) = diagnostic.byte {
+            write!(output, " at byte {byte}")?;
+        }
     }
     writeln!(output, ": {}", diagnostic.message)
 }
