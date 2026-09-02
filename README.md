@@ -20,6 +20,8 @@ On Windows PowerShell:
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/diegoglozano/gambit/releases/latest/download/gambit-installer.ps1 | iex"
 ```
 
+See the [changelog](CHANGELOG.md) for release highlights and upgrade notes.
+
 Diagnose the syntax and chess semantics of plain or Zstandard-compressed PGN
 files. Doctor recognizes `.zst` by filename, so no external decompressor is
 needed:
@@ -213,3 +215,8 @@ direct validation was only slightly faster than the queue path. On the Apple M3,
 eight direct ranges validate faster than the four-worker queue, but the discovery
 pass still makes a one-shot run slower. Persisted boundaries amortize after
 approximately four repeated M3 analyses.
+
+## License
+
+Gambit is available under either the [MIT License](LICENSE-MIT) or the
+[Apache License 2.0](LICENSE-APACHE), at your option.

@@ -63,6 +63,16 @@ fn help_describes_doctor() {
 }
 
 #[test]
+fn reports_the_release_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .arg("--version")
+        .output()
+        .expect("run gambit");
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"gambit 0.2.0\n");
+}
+
+#[test]
 fn validates_pgn_from_standard_input() {
     let output = run_with_stdin(
         &["doctor", "-"],
