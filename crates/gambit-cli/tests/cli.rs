@@ -1,5 +1,34 @@
+use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
+
+struct TestFile(PathBuf);
+
+impl TestFile {
+    fn new(suffix: &str, contents: &[u8]) -> Self {
+        let sequence = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "gambit-cli-test-{}-{sequence}.{suffix}",
+            std::process::id()
+        ));
+        fs::write(&path, contents).expect("write temporary PGN");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 
 fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_gambit"))
@@ -254,4 +283,112 @@ fn rejects_zero_as_an_error_limit() {
         .expect("run gambit");
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("positive integer"));
+}
+
+#[test]
+fn reads_zstd_files_without_an_external_decompressor() {
+    let pgn = b"[Event \"Compressed\"]\n\n1. e4 e5 *\n";
+    let compressed = zstd::stream::encode_all(&pgn[..], 1).expect("compress PGN");
+    let file = TestFile::new("pgn.zst", &compressed);
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=json"])
+        .arg(file.path())
+        .output()
+        .expect("run gambit");
+
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "valid");
+    assert_eq!(report["bytes"], pgn.len());
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["moves"], 2);
+}
+
+#[test]
+fn reports_corrupt_zstd_as_an_input_error() {
+    let file = TestFile::new("pgn.zst", b"not a zstd frame");
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=json"])
+        .arg(file.path())
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(3));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["diagnostic"]["category"], "input");
+}
+
+#[test]
+fn multi_file_json_aggregates_reports_and_exit_status() {
+    let valid = TestFile::new("pgn", b"1. e4 *\n");
+    let invalid = TestFile::new("pgn", b"1. e5 *\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=json"])
+        .arg(valid.path())
+        .arg(invalid.path())
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(1));
+    let batch: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(batch["schema_version"], 1);
+    assert_eq!(batch["status"], "invalid");
+    assert_eq!(batch["input_count"], 2);
+    assert_eq!(batch["games"], 1);
+    assert_eq!(batch["diagnostic_count"], 1);
+    assert_eq!(batch["reports"][0]["status"], "valid");
+    assert_eq!(batch["reports"][1]["status"], "invalid");
+    assert_eq!(
+        batch["reports"][1]["diagnostic"]["category"],
+        "illegal_move"
+    );
+}
+
+#[test]
+fn multi_file_scan_continues_after_an_input_error() {
+    let valid = TestFile::new("pgn", b"1. e4 *\n");
+    let missing = std::env::temp_dir().join(format!(
+        "gambit-cli-missing-{}-{}.pgn",
+        std::process::id(),
+        NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=json"])
+        .arg(&missing)
+        .arg(valid.path())
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(3));
+    let batch: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(batch["status"], "error");
+    assert_eq!(batch["reports"][0]["status"], "error");
+    assert_eq!(batch["reports"][1]["status"], "valid");
+}
+
+#[test]
+fn multi_file_jsonl_ends_with_a_batch_summary() {
+    let first = TestFile::new("pgn", b"1. e4 *\n");
+    let second = TestFile::new("pgn", b"1. d4 *\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=jsonl"])
+        .arg(first.path())
+        .arg(second.path())
+        .output()
+        .expect("run gambit");
+
+    assert!(output.status.success());
+    let records = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["record"], "summary");
+    assert_eq!(records[1]["record"], "summary");
+    assert_eq!(records[2]["record"], "batch_summary");
+    assert_eq!(records[2]["input_count"], 2);
+    assert_eq!(records[2]["games"], 2);
 }

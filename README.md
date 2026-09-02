@@ -20,13 +20,18 @@ On Windows PowerShell:
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/diegoglozano/gambit/releases/latest/download/gambit-installer.ps1 | iex"
 ```
 
-Diagnose the syntax and chess semantics of a PGN file, or stream decompressed
-PGN through standard input:
+Diagnose the syntax and chess semantics of plain or Zstandard-compressed PGN
+files. Doctor recognizes `.zst` by filename, so no external decompressor is
+needed:
 
 ```console
 gambit doctor games.pgn
-zstdcat games.pgn.zst | gambit doctor -
+gambit doctor games.pgn.zst
+gambit doctor january.pgn february.pgn.zst
 ```
+
+Use `-` alone to read decompressed PGN from standard input. Standard input
+cannot be mixed with file paths in the same invocation.
 
 Doctor reports malformed PGN, invalid FEN starting positions, malformed or
 illegal SAN, ambiguous moves, and incorrect check or mate suffixes. Diagnostics
@@ -41,6 +46,11 @@ diagnostics), or set an explicit positive limit with `--max-errors`. JSON keeps
 the first diagnostic in `diagnostic` for compatibility and places later ones in
 `additional_diagnostics`; JSONL emits one diagnostic record per line followed
 by a summary record.
+
+For multiple inputs, the error limit applies independently to each file and the
+process returns the most severe exit status. JSON wraps the per-file reports in
+a batch summary. JSONL emits each file's records followed by a final
+`batch_summary` record. Single-input JSON remains unchanged.
 
 Use machine-readable output in scripts, check only PGN structure, allow a
 missing final outcome marker, or suppress a successful report:

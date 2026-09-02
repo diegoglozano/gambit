@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 use doctor::{
@@ -12,7 +13,7 @@ use doctor::{
 use serde::Serialize;
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <FILE.pgn|->\n  gambit <FILE.pgn|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct file form is retained as a compatibility alias for 'gambit doctor'.\nUse - to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl>  Select output format [default: human]\n      --syntax-only                Check PGN structure without executing moves\n      --lenient                    Allow a final game without an outcome marker\n      --keep-going                 Continue after errors [default limit: 100]\n      --max-errors <N>             Continue until N errors have been reported\n  -q, --quiet                      Print nothing when the input is valid\n  -h, --help                       Print help\n  -V, --version                    Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <FILE.pgn|FILE.pgn.zst|->...\n  gambit <FILE.pgn|FILE.pgn.zst|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct file form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Use - alone to read PGN from standard input.\n\nOptions:\n      --format <human|json|jsonl>  Select output format [default: human]\n      --syntax-only                Check PGN structure without executing moves\n      --lenient                    Allow a final game without an outcome marker\n      --keep-going                 Continue after errors [default limit: 100]\n      --max-errors <N>             Continue until N errors have been reported per input\n  -q, --quiet                      Print nothing when the input is valid\n  -h, --help                       Print help\n  -V, --version                    Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -23,7 +24,7 @@ enum OutputFormat {
 
 #[derive(Debug)]
 struct DoctorCommand {
-    path: OsString,
+    paths: Vec<OsString>,
     format: OutputFormat,
     quiet: bool,
     options: DoctorOptions,
@@ -73,7 +74,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
                 ));
             }
             Ok(Action::Doctor(DoctorCommand {
-                path: first,
+                paths: vec![first],
                 format: OutputFormat::Human,
                 quiet: false,
                 options: DoctorOptions {
@@ -98,7 +99,7 @@ fn no_more(
 }
 
 fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
-    let mut path = None;
+    let mut paths = Vec::new();
     let mut format = OutputFormat::Human;
     let mut quiet = false;
     let mut mode = ValidationMode::Semantic;
@@ -126,17 +127,8 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
                 format = parse_format(&value)?;
             }
             Some("--") => {
-                if path.is_some() {
-                    return Err(String::from("doctor accepts exactly one PGN file"));
-                }
-                path = Some(
-                    arguments
-                        .next()
-                        .ok_or_else(|| String::from("-- must be followed by a PGN file"))?,
-                );
-                if arguments.next().is_some() {
-                    return Err(String::from("doctor accepts exactly one PGN file"));
-                }
+                paths.extend(arguments);
+                break;
             }
             Some(value) if value.starts_with("--format=") => {
                 format = parse_format(std::ffi::OsStr::new(&value["--format=".len()..]))?;
@@ -148,8 +140,7 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
             Some(value) if value.starts_with('-') && value != "-" => {
                 return Err(format!("unknown doctor option: {value}"));
             }
-            _ if path.is_some() => return Err(String::from("doctor accepts exactly one PGN file")),
-            _ => path = Some(argument),
+            _ => paths.push(argument),
         }
     }
 
@@ -158,9 +149,16 @@ fn parse_doctor_arguments(arguments: impl Iterator<Item = OsString>) -> Result<A
             "--quiet cannot be combined with a machine-readable format",
         ));
     }
-    let path = path.ok_or_else(|| String::from("doctor requires a PGN file"))?;
+    if paths.is_empty() {
+        return Err(String::from("doctor requires at least one PGN file"));
+    }
+    if paths.len() > 1 && paths.iter().any(|path| path == "-") {
+        return Err(String::from(
+            "standard input cannot be combined with other PGN files",
+        ));
+    }
     Ok(Action::Doctor(DoctorCommand {
-        path,
+        paths,
         format,
         quiet,
         options: DoctorOptions {
@@ -192,29 +190,139 @@ fn parse_max_errors(value: &std::ffi::OsStr) -> Result<usize, String> {
 }
 
 fn run_doctor(command: &DoctorCommand) -> ExitCode {
-    let source = if command.path == "-" {
-        String::from("stdin")
+    let reports = if command.paths[0] == "-" {
+        vec![inspect(
+            io::stdin().lock(),
+            String::from("stdin"),
+            command.options,
+        )]
     } else {
-        command.path.to_string_lossy().into_owned()
+        command
+            .paths
+            .iter()
+            .map(|path| inspect_path(path, command.options))
+            .collect::<Vec<_>>()
     };
-    let report = if command.path == "-" {
-        inspect(io::stdin().lock(), source, command.options)
-    } else {
-        match File::open(&command.path) {
-            Ok(file) => inspect(file, source, command.options),
-            Err(error) => Report::input_error(
-                source,
-                command.options,
-                format!("failed to open {}: {error}", command.path.to_string_lossy()),
-            ),
-        }
-    };
-    let exit_code = report.exit_code();
-    if let Err(error) = render_report(&report, command.format, command.quiet) {
+    let exit_code = reports.iter().map(Report::exit_code).max().unwrap_or(0);
+    if let Err(error) = render_reports(&reports, command.format, command.quiet) {
         eprintln!("failed to write report: {error}");
         return ExitCode::from(3);
     }
     ExitCode::from(exit_code)
+}
+
+fn inspect_path(path: &std::ffi::OsStr, options: DoctorOptions) -> Report {
+    let source = path.to_string_lossy().into_owned();
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            return Report::input_error(
+                source,
+                options,
+                format!("failed to open {}: {error}", path.to_string_lossy()),
+            );
+        }
+    };
+    if is_zstd_path(path) {
+        match zstd::stream::read::Decoder::new(file) {
+            Ok(decoder) => inspect(decoder, source, options),
+            Err(error) => Report::input_error(
+                source,
+                options,
+                format!(
+                    "failed to initialize zstd decoder for {}: {error}",
+                    path.to_string_lossy()
+                ),
+            ),
+        }
+    } else {
+        inspect(file, source, options)
+    }
+}
+
+fn is_zstd_path(path: &std::ffi::OsStr) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zst"))
+}
+
+fn aggregate_status(reports: &[Report]) -> ReportStatus {
+    if reports
+        .iter()
+        .any(|report| report.status == ReportStatus::Error)
+    {
+        ReportStatus::Error
+    } else if reports
+        .iter()
+        .any(|report| report.status == ReportStatus::Invalid)
+    {
+        ReportStatus::Invalid
+    } else {
+        ReportStatus::Valid
+    }
+}
+
+#[derive(Serialize)]
+struct BatchReport<'a> {
+    schema_version: u8,
+    status: ReportStatus,
+    input_count: usize,
+    bytes: u64,
+    games: u64,
+    moves: u64,
+    elapsed_seconds: f64,
+    throughput_mib_per_second: f64,
+    diagnostic_count: usize,
+    reports: &'a [Report],
+}
+
+impl<'a> BatchReport<'a> {
+    fn new(reports: &'a [Report]) -> Self {
+        let bytes = reports.iter().map(|report| report.bytes).sum();
+        let elapsed_seconds = reports
+            .iter()
+            .map(|report| report.elapsed_seconds)
+            .sum::<f64>();
+        #[allow(clippy::cast_precision_loss)]
+        let throughput_mib_per_second = if elapsed_seconds > 0.0 {
+            bytes as f64 / (1024.0 * 1024.0) / elapsed_seconds
+        } else {
+            0.0
+        };
+        Self {
+            schema_version: 1,
+            status: aggregate_status(reports),
+            input_count: reports.len(),
+            bytes,
+            games: reports.iter().map(|report| report.games).sum(),
+            moves: reports.iter().map(|report| report.moves).sum(),
+            elapsed_seconds,
+            throughput_mib_per_second,
+            diagnostic_count: reports.iter().map(|report| report.diagnostic_count).sum(),
+            reports,
+        }
+    }
+}
+
+fn render_reports(reports: &[Report], format: OutputFormat, quiet: bool) -> io::Result<()> {
+    if reports.len() == 1 {
+        return render_report(&reports[0], format, quiet);
+    }
+    match format {
+        OutputFormat::Human => {
+            for report in reports {
+                render_report(report, format, quiet)?;
+            }
+            Ok(())
+        }
+        OutputFormat::Json => {
+            let mut output = io::stdout().lock();
+            serde_json::to_writer(&mut output, &BatchReport::new(reports))?;
+            writeln!(output)
+        }
+        OutputFormat::Jsonl => render_jsonl_batch(reports),
+    }
 }
 
 fn render_report(report: &Report, format: OutputFormat, quiet: bool) -> io::Result<()> {
@@ -294,11 +402,29 @@ struct JsonlSummary<'a> {
     error_limit_reached: bool,
 }
 
+#[derive(Serialize)]
+struct JsonlBatchSummary {
+    schema_version: u8,
+    record: &'static str,
+    status: ReportStatus,
+    input_count: usize,
+    bytes: u64,
+    games: u64,
+    moves: u64,
+    elapsed_seconds: f64,
+    throughput_mib_per_second: f64,
+    diagnostic_count: usize,
+}
+
 fn render_jsonl(report: &Report) -> io::Result<()> {
     let mut output = io::stdout().lock();
+    write_jsonl_report(&mut output, report)
+}
+
+fn write_jsonl_report(output: &mut impl Write, report: &Report) -> io::Result<()> {
     for diagnostic in report.diagnostics() {
         serde_json::to_writer(
-            &mut output,
+            &mut *output,
             &JsonlDiagnostic {
                 schema_version: report.schema_version,
                 record: "diagnostic",
@@ -306,10 +432,10 @@ fn render_jsonl(report: &Report) -> io::Result<()> {
                 diagnostic,
             },
         )?;
-        writeln!(output)?;
+        writeln!(&mut *output)?;
     }
     serde_json::to_writer(
-        &mut output,
+        &mut *output,
         &JsonlSummary {
             schema_version: report.schema_version,
             record: "summary",
@@ -324,6 +450,30 @@ fn render_jsonl(report: &Report) -> io::Result<()> {
             throughput_mib_per_second: report.throughput_mib_per_second,
             diagnostic_count: report.diagnostic_count,
             error_limit_reached: report.error_limit_reached,
+        },
+    )?;
+    writeln!(output)
+}
+
+fn render_jsonl_batch(reports: &[Report]) -> io::Result<()> {
+    let mut output = io::stdout().lock();
+    for report in reports {
+        write_jsonl_report(&mut output, report)?;
+    }
+    let batch = BatchReport::new(reports);
+    serde_json::to_writer(
+        &mut output,
+        &JsonlBatchSummary {
+            schema_version: batch.schema_version,
+            record: "batch_summary",
+            status: batch.status,
+            input_count: batch.input_count,
+            bytes: batch.bytes,
+            games: batch.games,
+            moves: batch.moves,
+            elapsed_seconds: batch.elapsed_seconds,
+            throughput_mib_per_second: batch.throughput_mib_per_second,
+            diagnostic_count: batch.diagnostic_count,
         },
     )?;
     writeln!(output)
@@ -397,7 +547,7 @@ mod tests {
         else {
             panic!("expected doctor action");
         };
-        assert_eq!(command.path, "games.pgn");
+        assert_eq!(command.paths, [OsString::from("games.pgn")]);
         assert_eq!(command.options.mode, ValidationMode::Syntax);
         assert!(!command.options.require_outcome);
     }
@@ -422,6 +572,25 @@ mod tests {
         else {
             panic!("expected doctor action");
         };
-        assert_eq!(command.path, "--games.pgn");
+        assert_eq!(command.paths, [OsString::from("--games.pgn")]);
+    }
+
+    #[test]
+    fn parses_multiple_paths() {
+        let Action::Doctor(command) =
+            parse_arguments(args(&["doctor", "one.pgn", "two.pgn.zst"])).unwrap()
+        else {
+            panic!("expected doctor action");
+        };
+        assert_eq!(
+            command.paths,
+            [OsString::from("one.pgn"), OsString::from("two.pgn.zst")]
+        );
+    }
+
+    #[test]
+    fn rejects_stdin_among_multiple_paths() {
+        let error = parse_arguments(args(&["doctor", "one.pgn", "-"])).unwrap_err();
+        assert!(error.contains("standard input cannot be combined"));
     }
 }
