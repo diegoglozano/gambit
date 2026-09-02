@@ -1,6 +1,6 @@
 [package]
 name = "gambit-chess"
-version = "0.1.0"
+version = "0.2.0"
 description = "Compact chess positions and legal SAN execution for Gambit"
 edition.workspace = true
 license.workspace = true
