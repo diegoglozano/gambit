@@ -24,6 +24,37 @@ impl TestFile {
     }
 }
 
+struct TestDirectory(PathBuf);
+
+impl TestDirectory {
+    fn new() -> Self {
+        let sequence = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("gambit-cli-test-{}-{sequence}", std::process::id()));
+        fs::create_dir(&path).expect("create temporary directory");
+        Self(path)
+    }
+
+    fn write(&self, relative: impl AsRef<Path>, contents: &[u8]) -> PathBuf {
+        let path = self.0.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create temporary subdirectory");
+        }
+        fs::write(&path, contents).expect("write temporary file");
+        path
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 impl Drop for TestFile {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
@@ -60,6 +91,7 @@ fn help_describes_doctor() {
     assert!(stdout.contains("--format <human|json|jsonl>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));
+    assert!(stdout.contains("Directories are scanned recursively"));
 }
 
 #[test]
@@ -401,6 +433,64 @@ fn multi_file_jsonl_ends_with_a_batch_summary() {
     assert_eq!(records[2]["record"], "batch_summary");
     assert_eq!(records[2]["input_count"], 2);
     assert_eq!(records[2]["games"], 2);
+}
+
+#[test]
+fn recursively_scans_pgn_files_in_deterministic_order() {
+    let directory = TestDirectory::new();
+    directory.write("z-last.pgn", b"1. e4 *\n");
+    let compressed = zstd::stream::encode_all(&b"1. d4 *\n"[..], 1).expect("compress PGN");
+    directory.write("nested/a-first.PGN.ZST", &compressed);
+    directory.write("nested/ignored.zst", b"not a PGN");
+    directory.write("notes.txt", b"not a PGN");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=json"])
+        .arg(directory.path())
+        .output()
+        .expect("run gambit");
+
+    assert!(output.status.success());
+    let batch: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(batch["status"], "valid");
+    assert_eq!(batch["input_count"], 2);
+    assert_eq!(batch["games"], 2);
+    assert_eq!(batch["moves"], 2);
+    assert_eq!(
+        Path::new(batch["reports"][0]["source"].as_str().unwrap())
+            .file_name()
+            .unwrap(),
+        "a-first.PGN.ZST"
+    );
+    assert_eq!(
+        Path::new(batch["reports"][1]["source"].as_str().unwrap())
+            .file_name()
+            .unwrap(),
+        "z-last.pgn"
+    );
+}
+
+#[test]
+fn reports_an_empty_directory_as_an_input_error() {
+    let directory = TestDirectory::new();
+    directory.write("notes.txt", b"not a PGN");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["doctor", "--format=json"])
+        .arg(directory.path())
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(3));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["diagnostic"]["category"], "input");
+    assert!(
+        report["diagnostic"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no .pgn or .pgn.zst files found")
+    );
 }
 
 #[test]

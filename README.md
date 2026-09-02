@@ -36,7 +36,13 @@ needed:
 gambit doctor games.pgn
 gambit doctor games.pgn.zst
 gambit doctor january.pgn february.pgn.zst
+gambit doctor ./corpus
 ```
+
+Directory inputs are scanned recursively for files ending in `.pgn` or
+`.pgn.zst`, case-insensitively. Files are processed in deterministic path order,
+so the same corpus produces reports in the same order across runs. Other files
+are ignored.
 
 Use `-` alone to read decompressed PGN from standard input. Standard input
 cannot be mixed with file paths in the same invocation.
@@ -60,10 +66,12 @@ the first diagnostic in `diagnostic` for compatibility and places later ones in
 `additional_diagnostics`; JSONL emits one diagnostic record per line followed
 by a summary record.
 
-For multiple inputs, the error limit applies independently to each file and the
-process returns the most severe exit status. JSON wraps the per-file reports in
-a batch summary. JSONL emits each file's records followed by a final
-`batch_summary` record. Single-input JSON remains unchanged.
+For multiple inputs—including files discovered under a directory—the error
+limit applies independently to each file and the process returns the most
+severe exit status. JSON wraps the per-file reports in a batch summary. JSONL
+emits each file's records followed by a final `batch_summary` record.
+Single-input JSON remains unchanged. An empty directory is reported as an input
+error instead of silently succeeding.
 
 Use machine-readable output in scripts, check only PGN structure, allow a
 missing final outcome marker, or suppress a successful report:
