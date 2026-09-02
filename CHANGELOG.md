@@ -8,6 +8,8 @@ All notable changes to Gambit are documented in this file.
 
 - Added recursive directory inputs to `gambit doctor`, with deterministic
   discovery of `.pgn` and `.pgn.zst` files and explicit empty-directory errors.
+- Added a `github` output format that emits native GitHub Actions error
+  annotations and a concise validation summary.
 
 ## [0.2.0] - 2026-09-02
 

@@ -19,6 +19,7 @@ nav:
   - Overview: index.md
   - Getting started: getting-started.md
   - CLI reference: cli.md
+  - GitHub Actions: github-actions.md
   - Benchmarks:
       - Lichess April 2014: benchmarks/lichess-2014-04.md
 

@@ -79,11 +79,16 @@ missing final outcome marker, or suppress a successful report:
 ```shell
 gambit doctor --format json games.pgn
 gambit doctor --keep-going --format jsonl games.pgn
+gambit doctor --keep-going --format github ./corpus
 gambit doctor --max-errors 20 games.pgn
 gambit doctor --syntax-only games.pgn
 gambit doctor --lenient fragment.pgn
 gambit doctor --quiet games.pgn
 ```
+
+The `github` format emits native error annotations when Doctor runs in GitHub
+Actions. See the [GitHub Actions guide](https://diegoglozano.github.io/gambit/docs/github-actions/)
+for a copy-paste workflow.
 
 The original `gambit games.pgn` form remains available as a compatibility
 alias for semantic validation.

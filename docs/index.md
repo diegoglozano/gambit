@@ -27,11 +27,13 @@ the live position. Use `--syntax-only` when you only need structural parsing.
 ## Choose an output format
 
 Human-readable diagnostics are the default. CI and editor integrations can use
-one JSON document per input or a stream of JSONL diagnostic records:
+one JSON document per input or a stream of JSONL diagnostic records. GitHub
+Actions can render Doctor failures as native annotations:
 
 ```console
 gambit doctor --format json game.pgn
 gambit doctor --keep-going --format jsonl corpus.pgn.zst
+gambit doctor --keep-going --format github ./corpus
 ```
 
 ## What is in this repository?
