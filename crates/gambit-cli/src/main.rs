@@ -6,7 +6,9 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-use doctor::{Diagnostic, DoctorOptions, Report, ReportStatus, ValidationMode, inspect};
+use doctor::{
+    Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
+};
 
 const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <FILE.pgn|->\n  gambit <FILE.pgn|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n\nThe direct file form is retained as a compatibility alias for 'gambit doctor'.\nUse - to read PGN from standard input.\n\nOptions:\n      --format <human|json>  Select output format [default: human]\n      --syntax-only          Check PGN structure without executing moves\n      --lenient              Allow a final game without an outcome marker\n  -q, --quiet                Print nothing when the input is valid\n  -h, --help                 Print help\n  -V, --version              Print version";
 
@@ -237,14 +239,45 @@ fn render_diagnostic(output: &mut impl Write, diagnostic: &Diagnostic) -> io::Re
     if let Some(ply) = diagnostic.ply {
         write!(output, ", ply {ply}")?;
     }
+    if let Some(line) = diagnostic.line {
+        write!(output, ", line {line}")?;
+    }
+    if let Some(column) = diagnostic.column {
+        write!(output, ", column {column}")?;
+    }
     if let Some(byte) = diagnostic.byte {
         write!(output, ", byte {byte}")?;
     }
     writeln!(output, ": {}", diagnostic.message)?;
+    if let Some(headers) = &diagnostic.headers {
+        render_game_headers(output, headers)?;
+    }
     if let Some(context) = &diagnostic.context {
         writeln!(output, "context: {context}")?;
     }
+    if let Some(excerpt) = &diagnostic.excerpt {
+        writeln!(output, "source: {excerpt}")?;
+    }
     Ok(())
+}
+
+fn render_game_headers(output: &mut impl Write, headers: &GameHeaders) -> io::Result<()> {
+    write!(output, "game headers: ")?;
+    let fields = [
+        ("White", headers.white.as_deref()),
+        ("Black", headers.black.as_deref()),
+        ("Event", headers.event.as_deref()),
+        ("Date", headers.date.as_deref()),
+        ("Round", headers.round.as_deref()),
+    ];
+    let mut separator = "";
+    for (name, value) in fields {
+        if let Some(value) = value {
+            write!(output, "{separator}{name}={value:?}")?;
+            separator = ", ";
+        }
+    }
+    writeln!(output)
 }
 
 #[cfg(test)]
