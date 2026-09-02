@@ -1,0 +1,63 @@
+# CLI reference
+
+## Synopsis
+
+```text
+gambit doctor [OPTIONS] <FILE.pgn|FILE.pgn.zst|->...
+gambit <FILE.pgn|FILE.pgn.zst|->
+```
+
+The direct file form is a compatibility alias for `gambit doctor` and accepts
+exactly one input. Use the `doctor` command for options or batch validation.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `--format <human|json|jsonl>` | Select the report format. The default is `human`. |
+| `--syntax-only` | Parse PGN structure without executing moves. |
+| `--lenient` | Allow a final game without an outcome marker. |
+| `--keep-going` | Continue after errors, up to 100 per input. |
+| `--max-errors <N>` | Continue until `N` errors have been reported per input. |
+| `-q`, `--quiet` | Print nothing when human-format validation succeeds. |
+| `-h`, `--help` | Print help. |
+| `-V`, `--version` | Print the version. |
+
+`--quiet` cannot be combined with a machine-readable format.
+
+## Validation modes
+
+Semantic validation is the default. It reports malformed PGN, invalid FEN
+starting positions, malformed or illegal SAN, ambiguous moves, and incorrect
+check or mate suffixes. It also verifies that:
+
+- the `Result` header agrees with the movetext outcome;
+- `SetUp` and `FEN` occur together correctly;
+- explicit move numbers match the live position and side to move;
+- those rules continue to hold inside recursive variations and FEN starts.
+
+`--syntax-only` intentionally skips position-dependent and cross-field checks.
+
+## Machine-readable reports
+
+JSON emits one report for a single input. For a batch, it wraps the per-file
+reports in a batch summary. The first diagnostic remains in `diagnostic`, while
+later diagnostics appear in `additional_diagnostics`.
+
+```console
+gambit doctor --format json games.pgn
+```
+
+JSONL emits one diagnostic record per line followed by a summary record. A
+multi-file invocation ends with an additional `batch_summary` record, making it
+suitable for incremental consumers:
+
+```console
+gambit doctor --keep-going --format jsonl games.pgn.zst
+```
+
+## Diagnostic locations
+
+Human diagnostics include the game number and identifying headers when
+available, the ply, byte offset, line, column, and a source-line excerpt. Lines
+and byte columns are one-based.
