@@ -13,8 +13,8 @@ use doctor::{
 };
 use serde::Serialize;
 use stats::{
-    GameLengthStats, ResultCounts, StatsDiagnostic, StatsOptions, StatsReport, StatsStatus,
-    inspect as inspect_stats,
+    DateStats, GameLengthStats, HeaderCoverage, RatingStats, ResultCounts, StatsDiagnostic,
+    StatsOptions, StatsReport, StatsStatus, inspect as inspect_stats,
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
@@ -572,6 +572,9 @@ struct StatsBatchReport<'a> {
     mainline_plies: u64,
     results: ResultCounts,
     game_length: GameLengthStats,
+    header_coverage: HeaderCoverage,
+    dates: DateStats,
+    ratings: RatingStats,
     elapsed_seconds: f64,
     throughput_mib_per_second: f64,
     reports: &'a [StatsReport],
@@ -587,10 +590,16 @@ impl<'a> StatsBatchReport<'a> {
             .map(|report| report.elapsed_seconds)
             .sum::<f64>();
         let mut results = ResultCounts::default();
+        let mut header_coverage = HeaderCoverage::default();
+        let mut dates = DateStats::default();
+        let mut ratings = RatingStats::default();
         let mut minimum_plies = None;
         let mut maximum_plies = None;
         for report in reports {
             results.add(report.results);
+            header_coverage.add(report.header_coverage);
+            dates.add(&report.dates);
+            ratings.add(report.ratings);
             if let Some(value) = report.game_length.minimum_plies {
                 minimum_plies =
                     Some(minimum_plies.map_or(value, |current: u64| current.min(value)));
@@ -651,6 +660,9 @@ impl<'a> StatsBatchReport<'a> {
                 average_plies,
                 maximum_plies,
             },
+            header_coverage,
+            dates,
+            ratings,
             elapsed_seconds,
             throughput_mib_per_second,
             reports,
@@ -685,6 +697,9 @@ fn render_stats_reports(reports: &[StatsReport], format: StatsOutputFormat) -> i
             report.mainline_plies,
             report.results,
             report.game_length,
+            report.header_coverage,
+            &report.dates,
+            report.ratings,
             report.elapsed_seconds,
             report.throughput_mib_per_second,
         )
@@ -704,6 +719,9 @@ fn render_stats_reports(reports: &[StatsReport], format: StatsOutputFormat) -> i
             batch.mainline_plies,
             batch.results,
             batch.game_length,
+            batch.header_coverage,
+            &batch.dates,
+            batch.ratings,
             batch.elapsed_seconds,
             batch.throughput_mib_per_second,
         )
@@ -718,6 +736,9 @@ fn render_stats_metrics(
     mainline_plies: u64,
     results: ResultCounts,
     game_length: GameLengthStats,
+    header_coverage: HeaderCoverage,
+    dates: &DateStats,
+    ratings: RatingStats,
     elapsed_seconds: f64,
     throughput_mib_per_second: f64,
 ) -> io::Result<()> {
@@ -726,8 +747,14 @@ fn render_stats_metrics(
     writeln!(output, "mainline plies: {mainline_plies}")?;
     writeln!(
         output,
-        "results: {} white wins, {} black wins, {} draws, {} unfinished",
-        results.white_wins, results.black_wins, results.draws, results.unfinished
+        "results: {} white win{}, {} black win{}, {} draw{}, {} unfinished",
+        results.white_wins,
+        plural_suffix_u64(results.white_wins),
+        results.black_wins,
+        plural_suffix_u64(results.black_wins),
+        results.draws,
+        plural_suffix_u64(results.draws),
+        results.unfinished,
     )?;
     match (game_length.minimum_plies, game_length.maximum_plies) {
         (Some(minimum), Some(maximum)) => writeln!(
@@ -736,6 +763,43 @@ fn render_stats_metrics(
             game_length.average_plies
         )?,
         _ => writeln!(output, "game length (plies): n/a")?,
+    }
+    writeln!(
+        output,
+        "header coverage: Event {}/{games}, Site {}/{games}, Date {}/{games}, Round {}/{games}, White {}/{games}, Black {}/{games}, Result {}/{games}",
+        header_coverage.event,
+        header_coverage.site,
+        header_coverage.date,
+        header_coverage.round,
+        header_coverage.white,
+        header_coverage.black,
+        header_coverage.result,
+    )?;
+    if let (Some(earliest), Some(latest)) = (&dates.earliest, &dates.latest) {
+        writeln!(
+            output,
+            "dates: {} complete ({earliest} to {latest}), {} incomplete/invalid, {} missing",
+            dates.complete, dates.incomplete_or_invalid, dates.missing
+        )?;
+    } else {
+        writeln!(
+            output,
+            "dates: 0 complete, {} incomplete/invalid, {} missing",
+            dates.incomplete_or_invalid, dates.missing
+        )?;
+    }
+    if let (Some(minimum), Some(maximum)) = (ratings.minimum, ratings.maximum) {
+        writeln!(
+            output,
+            "ratings: {} numeric (min {minimum}, avg {:.2}, max {maximum}), {} invalid, {} missing",
+            ratings.numeric, ratings.average, ratings.invalid, ratings.missing
+        )?;
+    } else {
+        writeln!(
+            output,
+            "ratings: 0 numeric, {} invalid, {} missing",
+            ratings.invalid, ratings.missing
+        )?;
     }
     writeln!(output, "elapsed: {elapsed_seconds:.3}s")?;
     writeln!(output, "throughput: {throughput_mib_per_second:.2} MiB/s")

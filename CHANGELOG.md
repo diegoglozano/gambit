@@ -12,6 +12,9 @@ All notable changes to Gambit are documented in this file.
 - Added human and JSON Stats reports for files, recursive directories,
   `.pgn.zst` streams, and standard input, including aggregate batch metrics and
   partial counters when an input is malformed.
+- Added Seven Tag Roster coverage, complete `Date`/`UTCDate` ranges, and
+  `WhiteElo`/`BlackElo` coverage and summary statistics without retaining
+  high-cardinality tag values.
 
 ### Changed
 

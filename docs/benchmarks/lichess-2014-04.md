@@ -233,6 +233,30 @@ The decompressed path retains a sub-2 MB resident footprint independent of the
 resident memory and lower byte throughput for eliminating a separate
 decompression process and the 701 MB decompressed file.
 
+### Metadata aggregation follow-up
+
+The next Stats slice inspects the Seven Tag Roster plus `UTCDate`, `WhiteElo`,
+and `BlackElo` in the same callback. It stores header presence as seven bits and
+retains only scalar aggregates and the two date extrema—not player or event
+values.
+
+The richer scan found that all 810,463 games have `Event`, `Site`, `White`,
+`Black`, and `Result`; none have roster `Date` or `Round`. All games instead
+have a complete `UTCDate`, spanning 2014.03.31 through 2014.04.30. Of 1,620,926
+player-rating slots, 1,620,815 are numeric and 111 are non-numeric; ratings
+range from 732 to 2734 with an average of 1619.0894.
+
+| Input | Core-only median | Metadata median | Change | Maximum RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Decompressed file | 475.62 MiB/s | **463.64 MiB/s** | -2.5% | 1,933,312 bytes |
+| In-process `.pgn.zst` | 351.54 MiB/s | **351.67 MiB/s** | +0.04% | 10,960,896 bytes |
+
+The five metadata runs measured 454.91, 461.51, 463.64, 465.28, and 467.81
+MiB/s for the decompressed file. Compressed runs measured 344.11, 351.67,
+353.31, 341.33, and 357.99 MiB/s. The compressed difference is measurement
+noise: Zstandard remains the bottleneck. Metadata costs about 2.5% on the
+parser-bound path while retaining the bounded-memory profile.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row
