@@ -19,6 +19,28 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/diegoglozano/gambi
 Prebuilt archives and checksums are also available on the
 [install page](https://diegoglozano.github.io/gambit/artifacts/).
 
+## Query games
+
+Select games from a corpus and write a new PGN:
+
+```console
+gambit query lichess.pgn \
+  --player diegoglozano \
+  --color black \
+  --result loss \
+  --since 2026-01-01 \
+  > black-losses.pgn
+```
+
+Count matches without writing the games, or emit metadata as JSONL:
+
+```console
+gambit query lichess.pgn --player diegoglozano --format count
+gambit query lichess.pgn --result draw --format jsonl
+```
+
+See [Query games](query.md) for filter semantics and the JSONL schema.
+
 ## Summarize a corpus
 
 Use Stats for a fast structural inventory before deeper validation or analysis:

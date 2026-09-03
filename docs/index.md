@@ -2,11 +2,21 @@
 
 Gambit inspects and validates PGN while streaming plain or Zstandard-compressed
 files. Point it at one file, several files, or an entire corpus directory.
-Stats summarizes games, mainline plies, results, and game lengths in one
-bounded-memory pass; Doctor pinpoints syntax and chess-semantic errors.
+Query selects reusable subsets, Stats summarizes corpus shape, and Doctor
+pinpoints syntax and chess-semantic errors.
 
 [Install Gambit](https://diegoglozano.github.io/gambit/artifacts/){ .md-button }
 [Get started](getting-started.md){ .md-button }
+
+## A quick query
+
+```console
+gambit query games.pgn --player diegoglozano --result loss --format count
+```
+
+Query can emit matching PGN, one JSONL metadata record per match, or only the
+count. Player-relative filters make questions such as wins, losses, color, and
+rating unambiguous. See [Query games](query.md) for the complete contract.
 
 ## A quick corpus summary
 
@@ -63,7 +73,7 @@ gambit doctor --keep-going --format github ./corpus
 
 ## What is in this repository?
 
-- `gambit` provides the Stats and Doctor command-line workflows.
+- `gambit` provides the Query, Stats, and Doctor command-line workflows.
 - `gambit-pgn` is the zero-copy parsing and bounded-memory streaming layer.
 - `gambit-chess` provides positions, legal move generation, and SAN execution.
 

@@ -8,6 +8,33 @@ dependency-free ingestion layer and a compact semantic chess core.
 
 ![Gambit Doctor validating PGN files](./static/gambit-doctor.gif)
 
+## Gambit Query
+
+Filter a PGN corpus using chess-oriented, player-relative predicates:
+
+```shell
+gambit query games.pgn \
+  --player diegoglozano \
+  --color black \
+  --result loss \
+  --since 2026-01-01 \
+  > black-losses.pgn
+
+gambit query games.pgn --player diegoglozano --format count
+```
+
+Query emits matching PGN by default, so its output remains usable by Gambit or
+other chess software. JSONL exposes one metadata record per match for data
+pipelines. Player and opponent names are matched case-insensitively; color,
+win/loss, and rating filters are evaluated from the selected player's
+perspective.
+
+Plain files, `.pgn.zst` streams, recursive directories, and standard input are
+supported. Query retains at most one game up to the 16 MiB safety limit, so
+memory use is independent of corpus size. See the
+[Query guide](https://diegoglozano.github.io/gambit/docs/query/) for filters,
+output contracts, and examples.
+
 ## Gambit Stats
 
 Inventory a plain or Zstandard-compressed PGN corpus in one streaming,

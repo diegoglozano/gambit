@@ -1,4 +1,5 @@
 mod doctor;
+mod query;
 mod stats;
 
 use std::env;
@@ -11,6 +12,10 @@ use std::process::ExitCode;
 use doctor::{
     Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
 };
+use query::{
+    PlayerColor, QueryError, QueryFailure, QueryFormat, QueryOptions, QuerySummary, ResultFilter,
+    query as query_games,
+};
 use serde::Serialize;
 use stats::{
     DateStats, GameLengthStats, HeaderCoverage, RatingStats, ResultCounts, StatsDiagnostic,
@@ -18,7 +23,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -50,11 +55,19 @@ struct StatsCommand {
 }
 
 #[derive(Debug)]
+struct QueryCommand {
+    paths: Vec<OsString>,
+    format: QueryFormat,
+    options: QueryOptions,
+}
+
+#[derive(Debug)]
 enum Action {
     Help,
     Version,
     Doctor(DoctorCommand),
     Stats(StatsCommand),
+    Query(QueryCommand),
 }
 
 fn main() -> ExitCode {
@@ -69,6 +82,7 @@ fn main() -> ExitCode {
         }
         Ok(Action::Doctor(command)) => run_doctor(&command),
         Ok(Action::Stats(command)) => run_stats(&command),
+        Ok(Action::Query(command)) => run_query(&command),
         Err(error) => {
             eprintln!("{error}\n\n{USAGE}");
             ExitCode::from(2)
@@ -86,6 +100,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
         Some("-V" | "--version") => no_more(arguments, Action::Version),
         Some("doctor") => parse_doctor_arguments(arguments),
         Some("stats") => parse_stats_arguments(arguments),
+        Some("query") => parse_query_arguments(arguments),
         Some(value) if value.starts_with('-') && value != "-" => {
             Err(format!("unknown option or command: {value}"))
         }
@@ -229,6 +244,173 @@ fn parse_stats_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
     }))
 }
 
+fn parse_query_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
+    let mut paths = Vec::new();
+    let mut format = QueryFormat::Pgn;
+    let mut options = QueryOptions::default();
+    let mut arguments = arguments.peekable();
+
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-h" | "--help") => return no_more(arguments, Action::Help),
+            Some("--") => {
+                paths.extend(arguments);
+                break;
+            }
+            Some(value) if value.starts_with('-') && value != "-" => {
+                let (option, inline_value) = value
+                    .split_once('=')
+                    .map_or((value, None), |(option, value)| (option, Some(value)));
+                if !is_query_value_option(option) {
+                    return Err(format!("unknown query option: {option}"));
+                }
+                let owned_value;
+                let value = if let Some(value) = inline_value {
+                    OsStr::new(value)
+                } else {
+                    owned_value = arguments
+                        .next()
+                        .ok_or_else(|| format!("{option} requires a value"))?;
+                    owned_value.as_os_str()
+                };
+                set_query_option(option, value, &mut format, &mut options)?;
+            }
+            _ => paths.push(argument),
+        }
+    }
+
+    validate_input_paths("query", &paths)?;
+    validate_query_options(&options)?;
+    Ok(Action::Query(QueryCommand {
+        paths,
+        format,
+        options,
+    }))
+}
+
+fn is_query_value_option(option: &str) -> bool {
+    matches!(
+        option,
+        "--player"
+            | "--opponent"
+            | "--color"
+            | "--result"
+            | "--since"
+            | "--until"
+            | "--min-rating"
+            | "--max-rating"
+            | "--format"
+    )
+}
+
+fn set_query_option(
+    option: &str,
+    value: &OsStr,
+    format: &mut QueryFormat,
+    options: &mut QueryOptions,
+) -> Result<(), String> {
+    match option {
+        "--player" => options.player = Some(parse_query_text(option, value)?),
+        "--opponent" => options.opponent = Some(parse_query_text(option, value)?),
+        "--color" => options.color = Some(parse_query_color(value)?),
+        "--result" => options.result = Some(parse_query_result(value)?),
+        "--since" => options.since = Some(parse_query_date(option, value)?),
+        "--until" => options.until = Some(parse_query_date(option, value)?),
+        "--min-rating" => options.minimum_rating = Some(parse_query_rating(option, value)?),
+        "--max-rating" => options.maximum_rating = Some(parse_query_rating(option, value)?),
+        "--format" => *format = parse_query_format(value)?,
+        _ => unreachable!("query option was checked before dispatch"),
+    }
+    Ok(())
+}
+
+fn validate_query_options(options: &QueryOptions) -> Result<(), String> {
+    if options.player.is_none()
+        && (options.opponent.is_some()
+            || options.color.is_some()
+            || options.minimum_rating.is_some()
+            || options.maximum_rating.is_some()
+            || matches!(options.result, Some(ResultFilter::Win | ResultFilter::Loss)))
+    {
+        return Err(String::from(
+            "--opponent, --color, rating bounds, and win/loss results require --player",
+        ));
+    }
+    if options
+        .since
+        .zip(options.until)
+        .is_some_and(|(since, until)| since > until)
+    {
+        return Err(String::from("--since must not be later than --until"));
+    }
+    if options
+        .minimum_rating
+        .zip(options.maximum_rating)
+        .is_some_and(|(minimum, maximum)| minimum > maximum)
+    {
+        return Err(String::from("--min-rating must not exceed --max-rating"));
+    }
+    Ok(())
+}
+
+fn parse_query_text(option: &str, value: &OsStr) -> Result<String, String> {
+    let value = value
+        .to_str()
+        .ok_or_else(|| format!("{option} must be valid UTF-8"))?;
+    if value.is_empty() {
+        Err(format!("{option} must not be empty"))
+    } else {
+        Ok(String::from(value))
+    }
+}
+
+fn parse_query_color(value: &OsStr) -> Result<PlayerColor, String> {
+    match value.to_str() {
+        Some("white") => Ok(PlayerColor::White),
+        Some("black") => Ok(PlayerColor::Black),
+        Some(value) => Err(format!("unknown query color: {value}")),
+        None => Err(String::from("query color must be valid UTF-8")),
+    }
+}
+
+fn parse_query_result(value: &OsStr) -> Result<ResultFilter, String> {
+    match value.to_str() {
+        Some("win") => Ok(ResultFilter::Win),
+        Some("loss") => Ok(ResultFilter::Loss),
+        Some("draw") => Ok(ResultFilter::Draw),
+        Some("unfinished") => Ok(ResultFilter::Unfinished),
+        Some(value) => Err(format!("unknown query result: {value}")),
+        None => Err(String::from("query result must be valid UTF-8")),
+    }
+}
+
+fn parse_query_date(option: &str, value: &OsStr) -> Result<u32, String> {
+    let value = value
+        .to_str()
+        .ok_or_else(|| format!("{option} must be valid UTF-8"))?;
+    query::parse_date(value)
+        .ok_or_else(|| format!("{option} must be a real date in YYYY-MM-DD format"))
+}
+
+fn parse_query_rating(option: &str, value: &OsStr) -> Result<u32, String> {
+    let value = value
+        .to_str()
+        .ok_or_else(|| format!("{option} must be valid UTF-8"))?;
+    value
+        .parse()
+        .map_err(|_| format!("{option} must be an unsigned integer"))
+}
+
+fn parse_query_format(value: &OsStr) -> Result<QueryFormat, String> {
+    match value.to_str() {
+        Some("pgn") => Ok(QueryFormat::Pgn),
+        Some("jsonl") => Ok(QueryFormat::Jsonl),
+        Some("count") => Ok(QueryFormat::Count),
+        Some(value) => Err(format!("unknown query output format: {value}")),
+        None => Err(String::from("query output format must be valid UTF-8")),
+    }
+}
+
 fn validate_input_paths(command: &str, paths: &[OsString]) -> Result<(), String> {
     if paths.is_empty() {
         return Err(format!("{command} requires at least one input path"));
@@ -306,6 +488,66 @@ fn run_stats(command: &StatsCommand) -> ExitCode {
         .unwrap_or(0);
     if let Err(error) = render_stats_reports(&reports, command.format) {
         eprintln!("failed to write stats: {error}");
+        return ExitCode::from(3);
+    }
+    ExitCode::from(exit_code)
+}
+
+fn run_query(command: &QueryCommand) -> ExitCode {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    let mut total = QuerySummary::default();
+    let mut exit_code = 0;
+
+    if command.paths[0] == "-" {
+        match query_games(
+            io::stdin().lock(),
+            "stdin",
+            &command.options,
+            command.format,
+            &mut output,
+        ) {
+            Ok(summary) => total.add(summary),
+            Err(failure) => {
+                total.add(failure.summary);
+                eprintln!("query: stdin: {}", failure.error);
+                if matches!(failure.error, QueryError::Output(_)) {
+                    return ExitCode::from(3);
+                }
+                exit_code = failure.error.exit_code();
+            }
+        }
+    } else {
+        for input in discover_inputs(&command.paths) {
+            let result = match input {
+                DiscoveredInput::File(path) => query_path(
+                    path.as_os_str(),
+                    &command.options,
+                    command.format,
+                    &mut output,
+                ),
+                DiscoveredInput::Error { source, message } => {
+                    eprintln!("query: {}: {message}", source.display());
+                    exit_code = exit_code.max(3);
+                    continue;
+                }
+            };
+            match result {
+                Ok(summary) => total.add(summary),
+                Err((source, failure)) => {
+                    total.add(failure.summary);
+                    eprintln!("query: {source}: {}", failure.error);
+                    if matches!(failure.error, QueryError::Output(_)) {
+                        return ExitCode::from(3);
+                    }
+                    exit_code = exit_code.max(failure.error.exit_code());
+                }
+            }
+        }
+    }
+
+    if command.format == QueryFormat::Count && writeln!(output, "{}", total.matches).is_err() {
+        eprintln!("failed to write query count");
         return ExitCode::from(3);
     }
     ExitCode::from(exit_code)
@@ -491,6 +733,39 @@ fn inspect_stats_path(path: &OsStr, options: StatsOptions) -> StatsReport {
     } else {
         inspect_stats(file, source, options)
     }
+}
+
+fn query_path(
+    path: &OsStr,
+    options: &QueryOptions,
+    format: QueryFormat,
+    output: &mut impl Write,
+) -> Result<QuerySummary, (String, QueryFailure)> {
+    let source = path.to_string_lossy().into_owned();
+    let file = File::open(path).map_err(|error| {
+        (
+            source.clone(),
+            QueryFailure {
+                summary: QuerySummary::default(),
+                error: QueryError::Frame(gambit_pgn::FrameError::Io(error)),
+            },
+        )
+    })?;
+    let result = if is_zstd_path(path) {
+        let decoder = zstd::stream::read::Decoder::new(file).map_err(|error| {
+            (
+                source.clone(),
+                QueryFailure {
+                    summary: QuerySummary::default(),
+                    error: QueryError::Frame(gambit_pgn::FrameError::Io(error)),
+                },
+            )
+        })?;
+        query_games(decoder, &source, options, format, output)
+    } else {
+        query_games(file, &source, options, format, output)
+    };
+    result.map_err(|error| (source, error))
 }
 
 fn is_zstd_path(path: &std::ffi::OsStr) -> bool {
