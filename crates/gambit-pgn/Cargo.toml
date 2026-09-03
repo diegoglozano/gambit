@@ -1,6 +1,6 @@
 [package]
 name = "gambit-pgn"
-version = "0.3.0"
+version = "0.4.0"
 description = "A zero-copy, streaming PGN parser for chess data pipelines"
 edition.workspace = true
 license.workspace = true
