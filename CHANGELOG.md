@@ -4,6 +4,12 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added `gambit query` for bounded-memory metadata filtering with player-relative
+  color, result, opponent, date, and rating predicates, emitting PGN, JSONL, or
+  a match count.
+
 ## [0.4.0] - 2026-09-03
 
 ### Added

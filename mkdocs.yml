@@ -19,6 +19,7 @@ nav:
   - Overview: index.md
   - Getting started: getting-started.md
   - Corpus statistics: statistics.md
+  - Query games: query.md
   - CLI reference: cli.md
   - GitHub Actions: github-actions.md
   - Benchmarks:

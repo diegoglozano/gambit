@@ -5,6 +5,7 @@
 ```text
 gambit doctor [OPTIONS] <PATH|->...
 gambit stats [OPTIONS] <PATH|->...
+gambit query [OPTIONS] <PATH|->...
 gambit <PATH|->
 ```
 
@@ -55,6 +56,25 @@ reports corpus shape, Seven Tag Roster coverage, date quality/range, and Elo
 quality/range. Fixed distributions describe game lengths, rating bands, and
 PGN time-control forms. See [Corpus statistics](statistics.md) for metric
 definitions, JSON shape, and HPC behavior.
+
+## Query options
+
+| Option | Description |
+| --- | --- |
+| `--player <NAME>` | Match games containing this player, case-insensitively. |
+| `--opponent <NAME>` | Match the selected player's opponent. Requires `--player`. |
+| `--color <white|black>` | Match the selected player's color. Requires `--player`. |
+| `--result <win|loss|draw|unfinished>` | Match the selected player's result. `win` and `loss` require `--player`. |
+| `--since <YYYY-MM-DD>` | Match games on or after this inclusive date. |
+| `--until <YYYY-MM-DD>` | Match games on or before this inclusive date. |
+| `--min-rating <ELO>` | Match the selected player's minimum rating. Requires `--player`. |
+| `--max-rating <ELO>` | Match the selected player's maximum rating. Requires `--player`. |
+| `--format <pgn|jsonl|count>` | Select output. The default is `pgn`. |
+| `-h`, `--help` | Print help. |
+
+Query accepts the same input forms as Doctor and Stats. See
+[Query games](query.md) for missing-metadata behavior, output contracts, and
+bounded-memory details.
 
 ## Validation modes
 

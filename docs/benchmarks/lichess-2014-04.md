@@ -282,6 +282,34 @@ The five distribution runs measured 444.21, 464.88, 464.94, 451.21, and
 baseline are within normal run-to-run variation; the new distributions have no
 material throughput or memory cost.
 
+### Metadata-query follow-up
+
+The first Query slice frames one bounded game at a time, parses it without
+materializing a game tree, and applies player-relative metadata predicates. A
+no-match player filter with `--format count` exercises the complete filtering
+path while avoiding output-volume costs:
+
+```console
+gambit query \
+  --player no-such-player-gambit-benchmark \
+  --format count \
+  lichess_db_standard_rated_2014-04.pgn.zst
+```
+
+Every run inspected all 810,463 games and returned zero matches.
+
+| Input | Elapsed runs | Median throughput | Maximum RSS |
+| --- | --- | ---: | ---: |
+| Decompressed file | 2.80s, 2.77s, 2.76s, 2.75s, 2.76s | **242.49 MiB/s** | 1,900,544 bytes |
+| In-process `.pgn.zst` | 3.58s, 3.30s, 3.29s, 3.25s, 3.32s | **202.81 MiB/s** | 10,944,512 bytes |
+
+Unlike fused Stats, Query retains the raw bytes of the current game so a match
+can be emitted as reusable PGN. Framing and parsing therefore inspect the bytes
+in separate passes, explaining the throughput difference. The 16 MiB per-game
+safety limit bounds worst-case memory independently of corpus size; normal
+games retain the same sub-2 MB decompressed and approximately 11 MB compressed
+resident footprints as the existing streaming paths.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row
@@ -293,6 +321,7 @@ is part of the result:
 | Gambit fused streaming file | 810,463 | 432.53 MiB/s | 1.74 MB | Reads once, lexes, and counts every event |
 | Gambit fused `zstdcat` pipeline | 810,463 | 427.02 MiB/s | 1.75 MB | Decompresses, reads once, lexes, and counts every event |
 | Gambit streaming file | 810,463 | 241.28 MiB/s | 1.74 MB | Frames games, then lexes and counts every event |
+| Gambit Query filtered count | 810,463 | 242.49 MiB/s | 1.90 MB | Frames games, parses metadata, and applies player-relative filters |
 | Gambit `zstdcat` pipeline | 810,463 | 238.10 MiB/s | 1.77 MB | Decompresses, frames, lexes, and counts every event |
 | python-chess `skip_game()` | 810,463 | 84.60 MiB/s | 20.25 MB | Finds and skips games without fully parsing them |
 | Scoutfish `make` | Not completed | Not valid | Not valid | Parses legal positions and writes a query index |

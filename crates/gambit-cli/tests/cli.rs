@@ -91,6 +91,7 @@ fn help_describes_commands() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("gambit doctor"));
     assert!(stdout.contains("gambit stats"));
+    assert!(stdout.contains("gambit query"));
     assert!(stdout.contains("--format <human|json|jsonl|github>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));
@@ -274,6 +275,96 @@ fn stats_rejects_streaming_jsonl_until_it_has_a_record_contract() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown stats output format"));
+}
+
+#[test]
+fn query_counts_player_relative_matches() {
+    let input = b"[Date \"2026.01.02\"]\n[White \"Opponent\"]\n[Black \"DiegoGLozano\"]\n[WhiteElo \"1300\"]\n[BlackElo \"1190\"]\n\n1. e4 1-0\n\n[Date \"2025.01.02\"]\n[White \"diegoglozano\"]\n[Black \"Other\"]\n[WhiteElo \"1200\"]\n[BlackElo \"1250\"]\n\n1. d4 1-0\n";
+    let output = run_with_stdin(
+        &[
+            "query",
+            "-",
+            "--player=diegoglozano",
+            "--color",
+            "black",
+            "--result=loss",
+            "--since",
+            "2026-01-01",
+            "--min-rating=1100",
+            "--max-rating",
+            "1200",
+            "--format=count",
+        ],
+        input,
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn query_emits_matching_pgn_that_can_be_validated() {
+    let input = b"[Event \"Keep\"]\n[White \"Diego\"]\n[Black \"Target\"]\n\n1. e4 *\n\n[Event \"Skip\"]\n[White \"Diego\"]\n[Black \"Other\"]\n\n1. d4 *\n";
+    let output = run_with_stdin(
+        &["query", "--player", "diego", "--opponent", "target", "-"],
+        input,
+    );
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("[Event \"Keep\"]"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("[Event \"Skip\"]"));
+    let validation = run_with_stdin(&["doctor", "--syntax-only", "-"], &output.stdout);
+    assert!(validation.status.success());
+}
+
+#[test]
+fn query_jsonl_identifies_each_matching_game() {
+    let input = b"[Site \"https://example.test/a\"]\n[UTCDate \"2026.02.03\"]\n[White \"A\"]\n[Black \"B\"]\n[WhiteElo \"1500\"]\n[BlackElo \"?\"]\n\n1. e4 e5 1/2-1/2\n";
+    let output = run_with_stdin(
+        &["query", "--result", "draw", "--format", "jsonl", "-"],
+        input,
+    );
+
+    assert!(output.status.success());
+    let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(record["schema_version"], 1);
+    assert_eq!(record["source"], "stdin");
+    assert_eq!(record["game"], 1);
+    assert_eq!(record["date"], "2026.02.03");
+    assert_eq!(record["white_elo"], 1500);
+    assert!(record.get("black_elo").is_none());
+    assert_eq!(record["result"], "draw");
+    assert_eq!(record["mainline_plies"], 2);
+}
+
+#[test]
+fn query_rejects_player_relative_filters_without_a_player() {
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["query", "--result", "win", "example.pgn"])
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("require --player"));
+}
+
+#[test]
+fn query_counts_plain_and_zstd_games_in_a_directory() {
+    let directory = TestDirectory::new();
+    directory.write("one.pgn", b"[White \"Diego\"]\n[Black \"A\"]\n\n1. e4 *\n");
+    let second = b"[White \"B\"]\n[Black \"Diego\"]\n\n1. d4 *\n";
+    let compressed = zstd::stream::encode_all(&second[..], 1).expect("compress PGN");
+    directory.write("nested/two.pgn.zst", &compressed);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["query", "--player", "diego", "--format", "count"])
+        .arg(directory.path())
+        .output()
+        .expect("run gambit");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"2\n");
 }
 
 #[test]
