@@ -69,12 +69,14 @@ fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("run gambit");
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(input)
-        .expect("write PGN");
+    let write_result = child.stdin.take().expect("piped stdin").write_all(input);
+    if let Err(error) = write_result {
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "write PGN: {error}"
+        );
+    }
     child.wait_with_output().expect("wait for gambit")
 }
 
@@ -130,9 +132,12 @@ fn stats_human_output_is_a_compact_summary() {
     assert!(stdout.contains("mainline plies: 2"));
     assert!(stdout.contains("0 white wins, 0 black wins, 1 draw, 0 unfinished"));
     assert!(stdout.contains("min 2, avg 2.00, max 2"));
+    assert!(stdout.contains("game-length buckets: 0=0, 1-20=1"));
     assert!(stdout.contains("header coverage:"));
     assert!(stdout.contains("dates: 0 complete, 0 incomplete/invalid, 1 missing"));
     assert!(stdout.contains("ratings: 0 numeric, 0 invalid, 2 missing"));
+    assert!(stdout.contains("rating bands: <1000=0"));
+    assert!(stdout.contains("time controls:") && stdout.contains("missing=1"));
 }
 
 #[test]
@@ -194,11 +199,11 @@ fn stats_aggregates_a_directory_batch() {
     let directory = TestDirectory::new();
     directory.write(
         "one.pgn",
-        b"[Event \"One\"]\n[Date \"2025.01.02\"]\n[WhiteElo \"2000\"]\n[BlackElo \"2200\"]\n\n1. e4 *\n",
+        b"[Event \"One\"]\n[Date \"2025.01.02\"]\n[WhiteElo \"2000\"]\n[BlackElo \"2200\"]\n[TimeControl \"180+0\"]\n\n1. e4 *\n",
     );
     directory.write(
         "nested/two.pgn",
-        b"[Date \"2023.12.31\"]\n[WhiteElo \"?\"]\n[BlackElo \"1800\"]\n\n1. d4 d5 0-1\n",
+        b"[Date \"2023.12.31\"]\n[WhiteElo \"?\"]\n[BlackElo \"1800\"]\n[TimeControl \"40/7200:3600\"]\n\n1. d4 d5 0-1\n",
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
@@ -227,6 +232,12 @@ fn stats_aggregates_a_directory_batch() {
     assert_eq!(batch["ratings"]["minimum"], 1800);
     assert_eq!(batch["ratings"]["average"], 2000.0);
     assert_eq!(batch["ratings"]["maximum"], 2200);
+    assert_eq!(batch["ratings"]["distribution"]["from_1800_to_1999"], 1);
+    assert_eq!(batch["ratings"]["distribution"]["from_2000_to_2199"], 1);
+    assert_eq!(batch["ratings"]["distribution"]["from_2200_to_2399"], 1);
+    assert_eq!(batch["game_length"]["distribution"]["from_1_to_20"], 2);
+    assert_eq!(batch["time_controls"]["increment"], 1);
+    assert_eq!(batch["time_controls"]["multi_stage"], 1);
     assert_eq!(batch["reports"].as_array().unwrap().len(), 2);
 }
 

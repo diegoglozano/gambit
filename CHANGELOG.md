@@ -15,6 +15,8 @@ All notable changes to Gambit are documented in this file.
 - Added Seven Tag Roster coverage, complete `Date`/`UTCDate` ranges, and
   `WhiteElo`/`BlackElo` coverage and summary statistics without retaining
   high-cardinality tag values.
+- Added fixed, exactly mergeable distributions for game length and Elo, plus
+  structural categories for PGN `TimeControl` values.
 
 ### Changed
 

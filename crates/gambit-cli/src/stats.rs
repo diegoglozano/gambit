@@ -46,12 +46,133 @@ impl ResultCounts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct GameLengthDistribution {
+    pub zero: u64,
+    pub from_1_to_20: u64,
+    pub from_21_to_40: u64,
+    pub from_41_to_60: u64,
+    pub from_61_to_80: u64,
+    pub from_81_to_120: u64,
+    pub from_121_to_160: u64,
+    pub at_least_161: u64,
+}
+
+impl GameLengthDistribution {
+    fn record(&mut self, plies: u64) {
+        match plies {
+            0 => self.zero += 1,
+            1..=20 => self.from_1_to_20 += 1,
+            21..=40 => self.from_21_to_40 += 1,
+            41..=60 => self.from_41_to_60 += 1,
+            61..=80 => self.from_61_to_80 += 1,
+            81..=120 => self.from_81_to_120 += 1,
+            121..=160 => self.from_121_to_160 += 1,
+            _ => self.at_least_161 += 1,
+        }
+    }
+
+    pub fn add(&mut self, other: Self) {
+        self.zero += other.zero;
+        self.from_1_to_20 += other.from_1_to_20;
+        self.from_21_to_40 += other.from_21_to_40;
+        self.from_41_to_60 += other.from_41_to_60;
+        self.from_61_to_80 += other.from_61_to_80;
+        self.from_81_to_120 += other.from_81_to_120;
+        self.from_121_to_160 += other.from_121_to_160;
+        self.at_least_161 += other.at_least_161;
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 #[allow(clippy::struct_field_names)]
 pub struct GameLengthStats {
     pub minimum_plies: Option<u64>,
     pub average_plies: f64,
     pub maximum_plies: Option<u64>,
+    pub distribution: GameLengthDistribution,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct RatingDistribution {
+    pub under_1000: u64,
+    pub from_1000_to_1199: u64,
+    pub from_1200_to_1399: u64,
+    pub from_1400_to_1599: u64,
+    pub from_1600_to_1799: u64,
+    pub from_1800_to_1999: u64,
+    pub from_2000_to_2199: u64,
+    pub from_2200_to_2399: u64,
+    pub at_least_2400: u64,
+}
+
+impl RatingDistribution {
+    fn record(&mut self, rating: u32) {
+        match rating {
+            0..=999 => self.under_1000 += 1,
+            1000..=1199 => self.from_1000_to_1199 += 1,
+            1200..=1399 => self.from_1200_to_1399 += 1,
+            1400..=1599 => self.from_1400_to_1599 += 1,
+            1600..=1799 => self.from_1600_to_1799 += 1,
+            1800..=1999 => self.from_1800_to_1999 += 1,
+            2000..=2199 => self.from_2000_to_2199 += 1,
+            2200..=2399 => self.from_2200_to_2399 += 1,
+            _ => self.at_least_2400 += 1,
+        }
+    }
+
+    fn add(&mut self, other: Self) {
+        self.under_1000 += other.under_1000;
+        self.from_1000_to_1199 += other.from_1000_to_1199;
+        self.from_1200_to_1399 += other.from_1200_to_1399;
+        self.from_1400_to_1599 += other.from_1400_to_1599;
+        self.from_1600_to_1799 += other.from_1600_to_1799;
+        self.from_1800_to_1999 += other.from_1800_to_1999;
+        self.from_2000_to_2199 += other.from_2000_to_2199;
+        self.from_2200_to_2399 += other.from_2200_to_2399;
+        self.at_least_2400 += other.at_least_2400;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct TimeControlStats {
+    pub sudden_death: u64,
+    pub increment: u64,
+    pub moves_per_period: u64,
+    pub multi_stage: u64,
+    pub hourglass: u64,
+    pub unknown: u64,
+    pub unlimited: u64,
+    pub invalid: u64,
+    pub missing: u64,
+}
+
+impl TimeControlStats {
+    fn record(&mut self, kind: TimeControlKind) {
+        match kind {
+            TimeControlKind::SuddenDeath => self.sudden_death += 1,
+            TimeControlKind::Increment => self.increment += 1,
+            TimeControlKind::MovesPerPeriod => self.moves_per_period += 1,
+            TimeControlKind::MultiStage => self.multi_stage += 1,
+            TimeControlKind::Hourglass => self.hourglass += 1,
+            TimeControlKind::Unknown => self.unknown += 1,
+            TimeControlKind::Unlimited => self.unlimited += 1,
+            TimeControlKind::Invalid => self.invalid += 1,
+            TimeControlKind::Missing => self.missing += 1,
+        }
+    }
+
+    pub fn add(&mut self, other: Self) {
+        self.sudden_death += other.sudden_death;
+        self.increment += other.increment;
+        self.moves_per_period += other.moves_per_period;
+        self.multi_stage += other.multi_stage;
+        self.hourglass += other.hourglass;
+        self.unknown += other.unknown;
+        self.unlimited += other.unlimited;
+        self.invalid += other.invalid;
+        self.missing += other.missing;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
@@ -112,6 +233,7 @@ pub struct RatingStats {
     pub minimum: Option<u32>,
     pub average: f64,
     pub maximum: Option<u32>,
+    pub distribution: RatingDistribution,
     #[serde(skip)]
     total: u64,
 }
@@ -122,6 +244,7 @@ impl RatingStats {
         self.invalid += other.invalid;
         self.missing += other.missing;
         self.total += other.total;
+        self.distribution.add(other.distribution);
         if let Some(value) = other.minimum {
             self.minimum = Some(self.minimum.map_or(value, |current| current.min(value)));
         }
@@ -138,6 +261,7 @@ impl RatingStats {
         };
         self.numeric += 1;
         self.total += u64::from(value);
+        self.distribution.record(value);
         self.minimum = Some(self.minimum.map_or(value, |current| current.min(value)));
         self.maximum = Some(self.maximum.map_or(value, |current| current.max(value)));
     }
@@ -190,6 +314,7 @@ pub struct StatsReport {
     pub header_coverage: HeaderCoverage,
     pub dates: DateStats,
     pub ratings: RatingStats,
+    pub time_controls: TimeControlStats,
     pub elapsed_seconds: f64,
     pub throughput_mib_per_second: f64,
     pub diagnostic: Option<StatsDiagnostic>,
@@ -210,6 +335,7 @@ impl StatsReport {
             header_coverage: HeaderCoverage::default(),
             dates: DateStats::default(),
             ratings: RatingStats::default(),
+            time_controls: TimeControlStats::default(),
             elapsed_seconds: 0.0,
             throughput_mib_per_second: 0.0,
             diagnostic: Some(StatsDiagnostic {
@@ -236,6 +362,7 @@ struct Accumulator {
     results: ResultCounts,
     minimum_plies: Option<u64>,
     maximum_plies: Option<u64>,
+    game_length_distribution: GameLengthDistribution,
     current_plies: u64,
     current_outcome: Outcome,
     variation_depth: u32,
@@ -246,6 +373,7 @@ struct Accumulator {
     earliest_date: Option<u32>,
     latest_date: Option<u32>,
     ratings: RatingStats,
+    time_controls: TimeControlStats,
     current_metadata: CurrentMetadata,
 }
 
@@ -257,6 +385,7 @@ impl Default for Accumulator {
             results: ResultCounts::default(),
             minimum_plies: None,
             maximum_plies: None,
+            game_length_distribution: GameLengthDistribution::default(),
             current_plies: 0,
             current_outcome: Outcome::Unknown,
             variation_depth: 0,
@@ -267,6 +396,7 @@ impl Default for Accumulator {
             earliest_date: None,
             latest_date: None,
             ratings: RatingStats::default(),
+            time_controls: TimeControlStats::default(),
             current_metadata: CurrentMetadata::default(),
         }
     }
@@ -301,6 +431,20 @@ enum MetadataValue {
     Numeric(u32),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum TimeControlKind {
+    SuddenDeath,
+    Increment,
+    MovesPerPeriod,
+    MultiStage,
+    Hourglass,
+    Unknown,
+    Unlimited,
+    Invalid,
+    #[default]
+    Missing,
+}
+
 impl MetadataValue {
     fn parsed(value: Option<u32>) -> Self {
         value.map_or(Self::Invalid, Self::Numeric)
@@ -318,6 +462,7 @@ struct CurrentMetadata {
     utc_date: MetadataValue,
     white_elo: MetadataValue,
     black_elo: MetadataValue,
+    time_control: TimeControlKind,
 }
 
 impl CurrentMetadata {
@@ -348,6 +493,11 @@ impl CurrentMetadata {
             b"BlackElo" => {
                 if self.black_elo.is_missing() {
                     self.black_elo = MetadataValue::parsed(parse_unsigned(tag.raw_value()));
+                }
+            }
+            b"TimeControl" => {
+                if self.time_control == TimeControlKind::Missing {
+                    self.time_control = classify_time_control(tag.raw_value());
                 }
             }
             _ => {}
@@ -386,6 +536,7 @@ impl Accumulator {
         self.maximum_plies = Some(self.maximum_plies.map_or(self.current_plies, |maximum| {
             maximum.max(self.current_plies)
         }));
+        self.game_length_distribution.record(self.current_plies);
         self.finish_metadata();
     }
 
@@ -425,6 +576,8 @@ impl Accumulator {
                 MetadataValue::Missing => self.ratings.missing += 1,
             }
         }
+        self.time_controls
+            .record(self.current_metadata.time_control);
     }
 
     fn game_length(&self) -> GameLengthStats {
@@ -438,6 +591,7 @@ impl Accumulator {
             minimum_plies: self.minimum_plies,
             average_plies,
             maximum_plies: self.maximum_plies,
+            distribution: self.game_length_distribution,
         }
     }
 
@@ -482,6 +636,68 @@ fn parse_unsigned(value: &[u8]) -> Option<u32> {
             .and_then(|number| number.checked_mul(10))?
             .checked_add(digit)
     })
+}
+
+fn classify_time_control(value: &[u8]) -> TimeControlKind {
+    match value {
+        b"?" => return TimeControlKind::Unknown,
+        b"-" => return TimeControlKind::Unlimited,
+        _ => {}
+    }
+    if value.contains(&b':') {
+        let mut stages = value.split(|byte| *byte == b':');
+        let first = stages.next();
+        let second = stages.next();
+        if first.is_some()
+            && second.is_some()
+            && first.into_iter().chain(second).chain(stages).all(|stage| {
+                !matches!(
+                    classify_single_time_control(stage),
+                    TimeControlKind::Invalid
+                )
+            })
+        {
+            return TimeControlKind::MultiStage;
+        }
+        return TimeControlKind::Invalid;
+    }
+    classify_single_time_control(value)
+}
+
+fn classify_single_time_control(value: &[u8]) -> TimeControlKind {
+    if let Some(seconds) = value.strip_prefix(b"*") {
+        return if parse_unsigned(seconds).is_some_and(|seconds| seconds > 0) {
+            TimeControlKind::Hourglass
+        } else {
+            TimeControlKind::Invalid
+        };
+    }
+    if let Some((initial, increment)) = split_once(value, b'+') {
+        return if parse_unsigned(initial).is_some() && parse_unsigned(increment).is_some() {
+            TimeControlKind::Increment
+        } else {
+            TimeControlKind::Invalid
+        };
+    }
+    if let Some((moves, seconds)) = split_once(value, b'/') {
+        return if parse_unsigned(moves).is_some_and(|moves| moves > 0)
+            && parse_unsigned(seconds).is_some_and(|seconds| seconds > 0)
+        {
+            TimeControlKind::MovesPerPeriod
+        } else {
+            TimeControlKind::Invalid
+        };
+    }
+    if parse_unsigned(value).is_some_and(|seconds| seconds > 0) {
+        TimeControlKind::SuddenDeath
+    } else {
+        TimeControlKind::Invalid
+    }
+}
+
+fn split_once(value: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
+    let index = value.iter().position(|byte| *byte == delimiter)?;
+    Some((&value[..index], &value[index + 1..]))
 }
 
 const fn days_in_month(year: u32, month: u32) -> u32 {
@@ -571,6 +787,7 @@ pub fn inspect<R: Read>(reader: R, source: String, options: StatsOptions) -> Sta
         header_coverage: accumulator.header_coverage,
         dates: accumulator.dates(),
         ratings: accumulator.ratings(),
+        time_controls: accumulator.time_controls,
         elapsed_seconds,
         throughput_mib_per_second,
         diagnostic,
@@ -600,6 +817,8 @@ mod tests {
         assert_eq!(report.game_length.minimum_plies, Some(1));
         assert!((report.game_length.average_plies - 1.5).abs() < f64::EPSILON);
         assert_eq!(report.game_length.maximum_plies, Some(2));
+        assert_eq!(report.game_length.distribution.from_1_to_20, 2);
+        assert_eq!(report.time_controls.missing, 2);
     }
 
     #[test]
@@ -666,6 +885,8 @@ mod tests {
         assert_eq!(report.ratings.minimum, Some(2300));
         assert!((report.ratings.average - 2400.0).abs() < f64::EPSILON);
         assert_eq!(report.ratings.maximum, Some(2500));
+        assert_eq!(report.ratings.distribution.from_2200_to_2399, 1);
+        assert_eq!(report.ratings.distribution.at_least_2400, 2);
     }
 
     #[test]
@@ -691,5 +912,50 @@ mod tests {
         assert_eq!(report.dates.incomplete_or_invalid, 1);
         assert_eq!(report.dates.earliest.as_deref(), Some("2023.12.31"));
         assert_eq!(report.dates.latest.as_deref(), Some("2023.12.31"));
+    }
+
+    #[test]
+    fn assigns_distribution_boundaries_exactly_once() {
+        let mut lengths = GameLengthDistribution::default();
+        for value in [0, 1, 20, 21, 40, 41, 60, 61, 80, 81, 120, 121, 160, 161] {
+            lengths.record(value);
+        }
+        assert_eq!(lengths.zero, 1);
+        assert_eq!(lengths.from_1_to_20, 2);
+        assert_eq!(lengths.from_21_to_40, 2);
+        assert_eq!(lengths.from_41_to_60, 2);
+        assert_eq!(lengths.from_61_to_80, 2);
+        assert_eq!(lengths.from_81_to_120, 2);
+        assert_eq!(lengths.from_121_to_160, 2);
+        assert_eq!(lengths.at_least_161, 1);
+
+        let mut ratings = RatingDistribution::default();
+        for value in [999, 1000, 1199, 1200, 2399, 2400] {
+            ratings.record(value);
+        }
+        assert_eq!(ratings.under_1000, 1);
+        assert_eq!(ratings.from_1000_to_1199, 2);
+        assert_eq!(ratings.from_1200_to_1399, 1);
+        assert_eq!(ratings.from_2200_to_2399, 1);
+        assert_eq!(ratings.at_least_2400, 1);
+    }
+
+    #[test]
+    fn classifies_pgn_time_control_forms() {
+        let cases: &[(&[u8], TimeControlKind)] = &[
+            (b"300", TimeControlKind::SuddenDeath),
+            (b"180+2", TimeControlKind::Increment),
+            (b"40/7200", TimeControlKind::MovesPerPeriod),
+            (b"40/7200:3600+30", TimeControlKind::MultiStage),
+            (b"*60", TimeControlKind::Hourglass),
+            (b"?", TimeControlKind::Unknown),
+            (b"-", TimeControlKind::Unlimited),
+            (b"", TimeControlKind::Invalid),
+            (b"40/0", TimeControlKind::Invalid),
+            (b"40/7200:", TimeControlKind::Invalid),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(classify_time_control(value), *expected, "{value:?}");
+        }
     }
 }

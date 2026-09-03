@@ -257,6 +257,31 @@ MiB/s for the decompressed file. Compressed runs measured 344.11, 351.67,
 noise: Zstandard remains the bottleneck. Metadata costs about 2.5% on the
 parser-bound path while retaining the bounded-memory profile.
 
+### Fixed-distribution follow-up
+
+Stats next added eight game-length buckets, nine rating bands, and nine
+time-control categories. All are fixed-size integer counters with exact
+multi-file merges.
+
+On this corpus, game lengths fall into 188 zero-ply, 44,878 1–20-ply, 110,628
+21–40-ply, 207,384 41–60-ply, 199,448 61–80-ply, 196,634 81–120-ply, 45,085
+121–160-ply, and 6,218 games with at least 161 plies. Rating bands contain 4,569
+values under 1000, 44,145 at 1000–1199, 218,466 at 1200–1399, 493,775 at
+1400–1599, 517,927 at 1600–1799, 261,806 at 1800–1999, 69,170 at 2000–2199,
+9,769 at 2200–2399, and 1,188 at 2400+. Time controls comprise 808,167
+increment controls and 2,296 unlimited games.
+
+| Input | Metadata median | Distribution median | Change | Maximum RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Decompressed file | 463.64 MiB/s | **464.52 MiB/s** | +0.19% | 1,916,928 bytes |
+| In-process `.pgn.zst` | 351.67 MiB/s | **349.57 MiB/s** | -0.60% | 10,944,512 bytes |
+
+The five distribution runs measured 444.21, 464.88, 464.94, 451.21, and
+464.52 MiB/s for the decompressed file. Compressed runs measured 335.85,
+350.26, 349.57, 350.48, and 339.99 MiB/s. Both differences from the metadata
+baseline are within normal run-to-run variation; the new distributions have no
+material throughput or memory cost.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row
