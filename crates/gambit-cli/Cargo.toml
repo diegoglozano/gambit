@@ -1,6 +1,6 @@
 [package]
 name = "gambit"
-version = "0.3.0"
+version = "0.4.0"
 description = "Inspect and validate PGN corpora from the command line"
 edition.workspace = true
 license.workspace = true
