@@ -374,7 +374,7 @@ fn reports_the_release_version() {
         .output()
         .expect("run gambit");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"gambit 0.4.0\n");
+    assert_eq!(output.stdout, b"gambit 0.5.0\n");
 }
 
 #[test]

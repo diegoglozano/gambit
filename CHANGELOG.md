@@ -4,6 +4,8 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-03
+
 ### Added
 
 - Added `gambit query` for bounded-memory metadata filtering with player-relative
@@ -67,7 +69,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/diegoglozano/gambit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/diegoglozano/gambit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/diegoglozano/gambit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/diegoglozano/gambit/compare/v0.1.0...v0.2.0
