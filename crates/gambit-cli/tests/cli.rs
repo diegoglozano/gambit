@@ -69,12 +69,14 @@ fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("run gambit");
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(input)
-        .expect("write PGN");
+    let write_result = child.stdin.take().expect("piped stdin").write_all(input);
+    if let Err(error) = write_result {
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "write PGN: {error}"
+        );
+    }
     child.wait_with_output().expect("wait for gambit")
 }
 
