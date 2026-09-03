@@ -14,7 +14,7 @@ use doctor::{
 use serde::Serialize;
 use stats::{
     DateStats, GameLengthStats, HeaderCoverage, RatingStats, ResultCounts, StatsDiagnostic,
-    StatsOptions, StatsReport, StatsStatus, inspect as inspect_stats,
+    StatsOptions, StatsReport, StatsStatus, TimeControlStats, inspect as inspect_stats,
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
@@ -575,6 +575,7 @@ struct StatsBatchReport<'a> {
     header_coverage: HeaderCoverage,
     dates: DateStats,
     ratings: RatingStats,
+    time_controls: TimeControlStats,
     elapsed_seconds: f64,
     throughput_mib_per_second: f64,
     reports: &'a [StatsReport],
@@ -593,6 +594,8 @@ impl<'a> StatsBatchReport<'a> {
         let mut header_coverage = HeaderCoverage::default();
         let mut dates = DateStats::default();
         let mut ratings = RatingStats::default();
+        let mut game_length_distribution = stats::GameLengthDistribution::default();
+        let mut time_controls = TimeControlStats::default();
         let mut minimum_plies = None;
         let mut maximum_plies = None;
         for report in reports {
@@ -600,6 +603,8 @@ impl<'a> StatsBatchReport<'a> {
             header_coverage.add(report.header_coverage);
             dates.add(&report.dates);
             ratings.add(report.ratings);
+            game_length_distribution.add(report.game_length.distribution);
+            time_controls.add(report.time_controls);
             if let Some(value) = report.game_length.minimum_plies {
                 minimum_plies =
                     Some(minimum_plies.map_or(value, |current: u64| current.min(value)));
@@ -659,10 +664,12 @@ impl<'a> StatsBatchReport<'a> {
                 minimum_plies,
                 average_plies,
                 maximum_plies,
+                distribution: game_length_distribution,
             },
             header_coverage,
             dates,
             ratings,
+            time_controls,
             elapsed_seconds,
             throughput_mib_per_second,
             reports,
@@ -700,6 +707,7 @@ fn render_stats_reports(reports: &[StatsReport], format: StatsOutputFormat) -> i
             report.header_coverage,
             &report.dates,
             report.ratings,
+            report.time_controls,
             report.elapsed_seconds,
             report.throughput_mib_per_second,
         )
@@ -722,6 +730,7 @@ fn render_stats_reports(reports: &[StatsReport], format: StatsOutputFormat) -> i
             batch.header_coverage,
             &batch.dates,
             batch.ratings,
+            batch.time_controls,
             batch.elapsed_seconds,
             batch.throughput_mib_per_second,
         )
@@ -739,6 +748,7 @@ fn render_stats_metrics(
     header_coverage: HeaderCoverage,
     dates: &DateStats,
     ratings: RatingStats,
+    time_controls: TimeControlStats,
     elapsed_seconds: f64,
     throughput_mib_per_second: f64,
 ) -> io::Result<()> {
@@ -764,6 +774,18 @@ fn render_stats_metrics(
         )?,
         _ => writeln!(output, "game length (plies): n/a")?,
     }
+    writeln!(
+        output,
+        "game-length buckets: 0={}, 1-20={}, 21-40={}, 41-60={}, 61-80={}, 81-120={}, 121-160={}, 161+={}",
+        game_length.distribution.zero,
+        game_length.distribution.from_1_to_20,
+        game_length.distribution.from_21_to_40,
+        game_length.distribution.from_41_to_60,
+        game_length.distribution.from_61_to_80,
+        game_length.distribution.from_81_to_120,
+        game_length.distribution.from_121_to_160,
+        game_length.distribution.at_least_161,
+    )?;
     writeln!(
         output,
         "header coverage: Event {}/{games}, Site {}/{games}, Date {}/{games}, Round {}/{games}, White {}/{games}, Black {}/{games}, Result {}/{games}",
@@ -801,6 +823,32 @@ fn render_stats_metrics(
             ratings.invalid, ratings.missing
         )?;
     }
+    writeln!(
+        output,
+        "rating bands: <1000={}, 1000-1199={}, 1200-1399={}, 1400-1599={}, 1600-1799={}, 1800-1999={}, 2000-2199={}, 2200-2399={}, 2400+={}",
+        ratings.distribution.under_1000,
+        ratings.distribution.from_1000_to_1199,
+        ratings.distribution.from_1200_to_1399,
+        ratings.distribution.from_1400_to_1599,
+        ratings.distribution.from_1600_to_1799,
+        ratings.distribution.from_1800_to_1999,
+        ratings.distribution.from_2000_to_2199,
+        ratings.distribution.from_2200_to_2399,
+        ratings.distribution.at_least_2400,
+    )?;
+    writeln!(
+        output,
+        "time controls: sudden death={}, increment={}, moves/period={}, multi-stage={}, hourglass={}, unknown={}, unlimited={}, invalid={}, missing={}",
+        time_controls.sudden_death,
+        time_controls.increment,
+        time_controls.moves_per_period,
+        time_controls.multi_stage,
+        time_controls.hourglass,
+        time_controls.unknown,
+        time_controls.unlimited,
+        time_controls.invalid,
+        time_controls.missing,
+    )?;
     writeln!(output, "elapsed: {elapsed_seconds:.3}s")?;
     writeln!(output, "throughput: {throughput_mib_per_second:.2} MiB/s")
 }

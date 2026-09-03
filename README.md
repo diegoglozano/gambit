@@ -21,9 +21,11 @@ gambit stats --format json january.pgn february.pgn.zst
 
 Stats reports decompressed bytes, complete games, mainline plies, result and
 game-length distributions, Seven Tag Roster coverage, complete date range, and
-Elo coverage/range/average. Recursive-variation moves are excluded. It is
-deliberately lexical and does not execute moves; use Doctor when
-chess-semantic validity matters.
+Elo coverage/range/average. Fixed buckets show game-length and rating shape,
+while time-control categories distinguish sudden-death, increment, staged, and
+other PGN forms. Recursive-variation moves are excluded. Stats is deliberately
+lexical and does not execute moves; use Doctor when chess-semantic validity
+matters.
 
 The hot path uses fixed-size counters over the fused incremental parser. Input
 is read once with a 64 KiB reusable buffer, memory does not grow with corpus

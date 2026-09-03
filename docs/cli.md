@@ -52,8 +52,9 @@ cannot be combined with any other input path.
 Stats accepts the same file, directory, compressed, and standard-input forms as
 Doctor. It performs structural parsing without executing chess moves and
 reports corpus shape, Seven Tag Roster coverage, date quality/range, and Elo
-quality/range. See [Corpus statistics](statistics.md) for metric definitions,
-JSON shape, and HPC behavior.
+quality/range. Fixed distributions describe game lengths, rating bands, and
+PGN time-control forms. See [Corpus statistics](statistics.md) for metric
+definitions, JSON shape, and HPC behavior.
 
 ## Validation modes
 
