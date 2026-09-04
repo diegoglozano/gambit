@@ -64,14 +64,17 @@ definitions, JSON shape, and HPC behavior.
 
 | Option | Description |
 | --- | --- |
-| `-o`, `--output <FILE>` | Create this self-contained `.gambit` database. Required; an existing path is never overwritten. |
+| `-o`, `--output <FILE>` | Select the `.gambit` database. Required. A build refuses an existing path; `--update` requires one. |
+| `--update` | Add new sources and replace changed sources in one transaction. Standard input is not supported because inputs must be reopened safely. |
 | `--format <human|json>` | Select the completion report format. The default is `human`. |
 | `-h`, `--help` | Print help. |
 
 Index accepts the same PGN input forms as Doctor and Stats. It semantically
 executes standard-chess mainlines, stores the original PGN and query metadata,
-and builds a position lookup in bounded memory. The database is published only
-after the complete build succeeds. See [Gambit databases](databases.md).
+and builds a position lookup in bounded memory. A new database is published
+only after the complete build succeeds. Updates fingerprint every named source,
+skip unchanged sources before semantic work, and atomically commit the complete
+batch. See [Gambit databases](databases.md).
 
 ## Query options
 

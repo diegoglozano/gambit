@@ -384,9 +384,38 @@ and all draws (27,386). PGN extraction is also round-tripped through Gambit
 Doctor in the CLI integration suite.
 
 At these measured rates, roughly 16 full position scans amortize the 99-second
-build on CPU time alone. The operational tradeoff is the 3.8 GiB database and
-the lack of incremental updates in schema version 1; the next build-side work
-is parallel parsing, batched ingestion, progress, and incremental rebuilds.
+build on CPU time alone. The operational tradeoff is the 3.8 GiB database. The
+next full-build work is parallel parsing, batched ingestion, and progress;
+schema version 2 adds the source-granular incremental path below.
+
+### Incremental database follow-up
+
+The schema-version-2 candidate was measured on 2026-09-05 with the same Apple
+M3 release profile. This smaller public-user corpus isolates update overhead;
+the source contains 1,729 games and 1,311,266 decompressed bytes. Five no-op
+updates fingerprinted the complete source but bypassed PGN semantic parsing and
+SQLite game or position writes.
+
+| Layout and operation | Sources | Elapsed runs | Median | Median scan throughput |
+| --- | ---: | --- | ---: | ---: |
+| One PGN, full build | 1 | 161.48 ms | **161.48 ms** | 7.74 MiB/s |
+| One PGN, unchanged update | 1 | 7.29, 7.58, 5.96, 7.27, 5.71 ms | **7.27 ms** | 172.01 MiB/s |
+| Sync directory, full build | 1,743 | 264.01 ms | **264.01 ms** | 4.78 MiB/s |
+| Sync directory, unchanged update | 1,743 | 34.32, 29.42, 30.42, 30.12, 29.51 ms | **30.12 ms** | 41.87 MiB/s |
+
+The monolithic no-op is about 22 times faster than its build. The Sync layout's
+1,743 file opens and indexed source lookups reduce scan throughput, but its
+30.12 ms median is still 8.8 times faster than the full build and makes each
+future new or refreshed game independently writable. As a delta check, adding
+one 93-byte, five-position source while also fingerprinting the 1.3 MB
+monolithic source committed in 12.33 ms.
+
+These update times still scale with bytes and files supplied because safe
+change detection reads every source. They avoid the much larger costs that
+scale with legal moves, stored positions, compression, and database writes.
+The April 2014 archive is a single source, so appending to that monolith would
+replace it in full; splitting stable ingestion units is essential for
+source-granular incremental performance.
 
 ## External tool comparison
 

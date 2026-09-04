@@ -4,6 +4,14 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added transactional `gambit index --update` for source-granular incremental
+  databases: unchanged sources bypass semantic indexing, new sources append,
+  changed sources replace their prior games, and failed batches roll back.
+- Added automatic schema-v1 database migration with lazy source-fingerprint
+  recovery, keeping v0.7 databases queryable and incrementally updatable.
+
 ## [0.7.0] - 2026-09-04
 
 ### Added

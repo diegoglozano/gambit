@@ -101,6 +101,7 @@ fn help_describes_commands() {
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));
     assert!(stdout.contains("--position <FEN>"));
+    assert!(stdout.contains("--update"));
     assert!(stdout.contains("Directories are scanned recursively"));
 }
 
@@ -128,6 +129,7 @@ fn index_round_trips_queries_and_pgn() {
     assert_eq!(report["sources"], 1);
     assert_eq!(report["positions"], 10);
     assert_eq!(report["pgn_bytes"], pgn.len());
+    assert_eq!(report["scanned_pgn_bytes"], pgn.len());
     assert!(report["database_bytes"].as_u64().unwrap() > 0);
 
     let count = Command::new(env!("CARGO_BIN_EXE_gambit"))
@@ -206,6 +208,107 @@ fn index_refuses_overwrite_and_cleans_up_failed_builds() {
             .count(),
         0
     );
+}
+
+#[test]
+fn index_updates_only_new_and_changed_sources_and_rolls_back_failures() {
+    let directory = TestDirectory::new();
+    let input = directory.write(
+        "a.pgn",
+        b"[Event \"Original\"]\n[White \"A\"]\n[Black \"B\"]\n\n1. e4 e5 *\n",
+    );
+    let database = directory.path().join("games.gambit");
+    let built = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("build database");
+    assert!(built.status.success());
+
+    let unchanged = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--update", "--format=json", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("update unchanged database");
+    assert!(unchanged.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&unchanged.stdout).unwrap();
+    assert_eq!(report["mode"], "update");
+    assert_eq!(report["sources"], 0);
+    assert_eq!(report["skipped_sources"], 1);
+    assert_eq!(report["replaced_sources"], 0);
+    assert_eq!(report["games"], 0);
+    assert_eq!(report["pgn_bytes"], 0);
+    assert_eq!(
+        report["scanned_pgn_bytes"],
+        fs::metadata(&input).unwrap().len()
+    );
+
+    let added = directory.write(
+        "b.pgn",
+        b"[Event \"Added\"]\n[White \"C\"]\n[Black \"D\"]\n\n1. d4 d5 *\n",
+    );
+    let appended = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--update", "--format=json", "--output"])
+        .arg(&database)
+        .arg(&added)
+        .output()
+        .expect("append source");
+    assert!(appended.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&appended.stdout).unwrap();
+    assert_eq!(report["sources"], 1);
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["skipped_sources"], 0);
+
+    fs::write(
+        &input,
+        b"[Event \"Changed\"]\n[White \"A\"]\n[Black \"B\"]\n\n1. c4 c5 *\n",
+    )
+    .unwrap();
+    let replaced = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--update", "--format=json", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("replace source");
+    assert!(replaced.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&replaced.stdout).unwrap();
+    assert_eq!(report["sources"], 1);
+    assert_eq!(report["replaced_sources"], 1);
+    assert_eq!(report["games"], 1);
+
+    let contents = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["query", "--format=jsonl"])
+        .arg(&database)
+        .output()
+        .expect("query updated database");
+    assert!(contents.status.success());
+    let contents = String::from_utf8(contents.stdout).unwrap();
+    assert!(!contents.contains("Original"));
+    assert!(contents.contains("Changed"));
+    assert!(contents.contains("Added"));
+    assert_eq!(contents.lines().count(), 2);
+
+    fs::write(&input, b"1. e5 *\n").unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--update", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("reject invalid changed source");
+    assert_eq!(failed.status.code(), Some(1));
+
+    let after_failure = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["query", "--format=jsonl"])
+        .arg(&database)
+        .output()
+        .expect("query after rolled-back update");
+    assert!(after_failure.status.success());
+    let after_failure = String::from_utf8(after_failure.stdout).unwrap();
+    assert!(after_failure.contains("Changed"));
+    assert!(after_failure.contains("Added"));
+    assert_eq!(after_failure.lines().count(), 2);
 }
 
 #[test]

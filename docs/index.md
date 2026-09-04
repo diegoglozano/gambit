@@ -12,6 +12,7 @@ pinpoints syntax and chess-semantic errors.
 
 ```console
 gambit index ./diegoglozano-games --output diegoglozano.gambit
+gambit index --update ./diegoglozano-games --output diegoglozano.gambit
 gambit query diegoglozano.gambit --player diegoglozano --result loss --format count
 ```
 
