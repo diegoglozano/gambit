@@ -19,6 +19,8 @@ gambit index ./diegoglozano-games --output diegoglozano.gambit
 # After the next sync, add new games and replace changed ones in place.
 gambit index --update ./diegoglozano-games --output diegoglozano.gambit
 
+gambit info diegoglozano.gambit
+
 gambit query diegoglozano.gambit \
   --player diegoglozano \
   --color black \
@@ -35,7 +37,7 @@ game and a fixed database cache. Incremental updates scan source fingerprints,
 skip unchanged files before chess-semantic work, and commit every addition or
 replacement in one transaction. See the
 [database guide](https://diegoglozano.github.io/gambit/docs/databases/) for
-format and HPC tradeoffs.
+inspection, integrity checks, format details, and HPC tradeoffs.
 
 ## Gambit Sync
 

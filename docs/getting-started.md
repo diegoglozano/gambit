@@ -85,6 +85,7 @@ For repeated queries, build a database once and update it after each sync:
 gambit index ./diegoglozano-games --output diegoglozano.gambit
 gambit sync --lichess-user diegoglozano --output ./diegoglozano-games
 gambit index --update ./diegoglozano-games --output diegoglozano.gambit
+gambit info diegoglozano.gambit
 ```
 
 Because Sync stores one game per source file, Index can skip every unchanged

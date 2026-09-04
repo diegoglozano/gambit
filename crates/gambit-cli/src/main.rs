@@ -27,7 +27,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build a self-contained, query-optimized .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n      --update                            Update an existing database in place\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit info [OPTIONS] <FILE>\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build or update a self-contained .gambit database\n  info      Summarize and optionally check a .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n      --update                            Update an existing database in place\n\nInfo options:\n      --check                             Run complete database integrity checks\n      --format <human|json>               Select report format [default: human]\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -76,6 +76,13 @@ struct IndexCommand {
 }
 
 #[derive(Debug)]
+struct InfoCommand {
+    path: PathBuf,
+    format: StatsOutputFormat,
+    check_integrity: bool,
+}
+
+#[derive(Debug)]
 struct SyncCommand {
     username: String,
     destination: PathBuf,
@@ -96,6 +103,7 @@ enum Action {
     Doctor(DoctorCommand),
     Stats(StatsCommand),
     Index(IndexCommand),
+    Info(InfoCommand),
     Query(Box<QueryCommand>),
     Sync(SyncCommand),
 }
@@ -113,6 +121,7 @@ fn main() -> ExitCode {
         Ok(Action::Doctor(command)) => run_doctor(&command),
         Ok(Action::Stats(command)) => run_stats(&command),
         Ok(Action::Index(command)) => run_index(&command),
+        Ok(Action::Info(command)) => run_info(&command),
         Ok(Action::Query(command)) => run_query(&command),
         Ok(Action::Sync(command)) => run_sync(&command),
         Err(error) => {
@@ -133,6 +142,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
         Some("doctor") => parse_doctor_arguments(arguments),
         Some("stats") => parse_stats_arguments(arguments),
         Some("index") => parse_index_arguments(arguments),
+        Some("info") => parse_info_arguments(arguments),
         Some("query") => parse_query_arguments(arguments),
         Some("sync") => parse_sync_arguments(arguments),
         Some(value) if value.starts_with('-') && value != "-" => {
@@ -337,6 +347,62 @@ fn parse_index_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
         format,
         update,
     }))
+}
+
+fn parse_info_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
+    let mut path = None;
+    let mut format = StatsOutputFormat::Human;
+    let mut check_integrity = false;
+    let mut arguments = arguments.peekable();
+
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-h" | "--help") => return no_more(arguments, Action::Help),
+            Some("--check") => check_integrity = true,
+            Some("--format") => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| String::from("--format requires a value"))?;
+                format = parse_stats_format(&value)?;
+            }
+            Some("--") => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| String::from("info requires a .gambit file"))?;
+                set_info_path(&mut path, value)?;
+                if arguments.next().is_some() {
+                    return Err(String::from("info accepts exactly one .gambit file"));
+                }
+                break;
+            }
+            Some(value) if value.starts_with("--format=") => {
+                format = parse_stats_format(OsStr::new(&value["--format=".len()..]))?;
+            }
+            Some(value) if value.starts_with('-') => {
+                return Err(format!("unknown info option: {value}"));
+            }
+            _ => set_info_path(&mut path, argument)?,
+        }
+    }
+
+    Ok(Action::Info(InfoCommand {
+        path: path.ok_or_else(|| String::from("info requires a .gambit file"))?,
+        format,
+        check_integrity,
+    }))
+}
+
+fn set_info_path(path: &mut Option<PathBuf>, value: OsString) -> Result<(), String> {
+    if path.is_some() {
+        return Err(String::from("info accepts exactly one .gambit file"));
+    }
+    if value == "-" {
+        return Err(String::from(
+            "info requires a file path, not standard input",
+        ));
+    }
+    *path = Some(PathBuf::from(value));
+    Ok(())
 }
 
 fn parse_query_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
@@ -913,6 +979,126 @@ fn render_index_report(report: &IndexReport, format: StatsOutputFormat) -> io::R
             writeln!(output)
         }
     }
+}
+
+fn run_info(command: &InfoCommand) -> ExitCode {
+    let started = Instant::now();
+    let info = match index::info(&command.path, command.check_integrity) {
+        Ok(info) => info,
+        Err(error) => {
+            eprintln!("info: {}: {error}", command.path.display());
+            return ExitCode::from(error.exit_code());
+        }
+    };
+    let report = DatabaseInfoReport::new(&command.path, &info, started.elapsed().as_secs_f64());
+    if let Err(error) = render_database_info(&report, command.format) {
+        eprintln!("failed to write database info: {error}");
+        return ExitCode::from(3);
+    }
+    ExitCode::from(info.exit_code())
+}
+
+#[derive(Serialize)]
+struct DatabaseInfoReport<'a> {
+    status: &'static str,
+    path: String,
+    #[serde(flatten)]
+    info: &'a index::DatabaseInfo,
+    compression_ratio: f64,
+    elapsed_seconds: f64,
+}
+
+impl<'a> DatabaseInfoReport<'a> {
+    fn new(path: &Path, info: &'a index::DatabaseInfo, elapsed_seconds: f64) -> Self {
+        #[allow(clippy::cast_precision_loss)]
+        let compression_ratio = if info.compressed_pgn_bytes == 0 {
+            0.0
+        } else {
+            info.pgn_bytes as f64 / info.compressed_pgn_bytes as f64
+        };
+        Self {
+            status: if !info.integrity_checked {
+                "readable"
+            } else if info.integrity_issues.is_empty() {
+                "valid"
+            } else {
+                "invalid"
+            },
+            path: path.to_string_lossy().into_owned(),
+            info,
+            compression_ratio,
+            elapsed_seconds,
+        }
+    }
+}
+
+fn render_database_info(
+    report: &DatabaseInfoReport<'_>,
+    format: StatsOutputFormat,
+) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    if format == StatsOutputFormat::Json {
+        serde_json::to_writer_pretty(&mut output, report).map_err(io::Error::other)?;
+        return writeln!(output);
+    }
+
+    writeln!(output, "database: {}", report.status)?;
+    writeln!(output, "path: {}", report.path)?;
+    writeln!(output, "schema version: {}", report.info.schema_version)?;
+    writeln!(output, "database bytes: {}", report.info.database_bytes)?;
+    writeln!(output, "sources: {}", report.info.sources)?;
+    writeln!(
+        output,
+        "fingerprinted sources: {}/{}",
+        report.info.fingerprinted_sources, report.info.sources
+    )?;
+    writeln!(output, "games: {}", report.info.games)?;
+    writeln!(output, "positions: {}", report.info.positions)?;
+    writeln!(output, "mainline plies: {}", report.info.mainline_plies)?;
+    writeln!(
+        output,
+        "results: {} white wins, {} black wins, {} draws, {} unfinished",
+        report.info.results.white_wins,
+        report.info.results.black_wins,
+        report.info.results.draws,
+        report.info.results.unfinished
+    )?;
+    match (report.info.earliest_date, report.info.latest_date) {
+        (Some(earliest), Some(latest)) => writeln!(
+            output,
+            "dates: {} to {}",
+            format_database_date(earliest),
+            format_database_date(latest)
+        )?,
+        _ => writeln!(output, "dates: none")?,
+    }
+    writeln!(output, "stored PGN bytes: {}", report.info.pgn_bytes)?;
+    writeln!(
+        output,
+        "compressed PGN bytes: {} ({:.2}x)",
+        report.info.compressed_pgn_bytes, report.compression_ratio
+    )?;
+    if !report.info.integrity_checked {
+        writeln!(output, "integrity: not checked (use --check)")?;
+    } else if report.info.integrity_issues.is_empty() {
+        writeln!(output, "integrity: ok")?;
+    } else {
+        writeln!(output, "integrity: failed")?;
+        for issue in &report.info.integrity_issues {
+            writeln!(output, "  {issue}")?;
+        }
+    }
+    writeln!(output, "elapsed: {:.3}s", report.elapsed_seconds)
+}
+
+fn format_database_date(date: u32) -> String {
+    format!(
+        "{:04}.{:02}.{:02}",
+        date / 10_000,
+        date / 100 % 100,
+        date % 100
+    )
 }
 
 fn run_query(command: &QueryCommand) -> ExitCode {
@@ -2349,6 +2535,21 @@ mod tests {
         let error = parse_arguments(args(&["index", "--update", "--output=archive.gambit", "-"]))
             .unwrap_err();
         assert!(error.contains("not standard input"));
+    }
+
+    #[test]
+    fn parses_database_info_options() {
+        let Action::Info(command) =
+            parse_arguments(args(&["info", "--check", "games.gambit", "--format=json"])).unwrap()
+        else {
+            panic!("expected info action");
+        };
+        assert_eq!(command.path, PathBuf::from("games.gambit"));
+        assert_eq!(command.format, StatsOutputFormat::Json);
+        assert!(command.check_integrity);
+
+        let error = parse_arguments(args(&["info", "first.gambit", "second.gambit"])).unwrap_err();
+        assert!(error.contains("exactly one"));
     }
 
     #[test]

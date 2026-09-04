@@ -75,6 +75,63 @@ pub struct IndexSummary {
     pub replaced_sources: u64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DatabaseResultCounts {
+    pub white_wins: u64,
+    pub black_wins: u64,
+    pub draws: u64,
+    pub unfinished: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DatabaseInfo {
+    pub schema_version: u32,
+    pub database_bytes: u64,
+    pub sources: u64,
+    pub fingerprinted_sources: u64,
+    pub games: u64,
+    pub positions: u64,
+    pub mainline_plies: u64,
+    pub pgn_bytes: u64,
+    pub compressed_pgn_bytes: u64,
+    pub earliest_date: Option<u32>,
+    pub latest_date: Option<u32>,
+    pub results: DatabaseResultCounts,
+    pub integrity_checked: bool,
+    pub integrity_issues: Vec<String>,
+}
+
+impl DatabaseInfo {
+    pub fn exit_code(&self) -> u8 {
+        u8::from(!self.integrity_issues.is_empty())
+    }
+}
+
+#[derive(Debug)]
+pub enum InfoError {
+    Io { context: String, error: io::Error },
+    Database(String),
+}
+
+impl fmt::Display for InfoError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { context, error } => write!(formatter, "{context}: {error}"),
+            Self::Database(error) => {
+                write!(formatter, "failed to inspect Gambit database: {error}")
+            }
+        }
+    }
+}
+
+impl InfoError {
+    pub const fn exit_code(&self) -> u8 {
+        match self {
+            Self::Io { .. } | Self::Database(_) => 3,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum IndexError {
     DestinationExists(PathBuf),
@@ -914,6 +971,308 @@ fn validate_database(connection: &Connection) -> Result<(), QueryError> {
     Ok(())
 }
 
+pub fn info(path: &Path, check_integrity: bool) -> Result<DatabaseInfo, InfoError> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(info_database_error)?;
+    let schema_version = info_schema_version(&connection)?;
+    let sources: i64 = connection
+        .query_row("SELECT COUNT(*) FROM sources", [], |row| row.get(0))
+        .map_err(info_database_error)?;
+    let fingerprinted_sources = if schema_version >= 2 {
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sources WHERE fingerprint IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(info_database_error)?
+    } else {
+        0
+    };
+    let positions: i64 = connection
+        .query_row("SELECT COUNT(*) FROM positions", [], |row| row.get(0))
+        .map_err(info_database_error)?;
+    let aggregate = read_info_aggregate(&connection)?;
+    let mut integrity_issues = Vec::new();
+    if check_integrity {
+        collect_integrity_issues(&connection, schema_version, &mut integrity_issues)?;
+    }
+    let database_bytes = fs::metadata(path)
+        .map_err(|error| InfoError::Io {
+            context: format!("failed to inspect {}", path.display()),
+            error,
+        })?
+        .len();
+    Ok(DatabaseInfo {
+        schema_version: info_u32(schema_version, "schema version")?,
+        database_bytes,
+        sources: info_u64(sources, "source count")?,
+        fingerprinted_sources: info_u64(fingerprinted_sources, "fingerprinted source count")?,
+        games: info_u64(aggregate.games, "game count")?,
+        positions: info_u64(positions, "position count")?,
+        mainline_plies: info_u64(aggregate.mainline_plies, "mainline ply count")?,
+        pgn_bytes: info_u64(aggregate.pgn_bytes, "PGN byte count")?,
+        compressed_pgn_bytes: info_u64(
+            aggregate.compressed_pgn_bytes,
+            "compressed PGN byte count",
+        )?,
+        earliest_date: aggregate
+            .earliest_date
+            .map(|value| info_u32(value, "earliest date"))
+            .transpose()?,
+        latest_date: aggregate
+            .latest_date
+            .map(|value| info_u32(value, "latest date"))
+            .transpose()?,
+        results: DatabaseResultCounts {
+            white_wins: info_u64(aggregate.white_wins, "white-win count")?,
+            black_wins: info_u64(aggregate.black_wins, "black-win count")?,
+            draws: info_u64(aggregate.draws, "draw count")?,
+            unfinished: info_u64(aggregate.unfinished, "unfinished count")?,
+        },
+        integrity_checked: check_integrity,
+        integrity_issues,
+    })
+}
+
+fn info_schema_version(connection: &Connection) -> Result<i64, InfoError> {
+    let application_id: i64 = connection
+        .query_row("PRAGMA application_id", [], |row| row.get(0))
+        .map_err(info_database_error)?;
+    if application_id != APPLICATION_ID {
+        return Err(InfoError::Database(String::from(
+            "file is not a Gambit database",
+        )));
+    }
+    let schema_version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(info_database_error)?;
+    if !(OLDEST_QUERYABLE_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&schema_version) {
+        return Err(InfoError::Database(format!(
+            "unsupported schema version {schema_version}; this Gambit supports versions {OLDEST_QUERYABLE_SCHEMA_VERSION} through {SCHEMA_VERSION}"
+        )));
+    }
+    Ok(schema_version)
+}
+
+struct InfoAggregate {
+    games: i64,
+    mainline_plies: i64,
+    pgn_bytes: i64,
+    compressed_pgn_bytes: i64,
+    earliest_date: Option<i64>,
+    latest_date: Option<i64>,
+    white_wins: i64,
+    black_wins: i64,
+    draws: i64,
+    unfinished: i64,
+}
+
+fn read_info_aggregate(connection: &Connection) -> Result<InfoAggregate, InfoError> {
+    connection
+        .query_row(
+            "SELECT
+                COUNT(*),
+                COALESCE(SUM(mainline_plies), 0),
+                COALESCE(SUM(pgn_bytes), 0),
+                COALESCE(SUM(LENGTH(pgn_zstd)), 0),
+                MIN(played_on),
+                MAX(played_on),
+                COALESCE(SUM(result = 1), 0),
+                COALESCE(SUM(result = 2), 0),
+                COALESCE(SUM(result = 3), 0),
+                COALESCE(SUM(result = 0), 0)
+             FROM games",
+            [],
+            |row| {
+                Ok(InfoAggregate {
+                    games: row.get(0)?,
+                    mainline_plies: row.get(1)?,
+                    pgn_bytes: row.get(2)?,
+                    compressed_pgn_bytes: row.get(3)?,
+                    earliest_date: row.get(4)?,
+                    latest_date: row.get(5)?,
+                    white_wins: row.get(6)?,
+                    black_wins: row.get(7)?,
+                    draws: row.get(8)?,
+                    unfinished: row.get(9)?,
+                })
+            },
+        )
+        .map_err(info_database_error)
+}
+
+fn collect_integrity_issues(
+    connection: &Connection,
+    schema_version: i64,
+    issues: &mut Vec<String>,
+) -> Result<(), InfoError> {
+    const MAXIMUM_ISSUES: usize = 10;
+    let mut statement = connection
+        .prepare("PRAGMA quick_check(10)")
+        .map_err(info_database_error)?;
+    let checks = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(info_database_error)?;
+    for check in checks {
+        let check = check.map_err(info_database_error)?;
+        if check != "ok" {
+            issues.push(check);
+        }
+    }
+    drop(statement);
+
+    let mut statement = connection
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(info_database_error)?;
+    let mut rows = statement.query([]).map_err(info_database_error)?;
+    while issues.len() < MAXIMUM_ISSUES {
+        let Some(row) = rows.next().map_err(info_database_error)? else {
+            break;
+        };
+        let table: String = row.get(0).map_err(info_database_error)?;
+        let row_id: Option<i64> = row.get(1).map_err(info_database_error)?;
+        let parent: String = row.get(2).map_err(info_database_error)?;
+        issues.push(format!(
+            "foreign key violation in {table} row {} referencing {parent}",
+            row_id.map_or_else(|| String::from("unknown"), |value| value.to_string())
+        ));
+    }
+    if rows.next().map_err(info_database_error)?.is_some() {
+        issues.push(String::from("additional integrity issues omitted"));
+    }
+    drop(rows);
+    drop(statement);
+    if issues.len() < MAXIMUM_ISSUES {
+        check_stored_pgn(connection, schema_version, issues, MAXIMUM_ISSUES)?;
+    }
+    Ok(())
+}
+
+struct CheckedSource {
+    id: i64,
+    name: String,
+    expected_digest: Option<Vec<u8>>,
+    fingerprinter: SourceFingerprinter,
+    valid: bool,
+}
+
+fn check_stored_pgn(
+    connection: &Connection,
+    schema_version: i64,
+    issues: &mut Vec<String>,
+    maximum_issues: usize,
+) -> Result<(), InfoError> {
+    let fingerprint = if schema_version >= 2 {
+        "s.fingerprint"
+    } else {
+        "NULL"
+    };
+    let sql = format!(
+        "SELECT s.id, s.name, {fingerprint}, g.source_game, g.pgn_zstd, g.pgn_bytes
+         FROM sources s
+         LEFT JOIN games g ON g.source_id = s.id
+         ORDER BY s.id, g.source_game"
+    );
+    let mut statement = connection.prepare(&sql).map_err(info_database_error)?;
+    let mut rows = statement.query([]).map_err(info_database_error)?;
+    let mut source: Option<CheckedSource> = None;
+    while issues.len() < maximum_issues {
+        let Some(row) = rows.next().map_err(info_database_error)? else {
+            break;
+        };
+        let source_id: i64 = row.get(0).map_err(info_database_error)?;
+        if source.as_ref().is_some_and(|source| source.id != source_id) {
+            finish_checked_source(source.take().expect("checked source exists"), issues);
+            if issues.len() >= maximum_issues {
+                break;
+            }
+        }
+        if source.is_none() {
+            source = Some(CheckedSource {
+                id: source_id,
+                name: row.get(1).map_err(info_database_error)?,
+                expected_digest: row.get(2).map_err(info_database_error)?,
+                fingerprinter: SourceFingerprinter::new(),
+                valid: true,
+            });
+        }
+        let Some(source_game) = row.get::<_, Option<i64>>(3).map_err(info_database_error)? else {
+            continue;
+        };
+        let compressed: Vec<u8> = row.get(4).map_err(info_database_error)?;
+        let stored_bytes: i64 = row.get(5).map_err(info_database_error)?;
+        let Some(bytes) = usize::try_from(stored_bytes)
+            .ok()
+            .filter(|bytes| *bytes <= MAXIMUM_GAME_BYTES)
+        else {
+            issues.push(format!(
+                "{} game {source_game} has an invalid stored PGN size",
+                source.as_ref().expect("checked source exists").name
+            ));
+            source.as_mut().expect("checked source exists").valid = false;
+            continue;
+        };
+        match zstd::bulk::decompress(&compressed, bytes) {
+            Ok(game) if game.len() == bytes => source
+                .as_mut()
+                .expect("checked source exists")
+                .fingerprinter
+                .observe(&game),
+            Ok(_) => {
+                issues.push(format!(
+                    "{} game {source_game} PGN size does not match its metadata",
+                    source.as_ref().expect("checked source exists").name
+                ));
+                source.as_mut().expect("checked source exists").valid = false;
+            }
+            Err(error) => {
+                issues.push(format!(
+                    "{} game {source_game} has invalid compressed PGN: {error}",
+                    source.as_ref().expect("checked source exists").name
+                ));
+                source.as_mut().expect("checked source exists").valid = false;
+            }
+        }
+    }
+    if let Some(source) = source {
+        finish_checked_source(source, issues);
+    }
+    Ok(())
+}
+
+fn finish_checked_source(source: CheckedSource, issues: &mut Vec<String>) {
+    let Some(expected) = source.expected_digest else {
+        return;
+    };
+    if expected.len() != 32 {
+        issues.push(format!("{} has an invalid source fingerprint", source.name));
+        return;
+    }
+    if source.valid && source.fingerprinter.finish(0).digest != expected.as_slice() {
+        issues.push(format!("{} source fingerprint does not match", source.name));
+    }
+}
+
+fn info_database_error(error: rusqlite::Error) -> InfoError {
+    let message = format!("database error: {error}");
+    drop(error);
+    InfoError::Database(message)
+}
+
+fn info_u64(value: i64, field: &str) -> Result<u64, InfoError> {
+    u64::try_from(value)
+        .map_err(|_| InfoError::Database(format!("database contains an invalid {field}")))
+}
+
+fn info_u32(value: i64, field: &str) -> Result<u32, InfoError> {
+    u32::try_from(value)
+        .map_err(|_| InfoError::Database(format!("database contains an invalid {field}")))
+}
+
 fn push_value(values: &mut Vec<Value>, value: Value) -> String {
     values.push(value);
     format!("?{}", values.len())
@@ -1219,6 +1578,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(summary.matches, 1);
+        let database_info = info(&path, false).unwrap();
+        assert_eq!(database_info.schema_version, 1);
+        assert_eq!(database_info.games, 1);
+        assert_eq!(database_info.fingerprinted_sources, 0);
 
         let expected = fingerprint(&game[..], "games.pgn").unwrap();
         let mut updater = Updater::open(&path).unwrap();

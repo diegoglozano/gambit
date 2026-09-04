@@ -417,6 +417,12 @@ The April 2014 archive is a single source, so appending to that monolith would
 replace it in full; splitting stable ingestion units is essential for
 source-granular incremental performance.
 
+On the same 1,729-game database, five `gambit info` summaries took 1.37, 1.21,
+1.25, 1.26, and 1.35 ms, a **1.26 ms median**. Five `info --check` runs that
+also checked SQLite structure and relationships, decompressed all 1,729 PGN
+frames, validated their lengths, and recomputed the source fingerprint took
+17.71, 17.21, 16.51, 16.46, and 16.40 ms, a **16.51 ms median**.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row
