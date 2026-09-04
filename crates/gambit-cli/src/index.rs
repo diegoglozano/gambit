@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{self, Write as _};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -293,7 +293,10 @@ impl Builder {
         connection
             .close()
             .map_err(|(_, error)| IndexError::Database(error))?;
-        File::open(&pending.temporary)
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&pending.temporary)
             .and_then(|file| file.sync_all())
             .map_err(|error| IndexError::Io {
                 context: String::from("failed to sync completed database"),
