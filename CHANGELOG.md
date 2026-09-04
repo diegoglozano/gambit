@@ -4,6 +4,8 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-04
+
 ### Fixed
 
 - Removed the fixed 30-second response deadline from streamed Lichess exports,
@@ -90,7 +92,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/diegoglozano/gambit/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/diegoglozano/gambit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/diegoglozano/gambit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/diegoglozano/gambit/compare/v0.3.0...v0.4.0
