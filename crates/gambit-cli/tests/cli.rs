@@ -98,6 +98,7 @@ fn help_describes_commands() {
     assert!(stdout.contains("--lichess-user <NAME>"));
     assert!(stdout.contains("--max-games <N>"));
     assert!(stdout.contains("--output <DIRECTORY>"));
+    assert!(stdout.contains("--database <FILE>"));
     assert!(stdout.contains("--format <human|json|jsonl|github>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));

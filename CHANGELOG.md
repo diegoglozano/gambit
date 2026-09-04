@@ -14,6 +14,8 @@ All notable changes to Gambit are documented in this file.
 - Added `gambit info` for database size, schema and fingerprint coverage,
   corpus totals, result/date summaries, compression ratio, JSON output, and
   optional SQLite, relationship, stored-PGN, and fingerprint integrity checks.
+- Added `gambit sync --database <FILE>` to build a `.gambit` database after the
+  first committed sync and update it source-by-source on every later run.
 
 ## [0.7.0] - 2026-09-04
 

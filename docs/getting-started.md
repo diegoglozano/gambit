@@ -79,12 +79,13 @@ Run the same sync command later to fetch an overlapping incremental window and
 refresh previously unfinished games. See [Sync Lichess games](sync.md) for
 initial history limits, storage, and recovery behavior.
 
-For repeated queries, build a database once and update it after each sync:
+For repeated queries, have Sync build and maintain the database automatically:
 
 ```console
-gambit index ./diegoglozano-games --output diegoglozano.gambit
-gambit sync --lichess-user diegoglozano --output ./diegoglozano-games
-gambit index --update ./diegoglozano-games --output diegoglozano.gambit
+gambit sync \
+  --lichess-user diegoglozano \
+  --output ./diegoglozano-games \
+  --database diegoglozano.gambit
 gambit info diegoglozano.gambit
 ```
 

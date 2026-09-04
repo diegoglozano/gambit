@@ -46,10 +46,11 @@ Maintain a resumable local collection of a Lichess user's games:
 ```shell
 gambit sync \
   --lichess-user diegoglozano \
-  --output ./diegoglozano-games
+  --output ./diegoglozano-games \
+  --database diegoglozano.gambit
 
 gambit stats ./diegoglozano-games
-gambit query ./diegoglozano-games \
+gambit query diegoglozano.gambit \
   --player diegoglozano \
   --result loss \
   --format count
@@ -58,7 +59,8 @@ gambit query ./diegoglozano-games \
 Sync stores one PGN per stable Lichess game ID. Later runs fetch only an
 overlapping incremental window and refresh games that were previously
 unfinished. Interrupted runs retain their last committed cursor and can be
-retried safely. See the
+retried safely. With `--database`, the first successful sync builds a `.gambit`
+file and every later sync updates only new or changed game sources. See the
 [Sync guide](https://diegoglozano.github.io/gambit/docs/sync/) for authentication,
 storage, and automation details.
 

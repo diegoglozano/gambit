@@ -27,7 +27,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit info [OPTIONS] <FILE>\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build or update a self-contained .gambit database\n  info      Summarize and optionally check a .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n      --update                            Update an existing database in place\n\nInfo options:\n      --check                             Run complete database integrity checks\n      --format <human|json>               Select report format [default: human]\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit info [OPTIONS] <FILE>\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build or update a self-contained .gambit database\n  info      Summarize and optionally check a .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n      --update                            Update an existing database in place\n\nInfo options:\n      --check                             Run complete database integrity checks\n      --format <human|json>               Select report format [default: human]\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --database <FILE>                   Build or update this .gambit database\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -86,6 +86,7 @@ struct InfoCommand {
 struct SyncCommand {
     username: String,
     destination: PathBuf,
+    database: Option<PathBuf>,
     since: Option<u32>,
     format: SyncOutputFormat,
 }
@@ -465,6 +466,7 @@ fn parse_query_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
 fn parse_sync_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
     let mut username = None;
     let mut destination = None;
+    let mut database = None;
     let mut since = None;
     let mut format = SyncOutputFormat::Human;
     let mut arguments = arguments.peekable();
@@ -484,7 +486,7 @@ fn parse_sync_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Act
             .map_or((value, None), |(option, value)| (option, Some(value)));
         if !matches!(
             option,
-            "--lichess-user" | "--output" | "--since" | "--format"
+            "--lichess-user" | "--output" | "--database" | "--since" | "--format"
         ) {
             return Err(format!("unknown sync option: {option}"));
         }
@@ -505,6 +507,12 @@ fn parse_sync_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Act
                 }
                 destination = Some(PathBuf::from(value));
             }
+            "--database" => {
+                if value.is_empty() || value == "-" {
+                    return Err(String::from("--database must be a file path"));
+                }
+                database = Some(PathBuf::from(value));
+            }
             "--since" => since = Some(parse_query_date(option, value)?),
             "--format" => format = parse_sync_format(value)?,
             _ => unreachable!("sync option was checked before dispatch"),
@@ -514,6 +522,7 @@ fn parse_sync_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Act
     Ok(Action::Sync(SyncCommand {
         username: username.ok_or_else(|| String::from("sync requires --lichess-user"))?,
         destination: destination.ok_or_else(|| String::from("sync requires --output"))?,
+        database,
         since,
         format,
     }))
@@ -951,34 +960,36 @@ fn render_index_report(report: &IndexReport, format: StatsOutputFormat) -> io::R
     let stdout = io::stdout();
     let mut output = stdout.lock();
     match format {
-        StatsOutputFormat::Human => {
-            writeln!(output, "index: {}", report.status)?;
-            writeln!(output, "mode: {}", report.mode)?;
-            writeln!(output, "destination: {}", report.destination)?;
-            writeln!(output, "sources written: {}", report.sources)?;
-            writeln!(output, "sources skipped: {}", report.skipped_sources)?;
-            writeln!(output, "sources replaced: {}", report.replaced_sources)?;
-            writeln!(output, "games written: {}", report.games)?;
-            writeln!(output, "positions written: {}", report.positions)?;
-            writeln!(
-                output,
-                "source PGN bytes scanned: {}",
-                report.scanned_pgn_bytes
-            )?;
-            writeln!(output, "source PGN bytes written: {}", report.pgn_bytes)?;
-            writeln!(output, "database bytes: {}", report.database_bytes)?;
-            writeln!(output, "elapsed: {:.3}s", report.elapsed_seconds)?;
-            writeln!(
-                output,
-                "throughput: {:.2} MiB/s",
-                report.throughput_mib_per_second
-            )
-        }
+        StatsOutputFormat::Human => write_index_report(&mut output, report),
         StatsOutputFormat::Json => {
             serde_json::to_writer_pretty(&mut output, report).map_err(io::Error::other)?;
             writeln!(output)
         }
     }
+}
+
+fn write_index_report(output: &mut impl Write, report: &IndexReport) -> io::Result<()> {
+    writeln!(output, "index: {}", report.status)?;
+    writeln!(output, "mode: {}", report.mode)?;
+    writeln!(output, "destination: {}", report.destination)?;
+    writeln!(output, "sources written: {}", report.sources)?;
+    writeln!(output, "sources skipped: {}", report.skipped_sources)?;
+    writeln!(output, "sources replaced: {}", report.replaced_sources)?;
+    writeln!(output, "games written: {}", report.games)?;
+    writeln!(output, "positions written: {}", report.positions)?;
+    writeln!(
+        output,
+        "source PGN bytes scanned: {}",
+        report.scanned_pgn_bytes
+    )?;
+    writeln!(output, "source PGN bytes written: {}", report.pgn_bytes)?;
+    writeln!(output, "database bytes: {}", report.database_bytes)?;
+    writeln!(output, "elapsed: {:.3}s", report.elapsed_seconds)?;
+    writeln!(
+        output,
+        "throughput: {:.2} MiB/s",
+        report.throughput_mib_per_second
+    )
 }
 
 fn run_info(command: &InfoCommand) -> ExitCode {
@@ -1308,6 +1319,16 @@ fn finish_sync(
     let statuses = std::mem::take(&mut summary.statuses);
     let unfinished = sync::finish(plan, statuses)
         .map_err(|error| format!("{}: {error}", command.destination.display()))?;
+    let database = command
+        .database
+        .as_deref()
+        .map(|destination| maintain_synced_database(&command.destination, destination))
+        .transpose()
+        .map_err(|error| {
+            format!(
+                "games and cursor were committed, but the database could not be maintained: {error}"
+            )
+        })?;
     let report = SyncReport {
         schema_version: 1,
         status: "complete",
@@ -1320,9 +1341,61 @@ fn finish_sync(
         refreshed_unfinished,
         unfinished,
         cursor_milliseconds: plan.until_timestamp,
+        database,
     };
     render_sync_report(&report, command.format)
         .map_err(|error| format!("failed to write report: {error}"))
+}
+
+fn maintain_synced_database(
+    source: &Path,
+    destination: &Path,
+) -> Result<IndexReport, index::IndexError> {
+    let update = destination.exists();
+    let started = Instant::now();
+    let games_directory = source.join("games");
+    let mut entries = fs::read_dir(&games_directory).map_err(|error| index::IndexError::Io {
+        context: format!("failed to inspect {}", games_directory.display()),
+        error,
+    })?;
+    let has_games = loop {
+        let entry = entries
+            .next()
+            .transpose()
+            .map_err(|error| index::IndexError::Io {
+                context: format!("failed to inspect {}", games_directory.display()),
+                error,
+            })?;
+        let Some(entry) = entry else {
+            break false;
+        };
+        if is_discoverable_pgn_path(&entry.path()) {
+            break true;
+        }
+    };
+    let summary = if has_games {
+        let command = IndexCommand {
+            paths: vec![source.as_os_str().to_owned()],
+            destination: destination.to_path_buf(),
+            format: StatsOutputFormat::Human,
+            update,
+        };
+        if update {
+            update_index(&command)?
+        } else {
+            build_index(&command)?
+        }
+    } else if update {
+        index::Updater::open(destination)?.finish()?
+    } else {
+        index::Builder::create(destination)?.finish()?
+    };
+    Ok(IndexReport::new(
+        destination,
+        &summary,
+        started.elapsed().as_secs_f64(),
+        if update { "update" } else { "build" },
+    ))
 }
 
 fn lichess_token() -> Result<Option<String>, &'static str> {
@@ -1361,6 +1434,8 @@ struct SyncReport {
     refreshed_unfinished: usize,
     unfinished: usize,
     cursor_milliseconds: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database: Option<IndexReport>,
 }
 
 fn render_sync_report(report: &SyncReport, format: SyncOutputFormat) -> io::Result<()> {
@@ -1380,7 +1455,12 @@ fn render_sync_report(report: &SyncReport, format: SyncOutputFormat) -> io::Resu
                 "unfinished: {} ({} refreshed)",
                 report.unfinished, report.refreshed_unfinished
             )?;
-            writeln!(output, "cursor: {} ms", report.cursor_milliseconds)
+            writeln!(output, "cursor: {} ms", report.cursor_milliseconds)?;
+            if let Some(database) = &report.database {
+                writeln!(output)?;
+                write_index_report(&mut output, database)?;
+            }
+            Ok(())
         }
         SyncOutputFormat::Json => {
             serde_json::to_writer_pretty(&mut output, report).map_err(io::Error::other)?;
@@ -2488,6 +2568,7 @@ mod tests {
             "--lichess-user=diegoglozano",
             "--output",
             "my-games",
+            "--database=my-games.gambit",
             "--since",
             "2026-01-01",
             "--format=json",
@@ -2497,8 +2578,35 @@ mod tests {
         };
         assert_eq!(command.username, "diegoglozano");
         assert_eq!(command.destination, PathBuf::from("my-games"));
+        assert_eq!(command.database, Some(PathBuf::from("my-games.gambit")));
         assert_eq!(command.since, Some(20_260_101));
         assert_eq!(command.format, SyncOutputFormat::Json);
+    }
+
+    #[test]
+    fn synced_database_builds_empty_then_updates_and_skips() {
+        let root =
+            std::env::temp_dir().join(format!("gambit-sync-database-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let source = root.join("sync");
+        fs::create_dir_all(source.join("games")).unwrap();
+        let database = root.join("games.gambit");
+
+        let empty = maintain_synced_database(&source, &database).unwrap();
+        assert_eq!(empty.mode, "build");
+        assert_eq!(empty.games, 0);
+
+        fs::write(source.join("games/one.pgn"), b"1. e4 e5 *\n").unwrap();
+        let added = maintain_synced_database(&source, &database).unwrap();
+        assert_eq!(added.mode, "update");
+        assert_eq!(added.sources, 1);
+        assert_eq!(added.games, 1);
+
+        let unchanged = maintain_synced_database(&source, &database).unwrap();
+        assert_eq!(unchanged.sources, 0);
+        assert_eq!(unchanged.skipped_sources, 1);
+        assert_eq!(index::info(&database, false).unwrap().games, 1);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
