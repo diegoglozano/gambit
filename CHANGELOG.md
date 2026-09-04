@@ -4,6 +4,13 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed the fixed 30-second response deadline from streamed Lichess exports,
+  which truncated healthy queries and syncs for larger collections.
+- Prevented `gambit query --format count` from printing an incomplete total
+  when any input fails.
+
 ## [0.6.0] - 2026-09-04
 
 ### Added

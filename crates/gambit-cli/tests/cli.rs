@@ -423,10 +423,22 @@ fn position_query_reports_an_illegal_mainline_move() {
     );
 
     assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("game 1, ply 1"));
     assert!(stderr.contains("SAN does not identify a legal move (e5)"));
+}
+
+#[test]
+fn count_query_does_not_emit_a_partial_total_on_failure() {
+    let output = run_with_stdin(
+        &["query", "--result", "unfinished", "--format", "count", "-"],
+        b"[Event \"Complete match\"]\n\n1. e4 *\n\n[Event \"Broken game\"]\n\n1. e4 (\n",
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("PGN stream ended"));
 }
 
 #[test]
