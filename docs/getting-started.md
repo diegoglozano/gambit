@@ -64,6 +64,21 @@ gambit query lichess.pgn \
 
 See [Query games](query.md) for filter semantics and the JSONL schema.
 
+## Keep an offline Lichess collection
+
+Synchronize a user's games once, then use the resulting directory as a normal
+local corpus:
+
+```console
+gambit sync --lichess-user diegoglozano --output ./diegoglozano-games
+gambit stats ./diegoglozano-games
+gambit query ./diegoglozano-games --player diegoglozano --format count
+```
+
+Run the same sync command later to fetch an overlapping incremental window and
+refresh previously unfinished games. See [Sync Lichess games](sync.md) for
+initial history limits, storage, and recovery behavior.
+
 ## Summarize a corpus
 
 Use Stats for a fast structural inventory before deeper validation or analysis:

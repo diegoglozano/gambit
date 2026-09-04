@@ -20,6 +20,17 @@ and can also find games that reach an exact FEN position. Player-relative
 filters make questions such as wins, losses, color, and rating unambiguous. See
 [Query games](query.md) for the complete contract.
 
+## Keep an offline collection
+
+```console
+gambit sync --lichess-user diegoglozano --output ./diegoglozano-games
+```
+
+Sync creates an idempotent local PGN store and downloads only a small
+overlapping window on later runs. The directory works directly with Query,
+Stats, and Doctor. See [Sync Lichess games](sync.md) for the storage and recovery
+contract.
+
 ## A quick corpus summary
 
 ```console
