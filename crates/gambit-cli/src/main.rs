@@ -23,7 +23,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -299,6 +299,7 @@ fn is_query_value_option(option: &str) -> bool {
             | "--until"
             | "--min-rating"
             | "--max-rating"
+            | "--position"
             | "--format"
     )
 }
@@ -318,6 +319,7 @@ fn set_query_option(
         "--until" => options.until = Some(parse_query_date(option, value)?),
         "--min-rating" => options.minimum_rating = Some(parse_query_rating(option, value)?),
         "--max-rating" => options.maximum_rating = Some(parse_query_rating(option, value)?),
+        "--position" => options.position = Some(parse_query_position(option, value)?),
         "--format" => *format = parse_query_format(value)?,
         _ => unreachable!("query option was checked before dispatch"),
     }
@@ -399,6 +401,14 @@ fn parse_query_rating(option: &str, value: &OsStr) -> Result<u32, String> {
     value
         .parse()
         .map_err(|_| format!("{option} must be an unsigned integer"))
+}
+
+fn parse_query_position(option: &str, value: &OsStr) -> Result<gambit_chess::Position, String> {
+    let value = value
+        .to_str()
+        .ok_or_else(|| format!("{option} must be valid UTF-8"))?;
+    gambit_chess::Position::from_fen(value.as_bytes())
+        .map_err(|error| format!("{option} must be a valid six-field FEN: {error}"))
 }
 
 fn parse_query_format(value: &OsStr) -> Result<QueryFormat, String> {

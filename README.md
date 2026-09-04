@@ -10,7 +10,7 @@ dependency-free ingestion layer and a compact semantic chess core.
 
 ## Gambit Query
 
-Filter a PGN corpus using chess-oriented, player-relative predicates:
+Search a PGN corpus by chess position or player-relative metadata:
 
 ```shell
 gambit query games.pgn \
@@ -21,13 +21,18 @@ gambit query games.pgn \
   > black-losses.pgn
 
 gambit query games.pgn --player diegoglozano --format count
+
+gambit query games.pgn \
+  --position 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2' \
+  --format count
 ```
 
 Query emits matching PGN by default, so its output remains usable by Gambit or
 other chess software. JSONL exposes one metadata record per match for data
 pipelines. Player and opponent names are matched case-insensitively; color,
 win/loss, and rating filters are evaluated from the selected player's
-perspective.
+perspective. Position search executes standard-chess mainlines and reports each
+matching game once, even if the position occurs repeatedly.
 
 Plain files, `.pgn.zst` streams, recursive directories, and standard input are
 supported. Query retains at most one game up to the 16 MiB safety limit, so

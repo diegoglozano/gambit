@@ -4,6 +4,12 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added exact standard-chess position filtering to `gambit query` with
+  `--position <FEN>`, including FEN starts, first-match ply reporting in JSONL,
+  and composition with every metadata filter.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added

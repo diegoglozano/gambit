@@ -69,6 +69,7 @@ definitions, JSON shape, and HPC behavior.
 | `--until <YYYY-MM-DD>` | Match games on or before this inclusive date. |
 | `--min-rating <ELO>` | Match the selected player's minimum rating. Requires `--player`. |
 | `--max-rating <ELO>` | Match the selected player's maximum rating. Requires `--player`. |
+| `--position <FEN>` | Match standard-chess games reaching this six-field FEN position. |
 | `--format <pgn|jsonl|count>` | Select output. The default is `pgn`. |
 | `-h`, `--help` | Print help. |
 
