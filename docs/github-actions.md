@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/diegoglozano/gambit/releases/download/v0.6.1/gambit-installer.sh | sh
+            https://github.com/diegoglozano/gambit/releases/download/v0.7.0/gambit-installer.sh | sh
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Validate PGN corpus
         run: gambit doctor --keep-going --format github games/
@@ -47,7 +47,7 @@ Use repository-relative input paths so GitHub can link annotations back to the
 checked-out files. If another step downloads or generates the corpus, point
 Doctor at that step's output directory instead.
 
-The workflow pins Gambit v0.6.1 so its behavior cannot change unexpectedly.
+The workflow pins Gambit v0.7.0 so its behavior cannot change unexpectedly.
 Update the tag deliberately when adopting a newer release, or use `latest` in
 the URL if automatic upgrades are preferable.
 
