@@ -13,7 +13,7 @@ workflow. The tag version must match the `gambit` package version.
    cargo clippy --workspace --all-targets --all-features -- -D warnings
    cargo test --workspace
    cargo dist generate --check
-   cargo dist plan --tag=v0.6.1
+   cargo dist plan --tag=v0.7.0
    oranda build
    mkdocs build --strict
    ```
@@ -22,8 +22,8 @@ workflow. The tag version must match the `gambit` package version.
 4. Create and push one annotated tag from the tested merge commit:
 
    ```console
-   git tag -a v0.6.1 -m "Gambit v0.6.1"
-   git push origin v0.6.1
+   git tag -a v0.7.0 -m "Gambit v0.7.0"
+   git push origin v0.7.0
    ```
 
 5. Watch the `Release` workflow through artifact builds and publication.

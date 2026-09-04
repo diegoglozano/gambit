@@ -70,7 +70,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "gambit"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "gambit-chess",
  "gambit-pgn",
@@ -83,11 +83,11 @@ dependencies = [
 
 [[package]]
 name = "gambit-chess"
-version = "0.6.1"
+version = "0.7.0"
 
 [[package]]
 name = "gambit-pgn"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "gambit-chess",
 ]

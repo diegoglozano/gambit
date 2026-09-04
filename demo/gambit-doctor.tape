@@ -14,7 +14,7 @@ Set WindowBar Colorful
 Set CursorBlink false
 
 Hide
-Type `export PATH="$PWD/target/release:$PATH"; export PS1='❯ '`
+Type `export PATH="$PWD/target/release:$PATH"; export PS1='❯ '; unlink target/demo.gambit 2>/dev/null || true`
 Enter
 Sleep 500ms
 Show
@@ -25,13 +25,13 @@ Sleep 300ms
 Enter
 Sleep 1s
 
-Type "gambit stats examples/valid.pgn | sed -n '1,7p'"
+Type "gambit index examples/valid.pgn --output target/demo.gambit"
 Sleep 300ms
 Enter
-Sleep 4s
+Sleep 5s
 
 Ctrl+L
-Type "gambit query examples/valid.pgn \"
+Type "gambit query target/demo.gambit \"
 Enter
 Type "  --position 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2' \"
 Enter
