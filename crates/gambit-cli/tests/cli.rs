@@ -95,6 +95,7 @@ fn help_describes_commands() {
     assert!(stdout.contains("--format <human|json|jsonl|github>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));
+    assert!(stdout.contains("--position <FEN>"));
     assert!(stdout.contains("Directories are scanned recursively"));
 }
 
@@ -365,6 +366,63 @@ fn query_counts_plain_and_zstd_games_in_a_directory() {
 
     assert!(output.status.success());
     assert_eq!(output.stdout, b"2\n");
+}
+
+#[test]
+fn query_counts_games_reaching_a_position_and_composes_filters() {
+    let input = b"[White \"Diego\"]\n[Black \"A\"]\n\n1. e4 e5 2. Nf3 *\n\n[White \"Other\"]\n[Black \"B\"]\n\n1. e4 e5 *\n";
+    let output = run_with_stdin(
+        &[
+            "query",
+            "--position",
+            "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 99 42",
+            "--player",
+            "diego",
+            "--format",
+            "count",
+            "-",
+        ],
+        input,
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn query_rejects_an_invalid_position_argument() {
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["query", "--position", "not-a-fen", "example.pgn"])
+        .output()
+        .expect("run gambit");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("--position must be a valid six-field FEN")
+    );
+}
+
+#[test]
+fn position_query_reports_an_illegal_mainline_move() {
+    let output = run_with_stdin(
+        &[
+            "query",
+            "--position",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "--format",
+            "count",
+            "-",
+        ],
+        b"1. e5 *\n",
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"0\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("game 1, ply 1"));
+    assert!(stderr.contains("SAN does not identify a legal move (e5)"));
 }
 
 #[test]

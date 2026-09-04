@@ -310,6 +310,39 @@ safety limit bounds worst-case memory independently of corpus size; normal
 games retain the same sub-2 MB decompressed and approximately 11 MB compressed
 resident footprints as the existing streaming paths.
 
+### Position-query follow-up
+
+Exact-position Query adds legal SAN execution while retaining the same
+one-game memory bound. The target below uses the initial piece placement with
+castling rights removed, so it cannot be reached from a normal initial game.
+Every run therefore compares the live position after all 54,748,499 mainline
+SAN moves and returns zero matches across 810,463 games:
+
+```console
+cargo build --release -p gambit
+
+for run_number in 1 2 3 4 5; do
+  target/release/gambit query \
+    --position 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1' \
+    --format count \
+    "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn"
+done
+```
+
+The same loop was repeated with the `.pgn.zst` path to measure in-process
+decompression. Measurements were taken on 2026-09-04 with the environment
+described above.
+
+| Input | Elapsed runs | Median throughput | Move rate | Maximum RSS |
+| --- | --- | ---: | ---: | ---: |
+| Decompressed file | 6.50s, 6.74s, 6.46s, 6.43s, 6.46s | **103.60 MiB/s** | 8.47 million/s | 1,900,544 bytes |
+| In-process `.pgn.zst` | 6.95s, 6.90s, 6.95s, 6.95s, 6.90s | **96.30 MiB/s** | 7.88 million/s | 10,928,128 bytes |
+
+This is a full semantic scan rather than an indexed lookup: runtime scales
+with the total number of moves, while resident memory remains independent of
+corpus size. It establishes the baseline that a future persistent position
+index should beat for repeated searches.
+
 ## External tool comparison
 
 These are not interchangeable operations, so the work performed by every row
@@ -322,6 +355,7 @@ is part of the result:
 | Gambit fused `zstdcat` pipeline | 810,463 | 427.02 MiB/s | 1.75 MB | Decompresses, reads once, lexes, and counts every event |
 | Gambit streaming file | 810,463 | 241.28 MiB/s | 1.74 MB | Frames games, then lexes and counts every event |
 | Gambit Query filtered count | 810,463 | 242.49 MiB/s | 1.90 MB | Frames games, parses metadata, and applies player-relative filters |
+| Gambit Query exact-position count | 810,463 | 103.60 MiB/s | 1.90 MB | Frames games, executes all 54,748,499 SAN moves, and compares live positions |
 | Gambit `zstdcat` pipeline | 810,463 | 238.10 MiB/s | 1.77 MB | Decompresses, frames, lexes, and counts every event |
 | python-chess `skip_game()` | 810,463 | 84.60 MiB/s | 20.25 MB | Finds and skips games without fully parsing them |
 | Scoutfish `make` | Not completed | Not valid | Not valid | Parses legal positions and writes a query index |

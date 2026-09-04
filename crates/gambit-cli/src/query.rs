@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::io::{self, Read, Write};
 
+use gambit_chess::{FenError, Position, SanError};
 use gambit_pgn::{Event, FrameError, GameReader, Outcome, Parser, ParserOptions, Tag};
 use serde::Serialize;
 
@@ -36,6 +37,7 @@ pub struct QueryOptions {
     pub until: Option<u32>,
     pub minimum_rating: Option<u32>,
     pub maximum_rating: Option<u32>,
+    pub position: Option<Position>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -59,6 +61,16 @@ pub enum QueryError {
         game: u64,
         error: gambit_pgn::ParseError,
     },
+    InvalidFen {
+        game: u64,
+        error: FenError,
+    },
+    InvalidSan {
+        game: u64,
+        ply: u64,
+        san: String,
+        error: SanError,
+    },
     Frame(FrameError),
     Output(io::Error),
 }
@@ -73,6 +85,8 @@ impl QueryError {
     pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Parse { .. }
+            | Self::InvalidFen { .. }
+            | Self::InvalidSan { .. }
             | Self::Frame(FrameError::GameTooLarge { .. } | FrameError::MissingOutcome { .. }) => 1,
             Self::Frame(FrameError::Io(_)) | Self::Output(_) => 3,
         }
@@ -83,6 +97,15 @@ impl fmt::Display for QueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Parse { game, error } => write!(formatter, "game {game}: {error}"),
+            Self::InvalidFen { game, error } => {
+                write!(formatter, "game {game}: invalid starting FEN: {error}")
+            }
+            Self::InvalidSan {
+                game,
+                ply,
+                san,
+                error,
+            } => write!(formatter, "game {game}, ply {ply}: {error} ({san})"),
             Self::Frame(error) => error.fmt(formatter),
             Self::Output(error) => write!(formatter, "failed to write query output: {error}"),
         }
@@ -105,16 +128,42 @@ struct GameMetadata<'a> {
     black: Option<Cow<'a, [u8]>>,
     white_elo: Option<Cow<'a, [u8]>>,
     black_elo: Option<Cow<'a, [u8]>>,
+    fen: Option<Cow<'a, [u8]>>,
+    variant: Option<Cow<'a, [u8]>>,
     outcome: Option<Outcome>,
     mainline_plies: u64,
     variation_depth: u32,
+    position: Position,
+    position_ply: Option<u64>,
+    position_search_active: bool,
 }
 
 impl<'a> GameMetadata<'a> {
-    fn observe(&mut self, event: Event<'a>) {
+    fn observe(
+        &mut self,
+        event: Event<'a>,
+        target: Option<Position>,
+        game: u64,
+    ) -> Result<(), QueryError> {
         match event {
             Event::Tag(tag) => self.observe_tag(tag),
-            Event::San(_) if self.variation_depth == 0 => self.mainline_plies += 1,
+            Event::MovetextStart { .. } => self.start_movetext(target, game)?,
+            Event::San(token) if self.variation_depth == 0 => {
+                self.mainline_plies += 1;
+                if let Some(target) = target.filter(|_| self.position_search_active) {
+                    self.position.play_san(token.as_bytes()).map_err(|error| {
+                        QueryError::InvalidSan {
+                            game,
+                            ply: self.mainline_plies,
+                            san: String::from_utf8_lossy(token.as_bytes()).into_owned(),
+                            error,
+                        }
+                    })?;
+                    if self.position_ply.is_none() && self.position.same_position(target) {
+                        self.position_ply = Some(self.mainline_plies);
+                    }
+                }
+            }
             Event::VariationStart(_) => self.variation_depth += 1,
             Event::VariationEnd(_) => self.variation_depth -= 1,
             Event::Outcome { outcome, .. } if self.variation_depth == 0 => {
@@ -122,6 +171,7 @@ impl<'a> GameMetadata<'a> {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn observe_tag(&mut self, tag: Tag<'a>) {
@@ -134,11 +184,37 @@ impl<'a> GameMetadata<'a> {
             b"Black" => &mut self.black,
             b"WhiteElo" => &mut self.white_elo,
             b"BlackElo" => &mut self.black_elo,
+            b"FEN" => &mut self.fen,
+            b"Variant" => &mut self.variant,
             _ => return,
         };
         if destination.is_none() {
             *destination = Some(tag.value());
         }
+    }
+
+    fn start_movetext(&mut self, target: Option<Position>, game: u64) -> Result<(), QueryError> {
+        let Some(target) = target else {
+            return Ok(());
+        };
+        if self
+            .variant
+            .as_deref()
+            .is_some_and(|variant| !variant.eq_ignore_ascii_case(b"standard"))
+        {
+            return Ok(());
+        }
+        self.position_search_active = true;
+        self.position = match self.fen.as_deref() {
+            Some(fen) => {
+                Position::from_fen(fen).map_err(|error| QueryError::InvalidFen { game, error })?
+            }
+            None => Position::initial(),
+        };
+        if self.position.same_position(target) {
+            self.position_ply = Some(0);
+        }
+        Ok(())
     }
 
     fn selected_player(&self, player: &str) -> Option<SelectedPlayer> {
@@ -164,6 +240,9 @@ impl<'a> GameMetadata<'a> {
     }
 
     fn matches(&self, options: &QueryOptions) -> bool {
+        if options.position.is_some() && self.position_ply.is_none() {
+            return false;
+        }
         let selected = options
             .player
             .as_deref()
@@ -275,6 +354,7 @@ impl<'a> GameMetadata<'a> {
                     black_elo: self.black_elo.as_deref().and_then(parse_unsigned),
                     result: self.outcome.map(outcome_label),
                     mainline_plies: self.mainline_plies,
+                    position_ply: self.position_ply,
                 };
                 serde_json::to_writer(&mut *output, &record)
                     .map_err(|error| QueryError::Output(io::Error::other(error)))?;
@@ -307,6 +387,8 @@ struct MatchRecord<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<&'static str>,
     mainline_plies: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position_ply: Option<u64>,
 }
 
 pub fn query<R: Read>(
@@ -337,7 +419,11 @@ pub fn query<R: Read>(
         let mut metadata = GameMetadata::default();
         for event in Parser::with_options(game, ParserOptions::STRICT) {
             match event {
-                Ok(event) => metadata.observe(event),
+                Ok(event) => {
+                    if let Err(error) = metadata.observe(event, options.position, summary.games) {
+                        return Err(QueryFailure { summary, error });
+                    }
+                }
                 Err(error) => {
                     return Err(QueryFailure {
                         summary,
@@ -485,6 +571,149 @@ mod tests {
         assert_eq!(summary.matches, 1);
         assert!(String::from_utf8_lossy(&output).contains("[Event \"First\"]"));
         assert!(!String::from_utf8_lossy(&output).contains("[Event \"Second\"]"));
+    }
+
+    #[test]
+    fn matches_a_mainline_position_and_reports_its_first_ply() {
+        let options = QueryOptions {
+            position: Some(
+                Position::from_fen(
+                    b"rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 37 82",
+                )
+                .unwrap(),
+            ),
+            ..QueryOptions::default()
+        };
+        let mut output = Vec::new();
+        let summary = query(
+            GAMES,
+            "games.pgn",
+            &options,
+            QueryFormat::Jsonl,
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(summary.games, 2);
+        assert_eq!(summary.matches, 1);
+        let record: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(record["game"], 1);
+        assert_eq!(record["position_ply"], 2);
+    }
+
+    #[test]
+    fn includes_the_starting_position_and_ignores_variations() {
+        let fen_start =
+            b"[SetUp \"1\"]\n[FEN \"4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 7\"]\n\n7. exd6 *\n";
+        let options = QueryOptions {
+            position: Some(Position::from_fen(b"4k3/8/8/3pP3/8/8/8/4K3 w - d6 50 99").unwrap()),
+            ..QueryOptions::default()
+        };
+        let mut output = Vec::new();
+        let summary = query(
+            fen_start.as_slice(),
+            "fen.pgn",
+            &options,
+            QueryFormat::Jsonl,
+            &mut output,
+        )
+        .unwrap();
+        let record: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+        assert_eq!(summary.matches, 1);
+        assert_eq!(record["position_ply"], 0);
+
+        let variation = b"1. e4 (1. d4 d5) e5 *\n";
+        let variation_options = QueryOptions {
+            position: Some(
+                Position::from_fen(b"rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1")
+                    .unwrap(),
+            ),
+            ..QueryOptions::default()
+        };
+        let summary = query(
+            variation.as_slice(),
+            "variation.pgn",
+            &variation_options,
+            QueryFormat::Count,
+            &mut Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(summary.matches, 0);
+    }
+
+    #[test]
+    fn position_search_reports_invalid_fen_and_san() {
+        let options = QueryOptions {
+            position: Some(Position::initial()),
+            ..QueryOptions::default()
+        };
+        let invalid_fen = query(
+            b"[FEN \"not a FEN\"]\n\n*\n".as_slice(),
+            "bad-fen.pgn",
+            &options,
+            QueryFormat::Count,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            invalid_fen.error,
+            QueryError::InvalidFen { game: 1, .. }
+        ));
+
+        let invalid_san = query(
+            b"1. e5 *\n".as_slice(),
+            "bad-san.pgn",
+            &options,
+            QueryFormat::Count,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            invalid_san.error,
+            QueryError::InvalidSan {
+                game: 1,
+                ply: 1,
+                ..
+            }
+        ));
+        assert_eq!(invalid_san.error.exit_code(), 1);
+    }
+
+    #[test]
+    fn position_search_skips_explicit_non_standard_variants() {
+        let options = QueryOptions {
+            position: Some(Position::initial()),
+            ..QueryOptions::default()
+        };
+        let mut output = Vec::new();
+        let summary = query(
+            b"[Variant \"Crazyhouse\"]\n\n1. N@e3 *\n".as_slice(),
+            "variant.pgn",
+            &options,
+            QueryFormat::Count,
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(summary.games, 1);
+        assert_eq!(summary.matches, 0);
+    }
+
+    #[test]
+    fn metadata_only_queries_remain_lexical() {
+        let mut output = Vec::new();
+        let summary = query(
+            b"[FEN \"not a FEN\"]\n\n1. e5 *\n".as_slice(),
+            "lexical.pgn",
+            &QueryOptions::default(),
+            QueryFormat::Count,
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(summary.matches, 1);
     }
 
     #[test]

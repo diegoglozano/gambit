@@ -15,8 +15,9 @@ gambit query games.pgn --player diegoglozano --result loss --format count
 ```
 
 Query can emit matching PGN, one JSONL metadata record per match, or only the
-count. Player-relative filters make questions such as wins, losses, color, and
-rating unambiguous. See [Query games](query.md) for the complete contract.
+count. It can also find games that reach an exact FEN position. Player-relative
+filters make questions such as wins, losses, color, and rating unambiguous. See
+[Query games](query.md) for the complete contract.
 
 ## A quick corpus summary
 

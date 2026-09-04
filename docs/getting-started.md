@@ -39,6 +39,14 @@ gambit query lichess.pgn --player diegoglozano --format count
 gambit query lichess.pgn --result draw --format jsonl
 ```
 
+Find every standard-chess game that reaches a position copied as FEN:
+
+```console
+gambit query lichess.pgn \
+  --position 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2' \
+  --format count
+```
+
 See [Query games](query.md) for filter semantics and the JSONL schema.
 
 ## Summarize a corpus

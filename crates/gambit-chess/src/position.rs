@@ -505,6 +505,21 @@ impl Position {
         self.fullmove_number
     }
 
+    /// Returns whether two values describe the same playable chess position.
+    ///
+    /// Piece placement, side to move, castling rights, and effective en-passant
+    /// availability are compared. The halfmove clock and fullmove number are
+    /// intentionally ignored because they do not change the position reached
+    /// by a game. An en-passant target is effective only when the side to move
+    /// has a legal en-passant capture.
+    #[must_use]
+    pub fn same_position(self, other: Self) -> bool {
+        self.pieces == other.pieces
+            && self.side_to_move == other.side_to_move
+            && self.castling == other.castling
+            && self.effective_en_passant() == other.effective_en_passant()
+    }
+
     #[must_use]
     pub const fn bitboard(self, color: Color, piece: Piece) -> u64 {
         self.pieces[piece_index(color, piece)]
@@ -520,6 +535,17 @@ impl Position {
             }
         }
         None
+    }
+
+    fn effective_en_passant(self) -> Option<Square> {
+        let target = self.en_passant()?;
+        let mut moves = MoveList::default();
+        self.generate_legal_moves(&mut moves);
+        moves
+            .as_slice()
+            .iter()
+            .any(|chess_move| chess_move.is_en_passant())
+            .then_some(target)
     }
 
     #[must_use]
@@ -1059,6 +1085,30 @@ mod tests {
         let mut moves = MoveList::default();
         position.generate_legal_moves(&mut moves);
         assert_eq!(moves.as_slice().iter().filter(|m| m.is_castle()).count(), 2);
+    }
+
+    #[test]
+    fn compares_playable_positions_without_move_counters() {
+        let first =
+            Position::from_fen(b"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
+                .unwrap();
+        let different_counters =
+            Position::from_fen(b"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 37 82")
+                .unwrap();
+        let different_side =
+            Position::from_fen(b"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1")
+                .unwrap();
+
+        assert!(first.same_position(different_counters));
+        assert!(!first.same_position(different_side));
+    }
+
+    #[test]
+    fn compares_effective_en_passant_availability() {
+        let available = Position::from_fen(b"4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1").unwrap();
+        let unavailable = Position::from_fen(b"4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1").unwrap();
+
+        assert!(!available.same_position(unavailable));
     }
 
     fn perft(position: Position, depth: u8) -> u64 {
