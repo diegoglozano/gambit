@@ -11,11 +11,12 @@ pinpoints syntax and chess-semantic errors.
 ## A quick query
 
 ```console
-gambit query games.pgn --player diegoglozano --result loss --format count
+gambit query --lichess-user diegoglozano --result loss --format count
 ```
 
 Query can emit matching PGN, one JSONL metadata record per match, or only the
-count. It can also find games that reach an exact FEN position. Player-relative
+count. It streams public user games directly from Lichess or reads local PGN,
+and can also find games that reach an exact FEN position. Player-relative
 filters make questions such as wins, losses, color, and rating unambiguous. See
 [Query games](query.md) for the complete contract.
 

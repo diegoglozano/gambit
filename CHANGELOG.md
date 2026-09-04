@@ -6,6 +6,9 @@ All notable changes to Gambit are documented in this file.
 
 ### Added
 
+- Added direct bounded-memory Lichess user queries with `--lichess-user`,
+  optional `LICHESS_TOKEN` authentication, upstream date/opponent/color
+  filtering, and a `--max-games` request limit.
 - Added exact standard-chess position filtering to `gambit query` with
   `--position <FEN>`, including FEN starts, first-match ply reporting in JSONL,
   and composition with every metadata filter.

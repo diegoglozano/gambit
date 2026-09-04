@@ -1,4 +1,5 @@
 mod doctor;
+mod lichess;
 mod query;
 mod stats;
 
@@ -23,7 +24,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -57,6 +58,8 @@ struct StatsCommand {
 #[derive(Debug)]
 struct QueryCommand {
     paths: Vec<OsString>,
+    lichess_user: Option<String>,
+    maximum_games: Option<u32>,
     format: QueryFormat,
     options: QueryOptions,
 }
@@ -67,7 +70,7 @@ enum Action {
     Version,
     Doctor(DoctorCommand),
     Stats(StatsCommand),
-    Query(QueryCommand),
+    Query(Box<QueryCommand>),
 }
 
 fn main() -> ExitCode {
@@ -246,6 +249,8 @@ fn parse_stats_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
 
 fn parse_query_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
     let mut paths = Vec::new();
+    let mut lichess_user = None;
+    let mut maximum_games = None;
     let mut format = QueryFormat::Pgn;
     let mut options = QueryOptions::default();
     let mut arguments = arguments.peekable();
@@ -273,25 +278,38 @@ fn parse_query_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
                         .ok_or_else(|| format!("{option} requires a value"))?;
                     owned_value.as_os_str()
                 };
-                set_query_option(option, value, &mut format, &mut options)?;
+                match option {
+                    "--lichess-user" => {
+                        lichess_user = Some(parse_lichess_username(value)?);
+                    }
+                    "--max-games" => maximum_games = Some(parse_maximum_games(value)?),
+                    _ => set_query_option(option, value, &mut format, &mut options)?,
+                }
             }
             _ => paths.push(argument),
         }
     }
 
-    validate_input_paths("query", &paths)?;
+    validate_query_source(&paths, lichess_user.as_deref(), maximum_games, &options)?;
+    if let Some(username) = lichess_user.as_ref() {
+        options.player = Some(username.clone());
+    }
     validate_query_options(&options)?;
-    Ok(Action::Query(QueryCommand {
+    Ok(Action::Query(Box::new(QueryCommand {
         paths,
+        lichess_user,
+        maximum_games,
         format,
         options,
-    }))
+    })))
 }
 
 fn is_query_value_option(option: &str) -> bool {
     matches!(
         option,
-        "--player"
+        "--lichess-user"
+            | "--max-games"
+            | "--player"
             | "--opponent"
             | "--color"
             | "--result"
@@ -302,6 +320,65 @@ fn is_query_value_option(option: &str) -> bool {
             | "--position"
             | "--format"
     )
+}
+
+fn validate_query_source(
+    paths: &[OsString],
+    lichess_user: Option<&str>,
+    maximum_games: Option<u32>,
+    options: &QueryOptions,
+) -> Result<(), String> {
+    match (paths.is_empty(), lichess_user) {
+        (true, None) => {
+            return Err(String::from(
+                "query requires an input path or --lichess-user",
+            ));
+        }
+        (false, Some(_)) => {
+            return Err(String::from(
+                "--lichess-user cannot be combined with input paths",
+            ));
+        }
+        _ => {}
+    }
+    if lichess_user.is_some() && options.player.is_some() {
+        return Err(String::from(
+            "--lichess-user selects the player and cannot be combined with --player",
+        ));
+    }
+    if maximum_games.is_some() && lichess_user.is_none() {
+        return Err(String::from("--max-games requires --lichess-user"));
+    }
+    if paths.len() > 1 && paths.iter().any(|path| path == "-") {
+        return Err(String::from(
+            "standard input cannot be combined with other input paths",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_lichess_username(value: &OsStr) -> Result<String, String> {
+    let username = parse_query_text("--lichess-user", value)?;
+    if !(2..=30).contains(&username.len())
+        || !username
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(String::from(
+            "--lichess-user must contain 2-30 letters, digits, underscores, or hyphens",
+        ));
+    }
+    Ok(username)
+}
+
+fn parse_maximum_games(value: &OsStr) -> Result<u32, String> {
+    let value = value
+        .to_str()
+        .ok_or_else(|| String::from("--max-games must be valid UTF-8"))?;
+    match value.parse() {
+        Ok(0) | Err(_) => Err(String::from("--max-games must be a positive integer")),
+        Ok(maximum) => Ok(maximum),
+    }
 }
 
 fn set_query_option(
@@ -509,7 +586,47 @@ fn run_query(command: &QueryCommand) -> ExitCode {
     let mut total = QuerySummary::default();
     let mut exit_code = 0;
 
-    if command.paths[0] == "-" {
+    if let Some(username) = command.lichess_user.as_deref() {
+        let token = match env::var("LICHESS_TOKEN") {
+            Ok(token) if token.is_empty() => None,
+            Ok(token) => Some(token),
+            Err(env::VarError::NotPresent) => None,
+            Err(env::VarError::NotUnicode(_)) => {
+                eprintln!("query: LICHESS_TOKEN must be valid UTF-8");
+                return ExitCode::from(3);
+            }
+        };
+        let request = lichess::UserGamesRequest {
+            username,
+            maximum_games: command.maximum_games,
+            options: &command.options,
+        };
+        let mut response = match lichess::user_games(&request, token.as_deref()) {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!("query: lichess:{username}: {error}");
+                return ExitCode::from(3);
+            }
+        };
+        let source = format!("lichess:{username}");
+        match query_games(
+            response.body_mut().as_reader(),
+            &source,
+            &command.options,
+            command.format,
+            &mut output,
+        ) {
+            Ok(summary) => total.add(summary),
+            Err(failure) => {
+                total.add(failure.summary);
+                eprintln!("query: {source}: {}", failure.error);
+                if matches!(failure.error, QueryError::Output(_)) {
+                    return ExitCode::from(3);
+                }
+                exit_code = failure.error.exit_code();
+            }
+        }
+    } else if command.paths[0] == "-" {
         match query_games(
             io::stdin().lock(),
             "stdin",
@@ -1600,5 +1717,54 @@ mod tests {
     fn rejects_stdin_among_multiple_paths() {
         let error = parse_arguments(args(&["doctor", "one.pgn", "-"])).unwrap_err();
         assert!(error.contains("standard input cannot be combined"));
+    }
+
+    #[test]
+    fn parses_lichess_as_a_query_source_and_selects_that_player() {
+        let Action::Query(command) = parse_arguments(args(&[
+            "query",
+            "--lichess-user",
+            "diegoglozano",
+            "--max-games=25",
+            "--color",
+            "black",
+            "--result",
+            "loss",
+        ]))
+        .unwrap() else {
+            panic!("expected query action");
+        };
+        assert!(command.paths.is_empty());
+        assert_eq!(command.lichess_user.as_deref(), Some("diegoglozano"));
+        assert_eq!(command.maximum_games, Some(25));
+        assert_eq!(command.options.player.as_deref(), Some("diegoglozano"));
+        assert_eq!(command.options.color, Some(PlayerColor::Black));
+        assert_eq!(command.options.result, Some(ResultFilter::Loss));
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_inapplicable_lichess_source_options() {
+        let mixed = parse_arguments(args(&[
+            "query",
+            "--lichess-user",
+            "diegoglozano",
+            "games.pgn",
+        ]))
+        .unwrap_err();
+        assert!(mixed.contains("cannot be combined with input paths"));
+
+        let player = parse_arguments(args(&[
+            "query",
+            "--lichess-user",
+            "diegoglozano",
+            "--player",
+            "someone",
+        ]))
+        .unwrap_err();
+        assert!(player.contains("selects the player"));
+
+        let maximum =
+            parse_arguments(args(&["query", "--max-games", "10", "games.pgn"])).unwrap_err();
+        assert!(maximum.contains("requires --lichess-user"));
     }
 }

@@ -6,6 +6,52 @@ already fast enough for personal archives and one-shot corpus searches.
 
 ## Start with your own games
 
+Read public games directly from Lichess and count losses as Black from 2026
+onward:
+
+```console
+gambit query --lichess-user diegoglozano \
+  --color black \
+  --result loss \
+  --since 2026-01-01 \
+  --format count
+```
+
+`--lichess-user` is both the input source and the selected player, so it cannot
+be combined with a file path or `--player`. Add `--max-games 25` to inspect at
+most the newest 25 games returned by Lichess. With PGN output, the same command
+can create an archive explicitly:
+
+```console
+gambit query --lichess-user diegoglozano > lichess-diegoglozano.pgn
+```
+
+Public games need no credentials. To authenticate, create a
+[Lichess personal access token](https://lichess.org/account/oauth/token) and
+expose it only to the Gambit process:
+
+```console
+LICHESS_TOKEN=lip_example gambit query --lichess-user diegoglozano --format count
+```
+
+Gambit reads `LICHESS_TOKEN` from the process environment. It does not silently
+load `.env` files; a shell, secret manager, or environment loader may provide
+the variable from one. The token is sent only in the Lichess authorization
+header and is never included in output or diagnostics. Authentication raises
+Lichess's export rate for your own games, but is optional for public data.
+
+The response is processed as it arrives and is not cached. Date, opponent, and
+color constraints are sent to Lichess to reduce transfer, then every predicate
+is evaluated locally for the same behavior as file queries. `--max-games`
+limits the games returned after those server-side constraints and before local
+result, rating, or position filtering. Lichess serves the newest games first.
+
+Lichess may rate-limit clients. Gambit makes one request at a time and reports
+an actionable input error on HTTP 429 rather than silently retrying and risking
+duplicate streaming output. Wait at least one minute before trying again.
+
+For an existing local export, use a file exactly as before:
+
 Count every game belonging to a player:
 
 ```console
@@ -122,9 +168,11 @@ move.
 
 ## Inputs and resource bounds
 
-Query accepts plain PGN, `.pgn.zst`, multiple files, recursive directories, or
-decompressed standard input. Directory discovery is deterministic. Output from
-all resolved files is concatenated, and `count` reports the aggregate.
+Query accepts plain PGN, `.pgn.zst`, multiple files, recursive directories,
+decompressed standard input, or one Lichess user. Directory discovery is
+deterministic. Output from all resolved files is concatenated, and `count`
+reports the aggregate. A Lichess source is streamed over HTTPS and cannot be
+combined with another input.
 
 The corpus is never materialized. Query retains only the current game, using a
 64 KiB read buffer and a 16 MiB maximum game-size safety limit. Memory use is
@@ -142,8 +190,15 @@ Exact-position search executes 54.7 million moves from the same corpus at
 of 1.90 MB and 10.93 MB respectively; see the
 [position-query benchmark](benchmarks/lichess-2014-04.md#position-query-follow-up).
 
+The [public monthly archives](https://database.lichess.org/) can be piped through
+Gambit, but they are not indexed by username. Avoiding local disk is possible;
+avoiding the network transfer and full scan is not. Per-user lookups should
+therefore use `--lichess-user`. A resumable local user cache is planned
+separately.
+
 Exit status 0 means the query completed, including when it matched no games.
 Malformed PGN, an invalid standard-game FEN start, illegal mainline SAN during
 position search, or a game exceeding the safety limit exits 1. An invalid
 `--position` value is a usage error and exits 2. Input, decompression, or output
-failures exit 3.
+failures—including Lichess transport, authentication, not-found, and rate-limit
+errors—exit 3.

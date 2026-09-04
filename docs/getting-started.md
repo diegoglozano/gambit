@@ -21,6 +21,21 @@ Prebuilt archives and checksums are also available on the
 
 ## Query games
 
+Query a user's public games directly from Lichess without first downloading a
+PGN file:
+
+```console
+gambit query --lichess-user diegoglozano \
+  --color black \
+  --result loss \
+  --since 2026-01-01 \
+  --format count
+```
+
+Add `--max-games 25` for a quick sample of the newest games. Public access does
+not require credentials. Set `LICHESS_TOKEN` in the process environment for
+authenticated access to your own account.
+
 Select games from a corpus and write a new PGN:
 
 ```console

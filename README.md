@@ -13,6 +13,12 @@ dependency-free ingestion layer and a compact semantic chess core.
 Search a PGN corpus by chess position or player-relative metadata:
 
 ```shell
+gambit query --lichess-user diegoglozano \
+  --color black \
+  --result loss \
+  --since 2026-01-01 \
+  --format count
+
 gambit query games.pgn \
   --player diegoglozano \
   --color black \
@@ -28,11 +34,14 @@ gambit query games.pgn \
 ```
 
 Query emits matching PGN by default, so its output remains usable by Gambit or
-other chess software. JSONL exposes one metadata record per match for data
-pipelines. Player and opponent names are matched case-insensitively; color,
-win/loss, and rating filters are evaluated from the selected player's
-perspective. Position search executes standard-chess mainlines and reports each
-matching game once, even if the position occurs repeatedly.
+other chess software. `--lichess-user` reads the user's public games directly
+from the Lichess API without creating a local archive; an optional
+`LICHESS_TOKEN` enables authenticated access. JSONL exposes one metadata record
+per match for data pipelines. Player and opponent names are matched
+case-insensitively; color, win/loss, and rating filters are evaluated from the
+selected player's perspective. Position search executes standard-chess
+mainlines and reports each matching game once, even if the position occurs
+repeatedly.
 
 Plain files, `.pgn.zst` streams, recursive directories, and standard input are
 supported. Query retains at most one game up to the 16 MiB safety limit, so
