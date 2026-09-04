@@ -8,6 +8,31 @@ dependency-free ingestion layer and a compact semantic chess core.
 
 ![Gambit 0.6 inspecting, querying, and validating PGN files](./static/gambit-doctor.gif)
 
+## Gambit databases
+
+Build a self-contained chess database when you want to query the same corpus
+repeatedly:
+
+```shell
+gambit index ./diegoglozano-games --output diegoglozano.gambit
+
+gambit query diegoglozano.gambit \
+  --player diegoglozano \
+  --color black \
+  --result loss \
+  --since 2026-01-01 \
+  --format count
+```
+
+The `.gambit` file contains the original PGN, normalized metadata, and an exact
+mainline-position lookup. Count queries read indexes without decompressing PGN;
+PGN output extracts only matching games. Construction streams plain PGN,
+`.pgn.zst`, standard input, or recursive directories with memory bounded by one
+game and a fixed database cache. Existing destinations are never overwritten,
+and a file is published only after the full build succeeds. See the
+[database guide](https://diegoglozano.github.io/gambit/docs/databases/) for
+format and HPC tradeoffs.
+
 ## Gambit Sync
 
 Maintain a resumable local collection of a Lichess user's games:

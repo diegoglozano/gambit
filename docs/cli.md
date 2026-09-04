@@ -5,6 +5,7 @@
 ```text
 gambit doctor [OPTIONS] <PATH|->...
 gambit stats [OPTIONS] <PATH|->...
+gambit index [OPTIONS] --output <FILE> <PATH|->...
 gambit query [OPTIONS] <PATH|->...
 gambit query [OPTIONS] --lichess-user <NAME>
 gambit sync --lichess-user <NAME> --output <DIRECTORY>
@@ -59,6 +60,19 @@ quality/range. Fixed distributions describe game lengths, rating bands, and
 PGN time-control forms. See [Corpus statistics](statistics.md) for metric
 definitions, JSON shape, and HPC behavior.
 
+## Index options
+
+| Option | Description |
+| --- | --- |
+| `-o`, `--output <FILE>` | Create this self-contained `.gambit` database. Required; an existing path is never overwritten. |
+| `--format <human|json>` | Select the completion report format. The default is `human`. |
+| `-h`, `--help` | Print help. |
+
+Index accepts the same PGN input forms as Doctor and Stats. It semantically
+executes standard-chess mainlines, stores the original PGN and query metadata,
+and builds a position lookup in bounded memory. The database is published only
+after the complete build succeeds. See [Gambit databases](databases.md).
+
 ## Query options
 
 | Option | Description |
@@ -77,10 +91,11 @@ definitions, JSON shape, and HPC behavior.
 | `--format <pgn|jsonl|count>` | Select output. The default is `pgn`. |
 | `-h`, `--help` | Print help. |
 
-Query accepts the same file input forms as Doctor and Stats, or one Lichess user
-as a remote input. Set the optional `LICHESS_TOKEN` environment variable for
-authenticated Lichess access. See [Query games](query.md) for missing-metadata
-behavior, remote-source semantics, output contracts, and bounded-memory details.
+Query accepts the same file input forms as Doctor and Stats, an explicit
+`.gambit` database, or one Lichess user as a remote input. Set the optional
+`LICHESS_TOKEN` environment variable for authenticated Lichess access. See
+[Query games](query.md) for missing-metadata behavior, remote-source semantics,
+output contracts, and bounded-memory details.
 
 ## Sync options
 

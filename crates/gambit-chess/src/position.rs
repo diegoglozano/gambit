@@ -520,6 +520,46 @@ impl Position {
             && self.effective_en_passant() == other.effective_en_passant()
     }
 
+    /// Returns a stable 128-bit key for the playable position.
+    ///
+    /// The key covers the same state as [`Self::same_position`]: piece placement,
+    /// side to move, castling rights, and effective en-passant availability. Move
+    /// counters are intentionally excluded. It is suitable for persistent index
+    /// lookups; callers that require collision-proof identity should still verify
+    /// a matching position.
+    #[must_use]
+    pub fn position_key(self) -> [u8; 16] {
+        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const FNV_OFFSET_ALT: u64 = 0x8422_2325_cbf2_9ce4;
+        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+        let mut first = FNV_OFFSET;
+        let mut second = FNV_OFFSET_ALT;
+        let mut update = |byte: u8| {
+            first = (first ^ u64::from(byte)).wrapping_mul(FNV_PRIME);
+            second = second.wrapping_mul(FNV_PRIME) ^ u64::from(byte);
+        };
+        for bitboard in self.pieces {
+            for byte in bitboard.to_le_bytes() {
+                update(byte);
+            }
+        }
+        update(match self.side_to_move {
+            Color::White => 0,
+            Color::Black => 1,
+        });
+        update(self.castling.0);
+        update(
+            self.effective_en_passant()
+                .map_or(NO_SQUARE, |square| square.0),
+        );
+
+        let mut key = [0_u8; 16];
+        key[..8].copy_from_slice(&first.to_le_bytes());
+        key[8..].copy_from_slice(&second.to_le_bytes());
+        key
+    }
+
     #[must_use]
     pub const fn bitboard(self, color: Color, piece: Piece) -> u64 {
         self.pieces[piece_index(color, piece)]
@@ -1100,7 +1140,16 @@ mod tests {
                 .unwrap();
 
         assert!(first.same_position(different_counters));
+        assert_eq!(first.position_key(), different_counters.position_key());
         assert!(!first.same_position(different_side));
+        assert_ne!(first.position_key(), different_side.position_key());
+        assert_eq!(
+            Position::initial().position_key(),
+            [
+                0xa0, 0xfc, 0xaf, 0x7d, 0xd0, 0x8a, 0x1d, 0xd2, 0x21, 0xe6, 0x46, 0x56, 0xad, 0xa2,
+                0xfc, 0x8e,
+            ]
+        );
     }
 
     #[test]

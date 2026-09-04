@@ -72,6 +72,7 @@ pub enum QueryError {
         error: SanError,
     },
     Frame(FrameError),
+    Database(String),
     Output(io::Error),
 }
 
@@ -88,7 +89,7 @@ impl QueryError {
             | Self::InvalidFen { .. }
             | Self::InvalidSan { .. }
             | Self::Frame(FrameError::GameTooLarge { .. } | FrameError::MissingOutcome { .. }) => 1,
-            Self::Frame(FrameError::Io(_)) | Self::Output(_) => 3,
+            Self::Frame(FrameError::Io(_)) | Self::Database(_) | Self::Output(_) => 3,
         }
     }
 }
@@ -107,6 +108,7 @@ impl fmt::Display for QueryError {
                 error,
             } => write!(formatter, "game {game}, ply {ply}: {error} ({san})"),
             Self::Frame(error) => error.fmt(formatter),
+            Self::Database(error) => write!(formatter, "failed to query Gambit database: {error}"),
             Self::Output(error) => write!(formatter, "failed to write query output: {error}"),
         }
     }

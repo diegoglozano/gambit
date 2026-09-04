@@ -340,8 +340,53 @@ described above.
 
 This is a full semantic scan rather than an indexed lookup: runtime scales
 with the total number of moves, while resident memory remains independent of
-corpus size. It establishes the baseline that a future persistent position
-index should beat for repeated searches.
+corpus size. It establishes the scan baseline that the persistent index below
+must beat for repeated searches.
+
+### Gambit database follow-up
+
+The first `.gambit` database implementation pays the parse and legal-move cost
+once, appends visited positions sequentially, then bulk-builds a covering
+position index. This avoids the unacceptably slow random B-tree insertion path:
+that compact prototype was stopped after more than seven minutes without
+finishing the same corpus.
+
+```console
+/usr/bin/time -l target/release/gambit index \
+  "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.pgn" \
+  --output "$LICHESS_DATA_DIR/lichess_db_standard_rated_2014-04.gambit" \
+  --format json
+```
+
+The completed build was measured on 2026-09-04 with the same release profile
+and machine as the other follow-ups:
+
+| Games | Visited positions | Source PGN | `.gambit` size | Elapsed | Throughput | Maximum RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 810,463 | 55,558,962 | 701,772,510 B | 4,080,631,808 B | 99.36s | 6.74 MiB/s | 276,414,464 B |
+
+The file is 5.82 times the decompressed PGN size. Peak memory occurs during
+SQLite's bulk index sort and stays fixed by the build configuration rather
+than growing with the corpus. This is intentionally a build-once format: raw
+`.pgn.zst` remains a better archival and one-shot scan representation.
+
+Lookup measurements used separate release-binary processes with a warm
+filesystem cache. One hundred absent-player metadata counts took 0.32s total
+(3.2 ms/process), and one hundred absent-position counts took 0.23s total
+(2.3 ms/process). A deliberately worst-case count of the initial position,
+which matches all 810,463 games, took 0.78s for five runs (156 ms/process). The
+same initial-position count from raw PGN took 6.43s, making the indexed query
+about 41 times faster even while aggregating every game ID.
+
+Correctness parity was checked between raw PGN and the database for the common
+initial position (810,463 matches), the unreachable no-castling position (0),
+and all draws (27,386). PGN extraction is also round-tripped through Gambit
+Doctor in the CLI integration suite.
+
+At these measured rates, roughly 16 full position scans amortize the 99-second
+build on CPU time alone. The operational tradeoff is the 3.8 GiB database and
+the lack of incremental updates in schema version 1; the next build-side work
+is parallel parsing, batched ingestion, progress, and incremental rebuilds.
 
 ## External tool comparison
 

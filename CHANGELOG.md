@@ -4,6 +4,15 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added `gambit index` to build self-contained, query-optimized `.gambit`
+  databases from streaming PGN, with original-game extraction, metadata
+  indexes, exact mainline-position lookup, bounded memory, and atomic
+  no-overwrite publication.
+- Extended `gambit query` to use `.gambit` metadata and position indexes for
+  counts and JSONL, decompressing stored PGN only for matching PGN output.
+
 ## [0.6.1] - 2026-09-04
 
 ### Fixed

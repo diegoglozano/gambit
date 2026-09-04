@@ -1,4 +1,5 @@
 mod doctor;
+mod index;
 mod lichess;
 mod query;
 mod stats;
@@ -10,7 +11,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use doctor::{
     Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
@@ -26,7 +27,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build a self-contained, query-optimized .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -67,6 +68,13 @@ struct QueryCommand {
 }
 
 #[derive(Debug)]
+struct IndexCommand {
+    paths: Vec<OsString>,
+    destination: PathBuf,
+    format: StatsOutputFormat,
+}
+
+#[derive(Debug)]
 struct SyncCommand {
     username: String,
     destination: PathBuf,
@@ -86,6 +94,7 @@ enum Action {
     Version,
     Doctor(DoctorCommand),
     Stats(StatsCommand),
+    Index(IndexCommand),
     Query(Box<QueryCommand>),
     Sync(SyncCommand),
 }
@@ -102,6 +111,7 @@ fn main() -> ExitCode {
         }
         Ok(Action::Doctor(command)) => run_doctor(&command),
         Ok(Action::Stats(command)) => run_stats(&command),
+        Ok(Action::Index(command)) => run_index(&command),
         Ok(Action::Query(command)) => run_query(&command),
         Ok(Action::Sync(command)) => run_sync(&command),
         Err(error) => {
@@ -121,6 +131,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
         Some("-V" | "--version") => no_more(arguments, Action::Version),
         Some("doctor") => parse_doctor_arguments(arguments),
         Some("stats") => parse_stats_arguments(arguments),
+        Some("index") => parse_index_arguments(arguments),
         Some("query") => parse_query_arguments(arguments),
         Some("sync") => parse_sync_arguments(arguments),
         Some(value) if value.starts_with('-') && value != "-" => {
@@ -263,6 +274,59 @@ fn parse_stats_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
         paths,
         format,
         options: StatsOptions { require_outcome },
+    }))
+}
+
+fn parse_index_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
+    let mut paths = Vec::new();
+    let mut destination = None;
+    let mut format = StatsOutputFormat::Human;
+    let mut arguments = arguments.peekable();
+
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-h" | "--help") => return no_more(arguments, Action::Help),
+            Some("--") => {
+                paths.extend(arguments);
+                break;
+            }
+            Some("-o" | "--output") => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| String::from("--output requires a value"))?;
+                if value.is_empty() || value == "-" {
+                    return Err(String::from("--output must be a file path"));
+                }
+                destination = Some(PathBuf::from(value));
+            }
+            Some("--format") => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| String::from("--format requires a value"))?;
+                format = parse_stats_format(&value)?;
+            }
+            Some(value) if value.starts_with("--output=") => {
+                let value = OsStr::new(&value["--output=".len()..]);
+                if value.is_empty() || value == "-" {
+                    return Err(String::from("--output must be a file path"));
+                }
+                destination = Some(PathBuf::from(value));
+            }
+            Some(value) if value.starts_with("--format=") => {
+                format = parse_stats_format(OsStr::new(&value["--format=".len()..]))?;
+            }
+            Some(value) if value.starts_with('-') && value != "-" => {
+                return Err(format!("unknown index option: {value}"));
+            }
+            _ => paths.push(argument),
+        }
+    }
+
+    validate_input_paths("index", &paths)?;
+    Ok(Action::Index(IndexCommand {
+        paths,
+        destination: destination.ok_or_else(|| String::from("index requires --output"))?,
+        format,
     }))
 }
 
@@ -663,6 +727,137 @@ fn run_stats(command: &StatsCommand) -> ExitCode {
         return ExitCode::from(3);
     }
     ExitCode::from(exit_code)
+}
+
+fn run_index(command: &IndexCommand) -> ExitCode {
+    let started = Instant::now();
+    let mut builder = match index::Builder::create(&command.destination) {
+        Ok(builder) => builder,
+        Err(error) => {
+            eprintln!("index: {error}");
+            return ExitCode::from(error.exit_code());
+        }
+    };
+
+    if command.paths[0] == "-" {
+        if let Err(error) = builder.add(io::stdin().lock(), "stdin") {
+            eprintln!("index: {error}");
+            return ExitCode::from(error.exit_code());
+        }
+    } else {
+        for input in discover_inputs(&command.paths) {
+            let result = match input {
+                DiscoveredInput::File(path) => add_index_path(&mut builder, &path),
+                DiscoveredInput::Error { source, message } => {
+                    eprintln!("index: {}: {message}", source.display());
+                    return ExitCode::from(3);
+                }
+            };
+            if let Err(error) = result {
+                eprintln!("index: {error}");
+                return ExitCode::from(error.exit_code());
+            }
+        }
+    }
+
+    let summary = match builder.finish() {
+        Ok(summary) => summary,
+        Err(error) => {
+            eprintln!("index: {error}");
+            return ExitCode::from(error.exit_code());
+        }
+    };
+    let report = IndexReport::new(
+        &command.destination,
+        &summary,
+        started.elapsed().as_secs_f64(),
+    );
+    if let Err(error) = render_index_report(&report, command.format) {
+        eprintln!("failed to write index report: {error}");
+        return ExitCode::from(3);
+    }
+    ExitCode::SUCCESS
+}
+
+fn add_index_path(builder: &mut index::Builder, path: &Path) -> Result<(), index::IndexError> {
+    let source = path.to_string_lossy().into_owned();
+    let file = File::open(path).map_err(|error| index::IndexError::Io {
+        context: format!("failed to open {source}"),
+        error,
+    })?;
+    if is_zstd_path(path.as_os_str()) {
+        let decoder =
+            zstd::stream::read::Decoder::new(file).map_err(|error| index::IndexError::Io {
+                context: format!("failed to initialize zstd decoder for {source}"),
+                error,
+            })?;
+        builder.add(decoder, &source)
+    } else {
+        builder.add(file, &source)
+    }
+}
+
+#[derive(Serialize)]
+struct IndexReport {
+    schema_version: u32,
+    status: &'static str,
+    destination: String,
+    sources: u64,
+    games: u64,
+    positions: u64,
+    pgn_bytes: u64,
+    database_bytes: u64,
+    elapsed_seconds: f64,
+    throughput_mib_per_second: f64,
+}
+
+impl IndexReport {
+    fn new(destination: &Path, summary: &index::IndexSummary, elapsed_seconds: f64) -> Self {
+        #[allow(clippy::cast_precision_loss)]
+        let throughput_mib_per_second = if elapsed_seconds > 0.0 {
+            summary.pgn_bytes as f64 / (1024.0 * 1024.0) / elapsed_seconds
+        } else {
+            0.0
+        };
+        Self {
+            schema_version: summary.schema_version,
+            status: "complete",
+            destination: destination.to_string_lossy().into_owned(),
+            sources: summary.sources,
+            games: summary.games,
+            positions: summary.positions,
+            pgn_bytes: summary.pgn_bytes,
+            database_bytes: summary.database_bytes,
+            elapsed_seconds,
+            throughput_mib_per_second,
+        }
+    }
+}
+
+fn render_index_report(report: &IndexReport, format: StatsOutputFormat) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    match format {
+        StatsOutputFormat::Human => {
+            writeln!(output, "index: {}", report.status)?;
+            writeln!(output, "destination: {}", report.destination)?;
+            writeln!(output, "sources: {}", report.sources)?;
+            writeln!(output, "games: {}", report.games)?;
+            writeln!(output, "positions: {}", report.positions)?;
+            writeln!(output, "source PGN bytes: {}", report.pgn_bytes)?;
+            writeln!(output, "database bytes: {}", report.database_bytes)?;
+            writeln!(output, "elapsed: {:.3}s", report.elapsed_seconds)?;
+            writeln!(
+                output,
+                "throughput: {:.2} MiB/s",
+                report.throughput_mib_per_second
+            )
+        }
+        StatsOutputFormat::Json => {
+            serde_json::to_writer_pretty(&mut output, report).map_err(io::Error::other)?;
+            writeln!(output)
+        }
+    }
 }
 
 fn run_query(command: &QueryCommand) -> ExitCode {
@@ -1142,6 +1337,10 @@ fn query_path(
     output: &mut impl Write,
 ) -> Result<QuerySummary, (String, QueryFailure)> {
     let source = path.to_string_lossy().into_owned();
+    if extension_is(Path::new(path), "gambit") {
+        return index::query(Path::new(path), options, format, output)
+            .map_err(|error| (source, error));
+    }
     let file = File::open(path).map_err(|error| {
         (
             source.clone(),
@@ -2059,6 +2258,23 @@ mod tests {
         assert_eq!(command.destination, PathBuf::from("my-games"));
         assert_eq!(command.since, Some(20_260_101));
         assert_eq!(command.format, SyncOutputFormat::Json);
+    }
+
+    #[test]
+    fn parses_an_index_command() {
+        let Action::Index(command) = parse_arguments(args(&[
+            "index",
+            "games.pgn.zst",
+            "--output=archive.gambit",
+            "--format",
+            "json",
+        ]))
+        .unwrap() else {
+            panic!("expected index action");
+        };
+        assert_eq!(command.paths, [OsString::from("games.pgn.zst")]);
+        assert_eq!(command.destination, PathBuf::from("archive.gambit"));
+        assert_eq!(command.format, StatsOutputFormat::Json);
     }
 
     #[test]
