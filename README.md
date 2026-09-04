@@ -8,6 +8,29 @@ dependency-free ingestion layer and a compact semantic chess core.
 
 ![Gambit Doctor validating PGN files](./static/gambit-doctor.gif)
 
+## Gambit Sync
+
+Maintain a resumable local collection of a Lichess user's games:
+
+```shell
+gambit sync \
+  --lichess-user diegoglozano \
+  --output ./diegoglozano-games
+
+gambit stats ./diegoglozano-games
+gambit query ./diegoglozano-games \
+  --player diegoglozano \
+  --result loss \
+  --format count
+```
+
+Sync stores one PGN per stable Lichess game ID. Later runs fetch only an
+overlapping incremental window and refresh games that were previously
+unfinished. Interrupted runs retain their last committed cursor and can be
+retried safely. See the
+[Sync guide](https://diegoglozano.github.io/gambit/docs/sync/) for authentication,
+storage, and automation details.
+
 ## Gambit Query
 
 Search a PGN corpus by chess position or player-relative metadata:

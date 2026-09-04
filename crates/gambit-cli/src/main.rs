@@ -2,6 +2,7 @@ mod doctor;
 mod lichess;
 mod query;
 mod stats;
+mod sync;
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -9,6 +10,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use doctor::{
     Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
@@ -24,7 +26,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  query     Filter games and emit matching PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -65,12 +67,27 @@ struct QueryCommand {
 }
 
 #[derive(Debug)]
+struct SyncCommand {
+    username: String,
+    destination: PathBuf,
+    since: Option<u32>,
+    format: SyncOutputFormat,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SyncOutputFormat {
+    Human,
+    Json,
+}
+
+#[derive(Debug)]
 enum Action {
     Help,
     Version,
     Doctor(DoctorCommand),
     Stats(StatsCommand),
     Query(Box<QueryCommand>),
+    Sync(SyncCommand),
 }
 
 fn main() -> ExitCode {
@@ -86,6 +103,7 @@ fn main() -> ExitCode {
         Ok(Action::Doctor(command)) => run_doctor(&command),
         Ok(Action::Stats(command)) => run_stats(&command),
         Ok(Action::Query(command)) => run_query(&command),
+        Ok(Action::Sync(command)) => run_sync(&command),
         Err(error) => {
             eprintln!("{error}\n\n{USAGE}");
             ExitCode::from(2)
@@ -104,6 +122,7 @@ fn parse_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, 
         Some("doctor") => parse_doctor_arguments(arguments),
         Some("stats") => parse_stats_arguments(arguments),
         Some("query") => parse_query_arguments(arguments),
+        Some("sync") => parse_sync_arguments(arguments),
         Some(value) if value.starts_with('-') && value != "-" => {
             Err(format!("unknown option or command: {value}"))
         }
@@ -302,6 +321,72 @@ fn parse_query_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
         format,
         options,
     })))
+}
+
+fn parse_sync_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Action, String> {
+    let mut username = None;
+    let mut destination = None;
+    let mut since = None;
+    let mut format = SyncOutputFormat::Human;
+    let mut arguments = arguments.peekable();
+
+    while let Some(argument) = arguments.next() {
+        let Some(value) = argument.to_str() else {
+            return Err(String::from("sync options must be valid UTF-8"));
+        };
+        if matches!(value, "-h" | "--help") {
+            return no_more(arguments, Action::Help);
+        }
+        if !value.starts_with('-') {
+            return Err(format!("unexpected sync argument: {value}"));
+        }
+        let (option, inline_value) = value
+            .split_once('=')
+            .map_or((value, None), |(option, value)| (option, Some(value)));
+        if !matches!(
+            option,
+            "--lichess-user" | "--output" | "--since" | "--format"
+        ) {
+            return Err(format!("unknown sync option: {option}"));
+        }
+        let owned_value;
+        let value = if let Some(value) = inline_value {
+            OsStr::new(value)
+        } else {
+            owned_value = arguments
+                .next()
+                .ok_or_else(|| format!("{option} requires a value"))?;
+            owned_value.as_os_str()
+        };
+        match option {
+            "--lichess-user" => username = Some(parse_lichess_username(value)?),
+            "--output" => {
+                if value.is_empty() {
+                    return Err(String::from("--output must not be empty"));
+                }
+                destination = Some(PathBuf::from(value));
+            }
+            "--since" => since = Some(parse_query_date(option, value)?),
+            "--format" => format = parse_sync_format(value)?,
+            _ => unreachable!("sync option was checked before dispatch"),
+        }
+    }
+
+    Ok(Action::Sync(SyncCommand {
+        username: username.ok_or_else(|| String::from("sync requires --lichess-user"))?,
+        destination: destination.ok_or_else(|| String::from("sync requires --output"))?,
+        since,
+        format,
+    }))
+}
+
+fn parse_sync_format(value: &OsStr) -> Result<SyncOutputFormat, String> {
+    match value.to_str() {
+        Some("human") => Ok(SyncOutputFormat::Human),
+        Some("json") => Ok(SyncOutputFormat::Json),
+        Some(value) => Err(format!("unknown sync output format: {value}")),
+        None => Err(String::from("sync output format must be valid UTF-8")),
+    }
 }
 
 fn is_query_value_option(option: &str) -> bool {
@@ -587,12 +672,10 @@ fn run_query(command: &QueryCommand) -> ExitCode {
     let mut exit_code = 0;
 
     if let Some(username) = command.lichess_user.as_deref() {
-        let token = match env::var("LICHESS_TOKEN") {
-            Ok(token) if token.is_empty() => None,
-            Ok(token) => Some(token),
-            Err(env::VarError::NotPresent) => None,
-            Err(env::VarError::NotUnicode(_)) => {
-                eprintln!("query: LICHESS_TOKEN must be valid UTF-8");
+        let token = match lichess_token() {
+            Ok(token) => token,
+            Err(error) => {
+                eprintln!("query: {error}");
                 return ExitCode::from(3);
             }
         };
@@ -600,6 +683,10 @@ fn run_query(command: &QueryCommand) -> ExitCode {
             username,
             maximum_games: command.maximum_games,
             options: &command.options,
+            since_timestamp: None,
+            until_timestamp: None,
+            include_ongoing: false,
+            oldest_first: false,
         };
         let mut response = match lichess::user_games(&request, token.as_deref()) {
             Ok(response) => response,
@@ -678,6 +765,189 @@ fn run_query(command: &QueryCommand) -> ExitCode {
         return ExitCode::from(3);
     }
     ExitCode::from(exit_code)
+}
+
+fn run_sync(command: &SyncCommand) -> ExitCode {
+    let (token, now_milliseconds) = match sync_runtime_context() {
+        Ok(context) => context,
+        Err(error) => {
+            eprintln!("sync: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let plan = match sync::prepare(
+        &command.destination,
+        &command.username,
+        now_milliseconds,
+        command.since,
+    ) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("sync: {}: {error}", command.destination.display());
+            return ExitCode::from(3);
+        }
+    };
+    if command.since.is_some() && !plan.is_initial() {
+        eprintln!("sync: --since can only initialize a new sync destination");
+        return ExitCode::from(2);
+    }
+
+    let options = QueryOptions {
+        since: if plan.is_initial() {
+            plan.initial_since
+        } else {
+            None
+        },
+        ..QueryOptions::default()
+    };
+    let request = lichess::UserGamesRequest {
+        username: &command.username,
+        maximum_games: None,
+        options: &options,
+        since_timestamp: plan.since_timestamp,
+        until_timestamp: Some(plan.until_timestamp),
+        include_ongoing: true,
+        oldest_first: true,
+    };
+    let mut response = match lichess::user_games(&request, token.as_deref()) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("sync: lichess:{}: {error}", command.username);
+            return ExitCode::from(3);
+        }
+    };
+    if let Err(error) = sync::start(&plan) {
+        eprintln!("sync: {}: {error}", command.destination.display());
+        return ExitCode::from(3);
+    }
+    let mut summary = match sync::ingest(response.body_mut().as_reader(), &plan, None) {
+        Ok(summary) => summary,
+        Err(error) => {
+            eprintln!("sync: lichess:{}: {error}", command.username);
+            return ExitCode::from(3);
+        }
+    };
+
+    let refreshed_unfinished = plan.unfinished_game_ids.len();
+    for game_id in &plan.unfinished_game_ids {
+        let mut response = match lichess::game(game_id, token.as_deref()) {
+            Ok(response) => response,
+            Err(lichess::LichessError::GameNotFound(_)) => {
+                eprintln!("sync: warning: unfinished game {game_id} no longer exists on Lichess");
+                summary.statuses.push(sync::GameStatus {
+                    game_id: game_id.clone(),
+                    unfinished: false,
+                });
+                continue;
+            }
+            Err(error) => {
+                eprintln!("sync: lichess:{game_id}: {error}");
+                return ExitCode::from(3);
+            }
+        };
+        match sync::ingest(response.body_mut().as_reader(), &plan, Some(game_id)) {
+            Ok(refresh) => summary.add(refresh),
+            Err(error) => {
+                eprintln!("sync: lichess:{game_id}: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    }
+    if let Err(error) = finish_sync(command, &plan, &mut summary, refreshed_unfinished) {
+        eprintln!("sync: {error}");
+        return ExitCode::from(3);
+    }
+    ExitCode::SUCCESS
+}
+
+fn finish_sync(
+    command: &SyncCommand,
+    plan: &sync::SyncPlan,
+    summary: &mut sync::IngestSummary,
+    refreshed_unfinished: usize,
+) -> Result<(), String> {
+    let statuses = std::mem::take(&mut summary.statuses);
+    let unfinished = sync::finish(plan, statuses)
+        .map_err(|error| format!("{}: {error}", command.destination.display()))?;
+    let report = SyncReport {
+        schema_version: 1,
+        status: "complete",
+        source: format!("lichess:{}", command.username),
+        destination: command.destination.to_string_lossy().into_owned(),
+        received: summary.received,
+        created: summary.created,
+        updated: summary.updated,
+        unchanged: summary.unchanged,
+        refreshed_unfinished,
+        unfinished,
+        cursor_milliseconds: plan.until_timestamp,
+    };
+    render_sync_report(&report, command.format)
+        .map_err(|error| format!("failed to write report: {error}"))
+}
+
+fn lichess_token() -> Result<Option<String>, &'static str> {
+    match env::var("LICHESS_TOKEN") {
+        Ok(token) if token.is_empty() => Ok(None),
+        Ok(token) => Ok(Some(token)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(env::VarError::NotUnicode(_)) => Err("LICHESS_TOKEN must be valid UTF-8"),
+    }
+}
+
+fn current_time_milliseconds() -> Result<i64, String> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?;
+    i64::try_from(duration.as_millis())
+        .map_err(|_| String::from("system time is outside the supported range"))
+}
+
+fn sync_runtime_context() -> Result<(Option<String>, i64), String> {
+    let token = lichess_token().map_err(String::from)?;
+    let now_milliseconds = current_time_milliseconds()?;
+    Ok((token, now_milliseconds))
+}
+
+#[derive(Serialize)]
+struct SyncReport {
+    schema_version: u8,
+    status: &'static str,
+    source: String,
+    destination: String,
+    received: u64,
+    created: u64,
+    updated: u64,
+    unchanged: u64,
+    refreshed_unfinished: usize,
+    unfinished: usize,
+    cursor_milliseconds: i64,
+}
+
+fn render_sync_report(report: &SyncReport, format: SyncOutputFormat) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    match format {
+        SyncOutputFormat::Human => {
+            writeln!(output, "sync: {}", report.status)?;
+            writeln!(output, "source: {}", report.source)?;
+            writeln!(output, "destination: {}", report.destination)?;
+            writeln!(output, "received: {}", report.received)?;
+            writeln!(output, "created: {}", report.created)?;
+            writeln!(output, "updated: {}", report.updated)?;
+            writeln!(output, "unchanged: {}", report.unchanged)?;
+            writeln!(
+                output,
+                "unfinished: {} ({} refreshed)",
+                report.unfinished, report.refreshed_unfinished
+            )?;
+            writeln!(output, "cursor: {} ms", report.cursor_milliseconds)
+        }
+        SyncOutputFormat::Json => {
+            serde_json::to_writer_pretty(&mut output, report).map_err(io::Error::other)?;
+            writeln!(output)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1766,5 +2036,34 @@ mod tests {
         let maximum =
             parse_arguments(args(&["query", "--max-games", "10", "games.pgn"])).unwrap_err();
         assert!(maximum.contains("requires --lichess-user"));
+    }
+
+    #[test]
+    fn parses_a_lichess_sync_command() {
+        let Action::Sync(command) = parse_arguments(args(&[
+            "sync",
+            "--lichess-user=diegoglozano",
+            "--output",
+            "my-games",
+            "--since",
+            "2026-01-01",
+            "--format=json",
+        ]))
+        .unwrap() else {
+            panic!("expected sync action");
+        };
+        assert_eq!(command.username, "diegoglozano");
+        assert_eq!(command.destination, PathBuf::from("my-games"));
+        assert_eq!(command.since, Some(20_260_101));
+        assert_eq!(command.format, SyncOutputFormat::Json);
+    }
+
+    #[test]
+    fn sync_requires_a_user_and_destination() {
+        let missing_user = parse_arguments(args(&["sync", "--output", "my-games"])).unwrap_err();
+        assert!(missing_user.contains("requires --lichess-user"));
+        let missing_output =
+            parse_arguments(args(&["sync", "--lichess-user", "diegoglozano"])).unwrap_err();
+        assert!(missing_output.contains("requires --output"));
     }
 }

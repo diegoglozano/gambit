@@ -7,6 +7,7 @@ gambit doctor [OPTIONS] <PATH|->...
 gambit stats [OPTIONS] <PATH|->...
 gambit query [OPTIONS] <PATH|->...
 gambit query [OPTIONS] --lichess-user <NAME>
+gambit sync --lichess-user <NAME> --output <DIRECTORY>
 gambit <PATH|->
 ```
 
@@ -80,6 +81,21 @@ Query accepts the same file input forms as Doctor and Stats, or one Lichess user
 as a remote input. Set the optional `LICHESS_TOKEN` environment variable for
 authenticated Lichess access. See [Query games](query.md) for missing-metadata
 behavior, remote-source semantics, output contracts, and bounded-memory details.
+
+## Sync options
+
+| Option | Description |
+| --- | --- |
+| `--lichess-user <NAME>` | Select the Lichess account to synchronize. Required. |
+| `--output <DIRECTORY>` | Select an empty or existing Gambit sync destination. Required. |
+| `--since <YYYY-MM-DD>` | Set an inclusive history boundary when initializing a new destination. |
+| `--format <human|json>` | Select the report format. The default is `human`. |
+| `-h`, `--help` | Print help. |
+
+Sync stores one PGN per Lichess game ID and advances its cursor only after the
+complete stream succeeds. Later runs fetch an overlapping incremental window
+and refresh previously unfinished games. See [Sync Lichess games](sync.md) for
+the storage, recovery, and automation contracts.
 
 ## Validation modes
 

@@ -6,6 +6,9 @@ All notable changes to Gambit are documented in this file.
 
 ### Added
 
+- Added `gambit sync` for resumable Lichess collections, with per-game PGN
+  storage, idempotent overlap, unfinished-game refresh, committed cursors, and
+  human or JSON reports.
 - Added direct bounded-memory Lichess user queries with `--lichess-user`,
   optional `LICHESS_TOKEN` authentication, upstream date/opponent/color
   filtering, and a `--max-games` request limit.

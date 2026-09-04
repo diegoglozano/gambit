@@ -92,8 +92,10 @@ fn help_describes_commands() {
     assert!(stdout.contains("gambit doctor"));
     assert!(stdout.contains("gambit stats"));
     assert!(stdout.contains("gambit query"));
+    assert!(stdout.contains("gambit sync"));
     assert!(stdout.contains("--lichess-user <NAME>"));
     assert!(stdout.contains("--max-games <N>"));
+    assert!(stdout.contains("--output <DIRECTORY>"));
     assert!(stdout.contains("--format <human|json|jsonl|github>"));
     assert!(stdout.contains("--keep-going"));
     assert!(stdout.contains("--max-errors <N>"));

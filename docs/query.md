@@ -193,8 +193,8 @@ of 1.90 MB and 10.93 MB respectively; see the
 The [public monthly archives](https://database.lichess.org/) can be piped through
 Gambit, but they are not indexed by username. Avoiding local disk is possible;
 avoiding the network transfer and full scan is not. Per-user lookups should
-therefore use `--lichess-user`. A resumable local user cache is planned
-separately.
+therefore use `--lichess-user`. For repeated offline analysis, create a
+resumable local collection with [Gambit Sync](sync.md).
 
 Exit status 0 means the query completed, including when it matched no games.
 Malformed PGN, an invalid standard-game FEN start, illegal mainline SAN during
