@@ -1,8 +1,8 @@
 # Query games
 
-`gambit query` selects games from PGN without first importing them into a
-database. It is the query contract for Gambit's future persistent index and is
-already fast enough for personal archives and one-shot corpus searches.
+`gambit query` selects games from streaming PGN or a persistent `.gambit`
+database. Raw PGN is ideal for one-shot corpus scans; a database pays the parse
+and position cost once for repeated local analysis.
 
 ## Start with your own games
 
@@ -169,7 +169,8 @@ move.
 ## Inputs and resource bounds
 
 Query accepts plain PGN, `.pgn.zst`, multiple files, recursive directories,
-decompressed standard input, or one Lichess user. Directory discovery is
+decompressed standard input, an explicit `.gambit` file, or one Lichess user.
+Directory discovery is
 deterministic. Output from all resolved files is concatenated, and `count`
 reports the aggregate. A Lichess source is streamed over HTTPS and cannot be
 combined with another input.
@@ -180,6 +181,11 @@ therefore bounded independently of corpus size. Metadata-only filters stay on
 the lexical path and do not execute SAN. `--position` activates legal SAN
 execution only for standard-chess games, retaining a single 104-byte live
 position in addition to the current game.
+
+For `.gambit`, metadata and count queries stay inside the database indexes.
+PGN output decompresses only matches, while JSONL reads stored metadata. The
+database itself is read-only during Query and has a fixed-size page cache. See
+[Gambit databases](databases.md) for construction and format details.
 
 On the 810,463-game Lichess April 2014 baseline, a player-filtered count
 sustains 242.49 MiB/s from decompressed PGN and 202.81 MiB/s with in-process

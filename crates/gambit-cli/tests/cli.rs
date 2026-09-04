@@ -91,6 +91,7 @@ fn help_describes_commands() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("gambit doctor"));
     assert!(stdout.contains("gambit stats"));
+    assert!(stdout.contains("gambit index"));
     assert!(stdout.contains("gambit query"));
     assert!(stdout.contains("gambit sync"));
     assert!(stdout.contains("--lichess-user <NAME>"));
@@ -101,6 +102,124 @@ fn help_describes_commands() {
     assert!(stdout.contains("--max-errors <N>"));
     assert!(stdout.contains("--position <FEN>"));
     assert!(stdout.contains("Directories are scanned recursively"));
+}
+
+#[test]
+fn index_round_trips_queries_and_pgn() {
+    let directory = TestDirectory::new();
+    let pgn = b"[Event \"Keep\"]\n[Date \"2026.01.02\"]\n[White \"Opponent\"]\n[Black \"Diego\"]\n[WhiteElo \"1300\"]\n[BlackElo \"1190\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Ng1 Ng8 1-0\n\n[Event \"Skip\"]\n[Date \"2025.01.02\"]\n[White \"Diego\"]\n[Black \"Other\"]\n\n1. d4 d5 1-0\n";
+    let compressed = zstd::stream::encode_all(&pgn[..], 1).expect("compress PGN");
+    let input = directory.write("games.pgn.zst", &compressed);
+    let database = directory.path().join("games.gambit");
+    let built = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--format=json", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("build index");
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&built.stdout).unwrap();
+    assert_eq!(report["status"], "complete");
+    assert_eq!(report["games"], 2);
+    assert_eq!(report["sources"], 1);
+    assert_eq!(report["positions"], 10);
+    assert_eq!(report["pgn_bytes"], pgn.len());
+    assert!(report["database_bytes"].as_u64().unwrap() > 0);
+
+    let count = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args([
+            "query",
+            "--player=diego",
+            "--color=black",
+            "--result=loss",
+            "--since=2026-01-01",
+            "--format=count",
+        ])
+        .arg(&database)
+        .output()
+        .expect("query index");
+    assert!(count.status.success());
+    assert_eq!(count.stdout, b"1\n");
+
+    let position = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args([
+            "query",
+            "--position",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 50 99",
+            "--player=diego",
+            "--color=black",
+            "--format=jsonl",
+        ])
+        .arg(&database)
+        .output()
+        .expect("query indexed position");
+    assert!(position.status.success());
+    let record: serde_json::Value = serde_json::from_slice(&position.stdout).unwrap();
+    assert_eq!(record["event"], "Keep");
+    assert_eq!(record["position_ply"], 0);
+
+    let pgn = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .arg("query")
+        .arg(&database)
+        .output()
+        .expect("extract indexed PGN");
+    assert!(pgn.status.success());
+    let validation = run_with_stdin(&["doctor", "-"], &pgn.stdout);
+    assert!(validation.status.success());
+    assert!(String::from_utf8_lossy(&pgn.stdout).contains("[Event \"Keep\"]"));
+    assert!(String::from_utf8_lossy(&pgn.stdout).contains("[Event \"Skip\"]"));
+}
+
+#[test]
+fn index_refuses_overwrite_and_cleans_up_failed_builds() {
+    let directory = TestDirectory::new();
+    let input = directory.write("valid.pgn", b"1. e4 *\n");
+    let database = directory.write("existing.gambit", b"keep me");
+    let overwrite = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("attempt overwrite");
+    assert_eq!(overwrite.status.code(), Some(3));
+    assert_eq!(fs::read(&database).unwrap(), b"keep me");
+
+    let invalid = directory.write("invalid.pgn", b"1. e5 *\n");
+    let failed_database = directory.path().join("failed.gambit");
+    let failed = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--output"])
+        .arg(&failed_database)
+        .arg(&invalid)
+        .output()
+        .expect("build invalid index");
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(!failed_database.exists());
+    assert_eq!(
+        fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn query_rejects_a_non_gambit_database() {
+    let file = TestFile::new("gambit", b"not a database");
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["query", "--format=count"])
+        .arg(file.path())
+        .output()
+        .expect("query invalid database");
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Gambit database"));
 }
 
 #[test]

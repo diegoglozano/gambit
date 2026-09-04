@@ -19,6 +19,7 @@ nav:
   - Overview: index.md
   - Getting started: getting-started.md
   - Corpus statistics: statistics.md
+  - Gambit databases: databases.md
   - Query games: query.md
   - Sync Lichess games: sync.md
   - CLI reference: cli.md

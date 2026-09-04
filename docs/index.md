@@ -8,6 +8,19 @@ pinpoints syntax and chess-semantic errors.
 [Install Gambit](https://diegoglozano.github.io/gambit/artifacts/){ .md-button }
 [Get started](getting-started.md){ .md-button }
 
+## Build a chess database
+
+```console
+gambit index ./diegoglozano-games --output diegoglozano.gambit
+gambit query diegoglozano.gambit --player diegoglozano --result loss --format count
+```
+
+A `.gambit` file packages original PGN, searchable metadata, and a mainline
+position index for repeated local analysis. It is built in bounded memory and
+queried through the same interface as raw PGN. See
+[Gambit databases](databases.md) for the format, recovery contract, and HPC
+tradeoffs.
+
 ## A quick query
 
 ```console
@@ -86,7 +99,8 @@ gambit doctor --keep-going --format github ./corpus
 
 ## What is in this repository?
 
-- `gambit` provides the Query, Stats, and Doctor command-line workflows.
+- `gambit` provides the Index, Query, Sync, Stats, and Doctor command-line
+  workflows.
 - `gambit-pgn` is the zero-copy parsing and bounded-memory streaming layer.
 - `gambit-chess` provides positions, legal move generation, and SAN execution.
 
