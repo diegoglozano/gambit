@@ -27,7 +27,7 @@ use stats::{
 };
 
 const DEFAULT_KEEP_GOING_ERRORS: usize = 100;
-const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build a self-contained, query-optimized .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
+const USAGE: &str = "Usage:\n  gambit doctor [OPTIONS] <PATH|->...\n  gambit stats [OPTIONS] <PATH|->...\n  gambit index [OPTIONS] --output <FILE> <PATH|->...\n  gambit query [OPTIONS] <PATH|->...\n  gambit query [OPTIONS] --lichess-user <NAME>\n  gambit sync --lichess-user <NAME> --output <DIRECTORY>\n  gambit <PATH|->\n\nCommands:\n  doctor    Diagnose PGN syntax and chess-semantic errors\n  stats     Summarize a PGN corpus in one bounded-memory pass\n  index     Build a self-contained, query-optimized .gambit database\n  query     Filter PGN or .gambit databases and emit PGN, JSONL, or a count\n  sync      Maintain a resumable local Lichess game store\n\nThe direct path form is retained as a compatibility alias for 'gambit doctor'.\nFiles ending in .zst are decompressed automatically. Directories are scanned recursively for .pgn and .pgn.zst files.\nUse - alone to read PGN from standard input.\n\nDoctor options:\n      --format <human|json|jsonl|github>  Select output format [default: human]\n      --syntax-only                       Check PGN structure without executing moves\n      --lenient                           Allow a final game without an outcome marker\n      --keep-going                        Continue after errors [default limit: 100]\n      --max-errors <N>                    Continue until N errors have been reported per input\n  -q, --quiet                             Print nothing when the input is valid\n\nStats options:\n      --format <human|json>               Select output format [default: human]\n      --lenient                           Allow a final game without an outcome marker\n\nIndex options:\n  -o, --output <FILE>                     Write the new .gambit database here\n      --format <human|json>               Select report format [default: human]\n      --update                            Update an existing database in place\n\nQuery options:\n      --lichess-user <NAME>               Stream this user's games from Lichess\n      --max-games <N>                     Limit games requested from Lichess\n      --player <NAME>                     Match a player, case-insensitively\n      --opponent <NAME>                   Match that player's opponent\n      --color <white|black>               Match the player's color\n      --result <win|loss|draw|unfinished> Match the player's result\n      --since <YYYY-MM-DD>                Match games on or after this date\n      --until <YYYY-MM-DD>                Match games on or before this date\n      --min-rating <ELO>                  Match the player's minimum rating\n      --max-rating <ELO>                  Match the player's maximum rating\n      --position <FEN>                    Match games reaching this position\n      --format <pgn|jsonl|count>          Select output format [default: pgn]\n\nSync options:\n      --lichess-user <NAME>               Select the Lichess account\n      --output <DIRECTORY>                Store one PGN file per game\n      --since <YYYY-MM-DD>                Set the first sync's earliest date\n      --format <human|json>               Select report format [default: human]\n\nGlobal options:\n  -h, --help                              Print help\n  -V, --version                           Print version";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -72,6 +72,7 @@ struct IndexCommand {
     paths: Vec<OsString>,
     destination: PathBuf,
     format: StatsOutputFormat,
+    update: bool,
 }
 
 #[derive(Debug)]
@@ -281,11 +282,13 @@ fn parse_index_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
     let mut paths = Vec::new();
     let mut destination = None;
     let mut format = StatsOutputFormat::Human;
+    let mut update = false;
     let mut arguments = arguments.peekable();
 
     while let Some(argument) = arguments.next() {
         match argument.to_str() {
             Some("-h" | "--help") => return no_more(arguments, Action::Help),
+            Some("--update") => update = true,
             Some("--") => {
                 paths.extend(arguments);
                 break;
@@ -323,10 +326,16 @@ fn parse_index_arguments(arguments: impl Iterator<Item = OsString>) -> Result<Ac
     }
 
     validate_input_paths("index", &paths)?;
+    if update && paths.iter().any(|path| path == "-") {
+        return Err(String::from(
+            "--update requires reopenable files or directories, not standard input",
+        ));
+    }
     Ok(Action::Index(IndexCommand {
         paths,
         destination: destination.ok_or_else(|| String::from("index requires --output"))?,
         format,
+        update,
     }))
 }
 
@@ -731,36 +740,12 @@ fn run_stats(command: &StatsCommand) -> ExitCode {
 
 fn run_index(command: &IndexCommand) -> ExitCode {
     let started = Instant::now();
-    let mut builder = match index::Builder::create(&command.destination) {
-        Ok(builder) => builder,
-        Err(error) => {
-            eprintln!("index: {error}");
-            return ExitCode::from(error.exit_code());
-        }
-    };
-
-    if command.paths[0] == "-" {
-        if let Err(error) = builder.add(io::stdin().lock(), "stdin") {
-            eprintln!("index: {error}");
-            return ExitCode::from(error.exit_code());
-        }
+    let summary = if command.update {
+        update_index(command)
     } else {
-        for input in discover_inputs(&command.paths) {
-            let result = match input {
-                DiscoveredInput::File(path) => add_index_path(&mut builder, &path),
-                DiscoveredInput::Error { source, message } => {
-                    eprintln!("index: {}: {message}", source.display());
-                    return ExitCode::from(3);
-                }
-            };
-            if let Err(error) = result {
-                eprintln!("index: {error}");
-                return ExitCode::from(error.exit_code());
-            }
-        }
-    }
-
-    let summary = match builder.finish() {
+        build_index(command)
+    };
+    let summary = match summary {
         Ok(summary) => summary,
         Err(error) => {
             eprintln!("index: {error}");
@@ -771,6 +756,7 @@ fn run_index(command: &IndexCommand) -> ExitCode {
         &command.destination,
         &summary,
         started.elapsed().as_secs_f64(),
+        if command.update { "update" } else { "build" },
     );
     if let Err(error) = render_index_report(&report, command.format) {
         eprintln!("failed to write index report: {error}");
@@ -779,7 +765,55 @@ fn run_index(command: &IndexCommand) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn build_index(command: &IndexCommand) -> Result<index::IndexSummary, index::IndexError> {
+    let mut builder = index::Builder::create(&command.destination)?;
+
+    if command.paths[0] == "-" {
+        builder.add(io::stdin().lock(), "stdin")?;
+    } else {
+        for input in discover_inputs(&command.paths) {
+            match input {
+                DiscoveredInput::File(path) => add_index_path(&mut builder, &path),
+                DiscoveredInput::Error { source, message } => {
+                    return Err(index::IndexError::Io {
+                        context: source.display().to_string(),
+                        error: io::Error::other(message),
+                    });
+                }
+            }?;
+        }
+    }
+    builder.finish()
+}
+
+fn update_index(command: &IndexCommand) -> Result<index::IndexSummary, index::IndexError> {
+    let mut updater = index::Updater::open(&command.destination)?;
+    for input in discover_inputs(&command.paths) {
+        let path = match input {
+            DiscoveredInput::File(path) => path,
+            DiscoveredInput::Error { source, message } => {
+                return Err(index::IndexError::Io {
+                    context: source.display().to_string(),
+                    error: io::Error::other(message),
+                });
+            }
+        };
+        let source = path.to_string_lossy().into_owned();
+        let reader = open_index_path(&path)?;
+        let fingerprint = index::fingerprint(reader, &source)?;
+        if updater.prepare(&source, &fingerprint)? == index::UpdateAction::Write {
+            updater.add(open_index_path(&path)?, &source, &fingerprint)?;
+        }
+    }
+    updater.finish()
+}
+
 fn add_index_path(builder: &mut index::Builder, path: &Path) -> Result<(), index::IndexError> {
+    let source = path.to_string_lossy().into_owned();
+    builder.add(open_index_path(path)?, &source)
+}
+
+fn open_index_path(path: &Path) -> Result<Box<dyn io::Read>, index::IndexError> {
     let source = path.to_string_lossy().into_owned();
     let file = File::open(path).map_err(|error| index::IndexError::Io {
         context: format!("failed to open {source}"),
@@ -791,9 +825,9 @@ fn add_index_path(builder: &mut index::Builder, path: &Path) -> Result<(), index
                 context: format!("failed to initialize zstd decoder for {source}"),
                 error,
             })?;
-        builder.add(decoder, &source)
+        Ok(Box::new(decoder))
     } else {
-        builder.add(file, &source)
+        Ok(Box::new(file))
     }
 }
 
@@ -801,32 +835,45 @@ fn add_index_path(builder: &mut index::Builder, path: &Path) -> Result<(), index
 struct IndexReport {
     schema_version: u32,
     status: &'static str,
+    mode: &'static str,
     destination: String,
     sources: u64,
+    skipped_sources: u64,
+    replaced_sources: u64,
     games: u64,
     positions: u64,
     pgn_bytes: u64,
+    scanned_pgn_bytes: u64,
     database_bytes: u64,
     elapsed_seconds: f64,
     throughput_mib_per_second: f64,
 }
 
 impl IndexReport {
-    fn new(destination: &Path, summary: &index::IndexSummary, elapsed_seconds: f64) -> Self {
+    fn new(
+        destination: &Path,
+        summary: &index::IndexSummary,
+        elapsed_seconds: f64,
+        mode: &'static str,
+    ) -> Self {
         #[allow(clippy::cast_precision_loss)]
         let throughput_mib_per_second = if elapsed_seconds > 0.0 {
-            summary.pgn_bytes as f64 / (1024.0 * 1024.0) / elapsed_seconds
+            summary.scanned_pgn_bytes as f64 / (1024.0 * 1024.0) / elapsed_seconds
         } else {
             0.0
         };
         Self {
             schema_version: summary.schema_version,
             status: "complete",
+            mode,
             destination: destination.to_string_lossy().into_owned(),
             sources: summary.sources,
+            skipped_sources: summary.skipped_sources,
+            replaced_sources: summary.replaced_sources,
             games: summary.games,
             positions: summary.positions,
             pgn_bytes: summary.pgn_bytes,
+            scanned_pgn_bytes: summary.scanned_pgn_bytes,
             database_bytes: summary.database_bytes,
             elapsed_seconds,
             throughput_mib_per_second,
@@ -840,11 +887,19 @@ fn render_index_report(report: &IndexReport, format: StatsOutputFormat) -> io::R
     match format {
         StatsOutputFormat::Human => {
             writeln!(output, "index: {}", report.status)?;
+            writeln!(output, "mode: {}", report.mode)?;
             writeln!(output, "destination: {}", report.destination)?;
-            writeln!(output, "sources: {}", report.sources)?;
-            writeln!(output, "games: {}", report.games)?;
-            writeln!(output, "positions: {}", report.positions)?;
-            writeln!(output, "source PGN bytes: {}", report.pgn_bytes)?;
+            writeln!(output, "sources written: {}", report.sources)?;
+            writeln!(output, "sources skipped: {}", report.skipped_sources)?;
+            writeln!(output, "sources replaced: {}", report.replaced_sources)?;
+            writeln!(output, "games written: {}", report.games)?;
+            writeln!(output, "positions written: {}", report.positions)?;
+            writeln!(
+                output,
+                "source PGN bytes scanned: {}",
+                report.scanned_pgn_bytes
+            )?;
+            writeln!(output, "source PGN bytes written: {}", report.pgn_bytes)?;
             writeln!(output, "database bytes: {}", report.database_bytes)?;
             writeln!(output, "elapsed: {:.3}s", report.elapsed_seconds)?;
             writeln!(
@@ -2275,6 +2330,25 @@ mod tests {
         assert_eq!(command.paths, [OsString::from("games.pgn.zst")]);
         assert_eq!(command.destination, PathBuf::from("archive.gambit"));
         assert_eq!(command.format, StatsOutputFormat::Json);
+        assert!(!command.update);
+    }
+
+    #[test]
+    fn parses_index_update_and_rejects_stdin() {
+        let Action::Index(command) = parse_arguments(args(&[
+            "index",
+            "--update",
+            "games",
+            "--output=archive.gambit",
+        ]))
+        .unwrap() else {
+            panic!("expected index action");
+        };
+        assert!(command.update);
+
+        let error = parse_arguments(args(&["index", "--update", "--output=archive.gambit", "-"]))
+            .unwrap_err();
+        assert!(error.contains("not standard input"));
     }
 
     #[test]

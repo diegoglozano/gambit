@@ -15,7 +15,8 @@ use crate::query::{
 };
 
 const APPLICATION_ID: i64 = 0x474d_4254;
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+const OLDEST_QUERYABLE_SCHEMA_VERSION: i64 = 1;
 const COMPRESSION_LEVEL: i32 = 3;
 const MAXIMUM_GAME_BYTES: usize = 16 * 1024 * 1024;
 
@@ -27,7 +28,8 @@ const RESULT_DRAW: i64 = 3;
 const SCHEMA: &str = "
 CREATE TABLE sources (
     id          INTEGER PRIMARY KEY,
-    name        TEXT NOT NULL
+    name        TEXT NOT NULL,
+    fingerprint BLOB
 );
 CREATE TABLE games (
     id              INTEGER PRIMARY KEY,
@@ -67,7 +69,10 @@ pub struct IndexSummary {
     pub games: u64,
     pub positions: u64,
     pub pgn_bytes: u64,
+    pub scanned_pgn_bytes: u64,
     pub database_bytes: u64,
+    pub skipped_sources: u64,
+    pub replaced_sources: u64,
 }
 
 #[derive(Debug)]
@@ -99,6 +104,9 @@ pub enum IndexError {
         san: String,
         error: gambit_chess::SanError,
     },
+    AmbiguousSource(String),
+    SourceChanged(String),
+    UnsupportedSchema(i64),
     Limit(&'static str),
 }
 
@@ -134,6 +142,18 @@ impl fmt::Display for IndexError {
                 formatter,
                 "{source}: game {game}, ply {ply}: {error} ({san})"
             ),
+            Self::AmbiguousSource(source) => write!(
+                formatter,
+                "database contains more than one source named {source:?}; rebuild it before updating"
+            ),
+            Self::SourceChanged(source) => write!(
+                formatter,
+                "{source} changed while it was being indexed; retry the update"
+            ),
+            Self::UnsupportedSchema(version) => write!(
+                formatter,
+                "unsupported database schema version {version}; this Gambit supports versions {OLDEST_QUERYABLE_SCHEMA_VERSION} through {SCHEMA_VERSION}"
+            ),
             Self::Limit(message) => formatter.write_str(message),
         }
     }
@@ -146,7 +166,13 @@ impl IndexError {
             | Self::Parse { .. }
             | Self::InvalidFen { .. }
             | Self::InvalidSan { .. } => 1,
-            Self::DestinationExists(_) | Self::Io { .. } | Self::Database(_) | Self::Limit(_) => 3,
+            Self::DestinationExists(_)
+            | Self::Io { .. }
+            | Self::Database(_)
+            | Self::AmbiguousSource(_)
+            | Self::SourceChanged(_)
+            | Self::UnsupportedSchema(_)
+            | Self::Limit(_) => 3,
         }
     }
 }
@@ -154,6 +180,52 @@ impl IndexError {
 impl From<rusqlite::Error> for IndexError {
     fn from(error: rusqlite::Error) -> Self {
         Self::Database(error)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceFingerprint {
+    digest: [u8; 32],
+    pub pgn_bytes: u64,
+}
+
+struct SourceFingerprinter {
+    hasher: blake3::Hasher,
+}
+
+impl SourceFingerprinter {
+    fn new() -> Self {
+        Self {
+            hasher: blake3::Hasher::new_derive_key("gambit source fingerprint v1"),
+        }
+    }
+
+    fn observe(&mut self, game: &[u8]) {
+        let length = u64::try_from(game.len()).expect("PGN game length fits u64");
+        self.hasher.update(&length.to_le_bytes());
+        self.hasher.update(game);
+    }
+
+    fn finish(self, pgn_bytes: u64) -> SourceFingerprint {
+        SourceFingerprint {
+            digest: *self.hasher.finalize().as_bytes(),
+            pgn_bytes,
+        }
+    }
+}
+
+pub fn fingerprint<R: Read>(reader: R, source: &str) -> Result<SourceFingerprint, IndexError> {
+    let mut reader = GameReader::new(reader);
+    let mut fingerprinter = SourceFingerprinter::new();
+    loop {
+        let game = reader.read_game().map_err(|error| IndexError::Frame {
+            source: source.to_owned(),
+            error,
+        })?;
+        let Some(game) = game else {
+            return Ok(fingerprinter.finish(reader.bytes_read()));
+        };
+        fingerprinter.observe(game);
     }
 }
 
@@ -195,84 +267,18 @@ impl Builder {
                 games: 0,
                 positions: 0,
                 pgn_bytes: 0,
+                scanned_pgn_bytes: 0,
                 database_bytes: 0,
+                skipped_sources: 0,
+                replaced_sources: 0,
             },
         })
     }
 
     pub fn add<R: Read>(&mut self, reader: R, source: &str) -> Result<(), IndexError> {
-        self.connection
-            .execute("INSERT INTO sources (name) VALUES (?1)", [source])?;
-        let source_id = self.connection.last_insert_rowid();
-        self.summary.sources += 1;
-
-        let mut reader = GameReader::new(reader);
-        let mut insert_game = self.connection.prepare_cached(
-            "INSERT INTO games (
-                source_id, source_game, pgn_zstd, pgn_bytes,
-                event, site, date_text, played_on,
-                white, white_key, black, black_key,
-                white_elo, black_elo, result, mainline_plies
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
-             )",
-        )?;
-        let mut insert_position = self.connection.prepare_cached(
-            "INSERT INTO positions (position_key, game_id, ply) VALUES (?1, ?2, ?3)",
-        )?;
-        let mut source_game = 0_u64;
-        loop {
-            let game = reader.read_game().map_err(|error| IndexError::Frame {
-                source: source.to_owned(),
-                error,
-            })?;
-            let Some(game) = game else {
-                self.summary.pgn_bytes += reader.bytes_read();
-                return Ok(());
-            };
-            source_game += 1;
-            let indexed = IndexedGame::parse(game, source, source_game)?;
-            let compressed =
-                zstd::bulk::compress(game, COMPRESSION_LEVEL).map_err(|error| IndexError::Io {
-                    context: format!("failed to compress {source} game {source_game}"),
-                    error,
-                })?;
-            let pgn_bytes = i64::try_from(game.len())
-                .map_err(|_| IndexError::Limit("one PGN game is too large to index"))?;
-            let source_game_i64 = i64::try_from(source_game)
-                .map_err(|_| IndexError::Limit("source contains too many games"))?;
-            let mainline_plies = i64::try_from(indexed.mainline_plies)
-                .map_err(|_| IndexError::Limit("one game contains too many moves"))?;
-            insert_game.execute(params![
-                source_id,
-                source_game_i64,
-                compressed,
-                pgn_bytes,
-                indexed.event.as_deref(),
-                indexed.site.as_deref(),
-                indexed.date_text.as_deref(),
-                indexed.played_on.map(i64::from),
-                indexed.white.as_deref(),
-                indexed.white_key.as_deref(),
-                indexed.black.as_deref(),
-                indexed.black_key.as_deref(),
-                indexed.white_elo.map(i64::from),
-                indexed.black_elo.map(i64::from),
-                indexed.result,
-                mainline_plies,
-            ])?;
-            let game_id = self.connection.last_insert_rowid();
-            for (position_key, ply) in indexed.positions {
-                insert_position.execute(params![
-                    position_key.as_slice(),
-                    game_id,
-                    i64::from(ply)
-                ])?;
-                self.summary.positions += 1;
-            }
-            self.summary.games += 1;
-        }
+        let fingerprint = write_source(&self.connection, &mut self.summary, reader, source)?;
+        self.summary.scanned_pgn_bytes += fingerprint.pgn_bytes;
+        Ok(())
     }
 
     pub fn finish(self) -> Result<IndexSummary, IndexError> {
@@ -310,6 +316,268 @@ impl Builder {
             .len();
         pending.commit()?;
         Ok(summary)
+    }
+}
+
+fn write_source<R: Read>(
+    connection: &Connection,
+    summary: &mut IndexSummary,
+    reader: R,
+    source: &str,
+) -> Result<SourceFingerprint, IndexError> {
+    connection.execute("INSERT INTO sources (name) VALUES (?1)", [source])?;
+    let source_id = connection.last_insert_rowid();
+    summary.sources += 1;
+
+    let mut reader = GameReader::new(reader);
+    let mut fingerprinter = SourceFingerprinter::new();
+    let mut insert_game = connection.prepare_cached(
+        "INSERT INTO games (
+            source_id, source_game, pgn_zstd, pgn_bytes,
+            event, site, date_text, played_on,
+            white, white_key, black, black_key,
+            white_elo, black_elo, result, mainline_plies
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+            ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
+         )",
+    )?;
+    let mut insert_position = connection
+        .prepare_cached("INSERT INTO positions (position_key, game_id, ply) VALUES (?1, ?2, ?3)")?;
+    let mut source_game = 0_u64;
+    loop {
+        let game = reader.read_game().map_err(|error| IndexError::Frame {
+            source: source.to_owned(),
+            error,
+        })?;
+        let Some(game) = game else {
+            let fingerprint = fingerprinter.finish(reader.bytes_read());
+            connection.execute(
+                "UPDATE sources SET fingerprint = ?1 WHERE id = ?2",
+                params![fingerprint.digest.as_slice(), source_id],
+            )?;
+            summary.pgn_bytes += fingerprint.pgn_bytes;
+            return Ok(fingerprint);
+        };
+        fingerprinter.observe(game);
+        source_game += 1;
+        let indexed = IndexedGame::parse(game, source, source_game)?;
+        let compressed =
+            zstd::bulk::compress(game, COMPRESSION_LEVEL).map_err(|error| IndexError::Io {
+                context: format!("failed to compress {source} game {source_game}"),
+                error,
+            })?;
+        let pgn_bytes = i64::try_from(game.len())
+            .map_err(|_| IndexError::Limit("one PGN game is too large to index"))?;
+        let source_game_i64 = i64::try_from(source_game)
+            .map_err(|_| IndexError::Limit("source contains too many games"))?;
+        let mainline_plies = i64::try_from(indexed.mainline_plies)
+            .map_err(|_| IndexError::Limit("one game contains too many moves"))?;
+        insert_game.execute(params![
+            source_id,
+            source_game_i64,
+            compressed,
+            pgn_bytes,
+            indexed.event.as_deref(),
+            indexed.site.as_deref(),
+            indexed.date_text.as_deref(),
+            indexed.played_on.map(i64::from),
+            indexed.white.as_deref(),
+            indexed.white_key.as_deref(),
+            indexed.black.as_deref(),
+            indexed.black_key.as_deref(),
+            indexed.white_elo.map(i64::from),
+            indexed.black_elo.map(i64::from),
+            indexed.result,
+            mainline_plies,
+        ])?;
+        let game_id = connection.last_insert_rowid();
+        for (position_key, ply) in indexed.positions {
+            insert_position.execute(params![position_key.as_slice(), game_id, i64::from(ply)])?;
+            summary.positions += 1;
+        }
+        summary.games += 1;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UpdateAction {
+    Unchanged,
+    Write,
+}
+
+pub struct Updater {
+    connection: Connection,
+    path: PathBuf,
+    summary: IndexSummary,
+}
+
+impl Updater {
+    pub fn open(path: &Path) -> Result<Self, IndexError> {
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let application_id: i64 =
+            connection.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+        if application_id != APPLICATION_ID {
+            return Err(IndexError::Limit("file is not a Gambit database"));
+        }
+        let schema_version: i64 =
+            connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if !(OLDEST_QUERYABLE_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&schema_version) {
+            return Err(IndexError::UnsupportedSchema(schema_version));
+        }
+        connection.execute_batch(
+            "PRAGMA journal_mode = DELETE;
+             PRAGMA synchronous = FULL;
+             PRAGMA foreign_keys = ON;
+             BEGIN IMMEDIATE;",
+        )?;
+        if schema_version == 1 {
+            connection.execute_batch(
+                "ALTER TABLE sources ADD COLUMN fingerprint BLOB;
+                 PRAGMA user_version = 2;",
+            )?;
+        }
+        Ok(Self {
+            connection,
+            path: path.to_path_buf(),
+            summary: IndexSummary {
+                schema_version: u32::try_from(SCHEMA_VERSION).expect("schema version fits u32"),
+                sources: 0,
+                games: 0,
+                positions: 0,
+                pgn_bytes: 0,
+                scanned_pgn_bytes: 0,
+                database_bytes: 0,
+                skipped_sources: 0,
+                replaced_sources: 0,
+            },
+        })
+    }
+
+    pub fn prepare(
+        &mut self,
+        source: &str,
+        fingerprint: &SourceFingerprint,
+    ) -> Result<UpdateAction, IndexError> {
+        self.summary.scanned_pgn_bytes += fingerprint.pgn_bytes;
+        let matches = {
+            let mut statement = self.connection.prepare(
+                "SELECT id, fingerprint FROM sources WHERE name = ?1 ORDER BY id LIMIT 2",
+            )?;
+            let rows = statement.query_map([source], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let Some((source_id, stored_digest)) = matches.first() else {
+            return Ok(UpdateAction::Write);
+        };
+        if matches.len() > 1 {
+            return Err(IndexError::AmbiguousSource(source.to_owned()));
+        }
+        let stored_fingerprint = match stored_digest {
+            Some(digest) if digest.len() == 32 => digest.clone(),
+            Some(_) => {
+                return Err(IndexError::Limit(
+                    "database contains an invalid source fingerprint",
+                ));
+            }
+            None => {
+                let recovered = self.stored_fingerprint(*source_id)?;
+                self.connection.execute(
+                    "UPDATE sources SET fingerprint = ?1 WHERE id = ?2",
+                    params![recovered.digest.as_slice(), source_id],
+                )?;
+                recovered.digest.to_vec()
+            }
+        };
+        if stored_fingerprint == fingerprint.digest {
+            self.summary.skipped_sources += 1;
+            return Ok(UpdateAction::Unchanged);
+        }
+
+        self.connection.execute(
+            "DELETE FROM positions WHERE game_id IN (SELECT id FROM games WHERE source_id = ?1)",
+            [source_id],
+        )?;
+        self.connection
+            .execute("DELETE FROM games WHERE source_id = ?1", [source_id])?;
+        self.connection
+            .execute("DELETE FROM sources WHERE id = ?1", [source_id])?;
+        self.summary.replaced_sources += 1;
+        Ok(UpdateAction::Write)
+    }
+
+    fn stored_fingerprint(&self, source_id: i64) -> Result<SourceFingerprint, IndexError> {
+        let mut fingerprinter = SourceFingerprinter::new();
+        let mut pgn_bytes = 0_u64;
+        let mut statement = self.connection.prepare(
+            "SELECT pgn_zstd, pgn_bytes FROM games WHERE source_id = ?1 ORDER BY source_game",
+        )?;
+        let mut rows = statement.query([source_id])?;
+        while let Some(row) = rows.next()? {
+            let compressed: Vec<u8> = row.get(0)?;
+            let bytes: i64 = row.get(1)?;
+            let bytes = usize::try_from(bytes)
+                .map_err(|_| IndexError::Limit("database contains an invalid stored PGN size"))?;
+            if bytes > MAXIMUM_GAME_BYTES {
+                return Err(IndexError::Limit(
+                    "stored PGN exceeds the 16 MiB game limit",
+                ));
+            }
+            let game =
+                zstd::bulk::decompress(&compressed, bytes).map_err(|error| IndexError::Io {
+                    context: String::from("failed to decompress stored PGN"),
+                    error,
+                })?;
+            if game.len() != bytes {
+                return Err(IndexError::Limit(
+                    "stored PGN size does not match its metadata",
+                ));
+            }
+            fingerprinter.observe(&game);
+            pgn_bytes += u64::try_from(bytes).expect("usize fits u64 on supported targets");
+        }
+        Ok(fingerprinter.finish(pgn_bytes))
+    }
+
+    pub fn add<R: Read>(
+        &mut self,
+        reader: R,
+        source: &str,
+        expected: &SourceFingerprint,
+    ) -> Result<(), IndexError> {
+        let actual = write_source(&self.connection, &mut self.summary, reader, source)?;
+        if actual.digest != expected.digest {
+            return Err(IndexError::SourceChanged(source.to_owned()));
+        }
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<IndexSummary, IndexError> {
+        self.connection.execute_batch("COMMIT; PRAGMA optimize;")?;
+        self.connection
+            .close()
+            .map_err(|(_, error)| IndexError::Database(error))?;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.path)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| IndexError::Io {
+                context: String::from("failed to sync updated database"),
+                error,
+            })?;
+        self.summary.database_bytes = fs::metadata(&self.path)
+            .map_err(|error| IndexError::Io {
+                context: String::from("failed to inspect updated database"),
+                error,
+            })?
+            .len();
+        Ok(self.summary)
     }
 }
 
@@ -638,9 +906,9 @@ fn validate_database(connection: &Connection) -> Result<(), QueryError> {
             "file is not a Gambit database",
         )));
     }
-    if schema_version != SCHEMA_VERSION {
+    if !(OLDEST_QUERYABLE_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&schema_version) {
         return Err(QueryError::Database(format!(
-            "unsupported schema version {schema_version}; this Gambit supports version {SCHEMA_VERSION}"
+            "unsupported schema version {schema_version}; this Gambit supports versions {OLDEST_QUERYABLE_SCHEMA_VERSION} through {SCHEMA_VERSION}"
         )));
     }
     Ok(())
@@ -895,5 +1163,84 @@ mod tests {
         .unwrap();
         assert_eq!(indexed.white_elo, None);
         assert_eq!(indexed.black_elo, Some(1800));
+    }
+
+    #[test]
+    fn fingerprints_framed_games_deterministically() {
+        let compact = fingerprint(&b"1. e4 *\n\n1. d4 *\n"[..], "first").unwrap();
+        let same = fingerprint(&b"1. e4 *\n\n1. d4 *\n"[..], "second").unwrap();
+        let changed = fingerprint(&b"1. e4 *\n\n1. c4 *\n"[..], "changed").unwrap();
+        assert_eq!(compact.digest, same.digest);
+        assert_ne!(compact.digest, changed.digest);
+    }
+
+    #[test]
+    fn updater_migrates_schema_one_and_recovers_source_fingerprints() {
+        let path = std::env::temp_dir().join(format!(
+            "gambit-schema-one-migration-{}.gambit",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let connection = Connection::open(&path).unwrap();
+        let schema_one = SCHEMA.replace(
+            "    name        TEXT NOT NULL,\n    fingerprint BLOB\n",
+            "    name        TEXT NOT NULL\n",
+        );
+        connection
+            .execute_batch(&format!(
+                "PRAGMA application_id = {APPLICATION_ID};
+                 PRAGMA user_version = 1;
+                 {schema_one}"
+            ))
+            .unwrap();
+        connection
+            .execute("INSERT INTO sources (id, name) VALUES (1, 'games.pgn')", [])
+            .unwrap();
+        let game = b"1. e4 *\n";
+        let mut reader = GameReader::new(&game[..]);
+        let stored_game = reader.read_game().unwrap().unwrap().to_vec();
+        let compressed = zstd::bulk::compress(&stored_game, COMPRESSION_LEVEL).unwrap();
+        connection
+            .execute(
+                "INSERT INTO games (
+                    source_id, source_game, pgn_zstd, pgn_bytes, result, mainline_plies
+                 ) VALUES (1, 1, ?1, ?2, 0, 1)",
+                params![compressed, i64::try_from(stored_game.len()).unwrap()],
+            )
+            .unwrap();
+        connection.close().unwrap();
+
+        let mut output = Vec::new();
+        let summary = query(
+            &path,
+            &QueryOptions::default(),
+            QueryFormat::Count,
+            &mut output,
+        )
+        .unwrap();
+        assert_eq!(summary.matches, 1);
+
+        let expected = fingerprint(&game[..], "games.pgn").unwrap();
+        let mut updater = Updater::open(&path).unwrap();
+        assert_eq!(
+            updater.prepare("games.pgn", &expected).unwrap(),
+            UpdateAction::Unchanged
+        );
+        let summary = updater.finish().unwrap();
+        assert_eq!(summary.skipped_sources, 1);
+
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        let digest: Vec<u8> = connection
+            .query_row("SELECT fingerprint FROM sources", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(digest, expected.digest);
+        connection.close().unwrap();
+        fs::remove_file(path).unwrap();
     }
 }

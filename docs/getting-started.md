@@ -79,6 +79,17 @@ Run the same sync command later to fetch an overlapping incremental window and
 refresh previously unfinished games. See [Sync Lichess games](sync.md) for
 initial history limits, storage, and recovery behavior.
 
+For repeated queries, build a database once and update it after each sync:
+
+```console
+gambit index ./diegoglozano-games --output diegoglozano.gambit
+gambit sync --lichess-user diegoglozano --output ./diegoglozano-games
+gambit index --update ./diegoglozano-games --output diegoglozano.gambit
+```
+
+Because Sync stores one game per source file, Index can skip every unchanged
+game before semantic parsing. See [Gambit databases](databases.md).
+
 ## Summarize a corpus
 
 Use Stats for a fast structural inventory before deeper validation or analysis:

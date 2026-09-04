@@ -9,11 +9,15 @@ Build one from a file, compressed archive, directory, or standard input:
 ```console
 $ gambit index games.pgn.zst --output games.gambit
 index: complete
+mode: build
 destination: games.gambit
-sources: 1
-games: 1729
-positions: 110388
-source PGN bytes: 1311266
+sources written: 1
+sources skipped: 0
+sources replaced: 0
+games written: 1729
+positions written: 110388
+source PGN bytes scanned: 1311266
+source PGN bytes written: 1311266
 database bytes: 7929856
 elapsed: 0.154s
 throughput: 8.14 MiB/s
@@ -52,29 +56,54 @@ synchronizes the completed database, and publishes it without overwriting an
 existing path. A malformed PGN, illegal standard-chess mainline, interruption,
 or storage failure leaves no destination claiming to be complete. Retrying the
 same command is safe after the temporary file has been removed; Gambit cleans
-up temporary files on handled errors.
+up temporary files on handled errors. Without `--update`, an existing
+destination is always refused.
 
-An existing destination is always refused. This makes a rebuild explicit:
+## Incremental updates
+
+After source files change, update the existing database in place:
 
 ```console
-gambit index ./synced-games --output games.next.gambit
-gambit query games.next.gambit --format count
-mv games.next.gambit games.gambit
+gambit sync --lichess-user diegoglozano --output ./synced-games
+gambit index --update ./synced-games --output games.gambit
 ```
 
-The source PGN remains the canonical, interoperable input. This first format
-does not support in-place append or mutation; rebuilding favors deterministic
-layout and simple recovery. Incremental indexing is a future layer over the
-same Query contract.
+Update works at source-file granularity. Gambit performs a bounded-memory
+framing and BLAKE3 fingerprint pass over every supplied source. It skips an
+unchanged source before parsing SAN or writing SQLite, appends a new source,
+and deletes then reindexes a changed source. A changed source is reopened for
+the semantic pass, and its fingerprint is verified again to detect concurrent
+modification.
+
+The exact source path string is its identity, so use the same relative or
+absolute input paths on the build and subsequent updates. Inputs omitted from
+an update remain in the database; this command does not prune them. A monolithic
+PGN is one source and must be reindexed in full when it changes. The
+one-game-per-file layout produced by `gambit sync` gives the most efficient
+incremental path: completed games skip, newly synced games append, and a
+refreshed unfinished game replaces only itself.
+
+All sources in one invocation update inside a single immediate transaction.
+An invalid or concurrently changed source, interruption, database error, or
+storage failure before commit rolls back additions and replacements together.
+Readers continue to see the previously committed database. Standard input is
+rejected with `--update` because safe fingerprint verification requires a
+reopenable source.
 
 ## File format
 
-Schema version 1 is a [SQLite application file](https://www.sqlite.org/appfileformat.html)
-with a 32 KiB page size, Gambit's `application_id`, and SQLite `user_version` 1.
+Schema version 2 is a [SQLite application file](https://www.sqlite.org/appfileformat.html)
+with a 32 KiB page size, Gambit's `application_id`, and SQLite `user_version` 2.
 Gambit links SQLite into the binary, so no system SQLite installation or server
 process is required. Each original game is an independent Zstandard frame for
 random extraction. Metadata indexes cover player, date, and result filters; a
-covering position index maps keys to games and first plies.
+covering position index maps keys to games and first plies. Version 2 adds a
+per-source fingerprint for change detection.
+
+Gambit continues to query schema version 1 databases created by v0.7.0. Their
+first update migrates the schema transactionally and lazily reconstructs each
+encountered fingerprint from the independently compressed stored games. An
+unchanged v0.7 source therefore does not need semantic reindexing.
 
 `.gambit` is the public interchange unit, but its SQL schema is an internal
 implementation detail before Gambit 1.0. Query validates the application and
@@ -97,15 +126,17 @@ large-corpus measurements and reproducible commands live in the
 [April 2014 benchmark](benchmarks/lichess-2014-04.md#gambit-database-follow-up).
 
 The next HPC improvements should preserve the file contract while adding
-parallel parse/SAN workers, batched writer ingestion, visible progress, and
-incremental rebuilds. Measurements—not the choice of SQLite itself—decide when
-a custom storage engine becomes worthwhile.
+parallel parse/SAN workers, batched writer ingestion, and visible progress.
+Measurements—not the choice of SQLite itself—decide when a custom storage
+engine becomes worthwhile.
 
 ## Reports and exit status
 
-`--format json` returns the schema version, source/game/position counts, source
-and database byte sizes, elapsed time, and source-byte throughput. Human output
-contains the same fields.
+`--format json` returns the mode, schema version, written/skipped/replaced
+source counts, written game/position counts, scanned and written source byte
+sizes, database size, elapsed time, and scan throughput. Human output contains
+the same fields. On update, game and position counts describe work performed in
+that invocation rather than totals already stored in the database.
 
 Exit status 0 means a complete database was published. Invalid PGN, FEN, or SAN
 exits 1; command-line errors exit 2; destination, input, compression, database,
