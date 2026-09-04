@@ -31,17 +31,15 @@ Enter
 Sleep 5s
 
 Ctrl+L
-Type "gambit query target/demo.gambit \"
+Type "gambit index --update examples/valid.pgn \"
 Enter
-Type "  --position 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2' \"
-Enter
-Type "  --format count"
+Type "  --output target/demo.gambit"
 Sleep 300ms
 Enter
-Sleep 3s
+Sleep 4s
 
 Ctrl+L
-Type "gambit doctor examples/invalid.pgn"
+Type "gambit info --check target/demo.gambit"
 Sleep 300ms
 Enter
 Sleep 4s

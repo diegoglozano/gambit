@@ -6,7 +6,7 @@ dependency-free ingestion layer and a compact semantic chess core.
 [Read the documentation](https://diegoglozano.github.io/gambit/docs/) or
 [download the latest release](https://diegoglozano.github.io/gambit/artifacts/).
 
-![Gambit 0.7 indexing, querying, and validating chess games](./static/gambit-doctor.gif)
+![Gambit 0.8 building, updating, and checking a chess database](./static/gambit-doctor.gif)
 
 ## Gambit databases
 
