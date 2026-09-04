@@ -6,6 +6,7 @@ use crate::query::{PlayerColor, QueryOptions};
 const API_ROOT: &str = "https://lichess.org/api/games/user";
 const GAME_EXPORT_ROOT: &str = "https://lichess.org/game/export";
 const EARLIEST_LICHESS_TIMESTAMP: i64 = 1_356_998_400_070;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 pub struct UserGamesRequest<'a> {
@@ -72,11 +73,7 @@ fn user_games_from(
     token: Option<&str>,
 ) -> Result<ureq::http::Response<ureq::Body>, LichessError> {
     let endpoint = format!("{}/{}", api_root.trim_end_matches('/'), request.username);
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(15)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
-        .build()
-        .into();
+    let agent = lichess_agent();
     let mut call = agent
         .get(endpoint)
         .header("Accept", "application/x-chess-pgn")
@@ -157,11 +154,7 @@ fn game_from(
     token: Option<&str>,
 ) -> Result<ureq::http::Response<ureq::Body>, LichessError> {
     let endpoint = format!("{}/{}", game_export_root.trim_end_matches('/'), game_id);
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(15)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
-        .build()
-        .into();
+    let agent = lichess_agent();
     let mut call = agent
         .get(endpoint)
         .header("Accept", "application/x-chess-pgn")
@@ -191,6 +184,16 @@ fn game_from(
     })
 }
 
+fn lichess_agent() -> ureq::Agent {
+    // User exports are intentionally long-lived streams. In ureq, a receive-response
+    // deadline remains eligible while the body is consumed, so setting one here would
+    // truncate otherwise healthy large exports. Connection establishment is still bounded.
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .build()
+        .into()
+}
+
 fn date_to_unix_milliseconds(date: u32, end_of_day: bool) -> i64 {
     let year = i64::from(date / 10_000);
     let month = i64::from(date / 100 % 100);
@@ -216,6 +219,17 @@ mod tests {
     use std::thread;
 
     use super::*;
+
+    #[test]
+    fn streaming_agent_does_not_deadline_the_response_or_body() {
+        let agent = lichess_agent();
+        let timeouts = agent.config().timeouts();
+
+        assert_eq!(timeouts.connect, Some(CONNECT_TIMEOUT));
+        assert_eq!(timeouts.recv_response, None);
+        assert_eq!(timeouts.recv_body, None);
+        assert_eq!(timeouts.global, None);
+    }
 
     #[test]
     fn converts_inclusive_date_bounds_to_unix_milliseconds() {

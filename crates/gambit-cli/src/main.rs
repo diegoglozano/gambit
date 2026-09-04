@@ -760,7 +760,10 @@ fn run_query(command: &QueryCommand) -> ExitCode {
         }
     }
 
-    if command.format == QueryFormat::Count && writeln!(output, "{}", total.matches).is_err() {
+    if command.format == QueryFormat::Count
+        && exit_code == 0
+        && writeln!(output, "{}", total.matches).is_err()
+    {
         eprintln!("failed to write query count");
         return ExitCode::from(3);
     }
