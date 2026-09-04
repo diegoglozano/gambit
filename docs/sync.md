@@ -14,6 +14,20 @@ gambit sync \
   --output ./diegoglozano-games
 ```
 
+Add `--database` when repeated queries should use a maintained `.gambit` file:
+
+```console
+gambit sync \
+  --lichess-user diegoglozano \
+  --output ./diegoglozano-games \
+  --database diegoglozano.gambit
+```
+
+The first successful sync builds the database. Running the same command later
+updates it: unchanged game files skip semantic indexing, new games append, and
+refreshed unfinished games replace their previous records. The PGN directory
+remains the canonical, interoperable store.
+
 The first run downloads the full public history. For a smaller initial store,
 set an inclusive starting date:
 
@@ -52,6 +66,14 @@ gambit doctor ./diegoglozano-games
 
 Because the store is local, repeated metadata and position queries run at
 Gambit's normal filesystem throughput instead of the Lichess export rate.
+When `--database` is enabled, point Query at that file for indexed lookups:
+
+```console
+gambit query diegoglozano.gambit \
+  --player diegoglozano \
+  --result loss \
+  --format count
+```
 
 ## Storage contract
 
@@ -71,6 +93,15 @@ Writes are idempotent. Repeated games replace the same path, unchanged PGN is
 not rewritten, and the cursor advances only after the complete API response and
 all game writes succeed. If a process or network failure interrupts a run, use
 the same command again.
+
+Database maintenance starts only after the game files and cursor commit. Its
+build uses atomic no-overwrite publication; later updates use one SQLite
+transaction. If database maintenance fails, Sync exits 3 and says explicitly
+that the files and cursor were already committed. Rerun the same command to
+repair or catch up the database. The database path is a command option rather
+than persisted sync state, so include `--database` on every run that should
+maintain it. Adding the option to an existing sync store builds its first
+database normally.
 
 ## Incremental behavior
 
@@ -105,11 +136,13 @@ The report includes `received`, `created`, `updated`, and `unchanged` counts;
 the number of unfinished games refreshed and still tracked; and the committed
 cursor. `received` counts PGN records received over the network, so an
 overlapped or individually refreshed game may be included even when no local
-file changes.
+file changes. With `--database`, JSON adds a nested `database` object containing
+the same build/update report as `gambit index --format json`; human output adds
+the Index report after the Sync report.
 
 Exit status 0 means the cursor and files were committed successfully. Invalid
 arguments exit 2. Filesystem, state, Lichess, parsing, and report failures exit
 3. A network, parsing, or game-storage failure before the commit leaves the
-previous cursor unchanged and is safe to retry. Report output is written after
-the commit, so a final broken-pipe error can return 3 even though the new cursor
-was saved.
+previous cursor unchanged and is safe to retry. Database maintenance and report
+output happen after that commit, so either can return 3 even though the new
+cursor was saved.

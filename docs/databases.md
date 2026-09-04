@@ -109,9 +109,15 @@ destination is always refused.
 After source files change, update the existing database in place:
 
 ```console
-gambit sync --lichess-user diegoglozano --output ./synced-games
-gambit index --update ./synced-games --output games.gambit
+gambit sync \
+  --lichess-user diegoglozano \
+  --output ./synced-games \
+  --database games.gambit
 ```
+
+The first invocation builds `games.gambit`; later invocations update it. The
+equivalent manual command remains available as
+`gambit index --update ./synced-games --output games.gambit`.
 
 Update works at source-file granularity. Gambit performs a bounded-memory
 framing and BLAKE3 fingerprint pass over every supplied source. It skips an

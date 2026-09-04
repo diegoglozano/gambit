@@ -120,14 +120,17 @@ output contracts, and bounded-memory details.
 | --- | --- |
 | `--lichess-user <NAME>` | Select the Lichess account to synchronize. Required. |
 | `--output <DIRECTORY>` | Select an empty or existing Gambit sync destination. Required. |
+| `--database <FILE>` | Build this `.gambit` database after the first successful sync and incrementally update it after later syncs. |
 | `--since <YYYY-MM-DD>` | Set an inclusive history boundary when initializing a new destination. |
 | `--format <human|json>` | Select the report format. The default is `human`. |
 | `-h`, `--help` | Print help. |
 
 Sync stores one PGN per Lichess game ID and advances its cursor only after the
 complete stream succeeds. Later runs fetch an overlapping incremental window
-and refresh previously unfinished games. See [Sync Lichess games](sync.md) for
-the storage, recovery, and automation contracts.
+and refresh previously unfinished games. `--database` then maintains a
+query-optimized database from that local canonical store. See
+[Sync Lichess games](sync.md) for the storage, recovery, and automation
+contracts.
 
 ## Validation modes
 
