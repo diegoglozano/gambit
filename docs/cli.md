@@ -6,6 +6,7 @@
 gambit doctor [OPTIONS] <PATH|->...
 gambit stats [OPTIONS] <PATH|->...
 gambit query [OPTIONS] <PATH|->...
+gambit query [OPTIONS] --lichess-user <NAME>
 gambit <PATH|->
 ```
 
@@ -61,6 +62,8 @@ definitions, JSON shape, and HPC behavior.
 
 | Option | Description |
 | --- | --- |
+| `--lichess-user <NAME>` | Stream this user's public games from the Lichess API and select that player implicitly. Cannot be combined with a path or `--player`. |
+| `--max-games <N>` | Request at most `N` of the newest games. Requires `--lichess-user`. |
 | `--player <NAME>` | Match games containing this player, case-insensitively. |
 | `--opponent <NAME>` | Match the selected player's opponent. Requires `--player`. |
 | `--color <white|black>` | Match the selected player's color. Requires `--player`. |
@@ -73,9 +76,10 @@ definitions, JSON shape, and HPC behavior.
 | `--format <pgn|jsonl|count>` | Select output. The default is `pgn`. |
 | `-h`, `--help` | Print help. |
 
-Query accepts the same input forms as Doctor and Stats. See
-[Query games](query.md) for missing-metadata behavior, output contracts, and
-bounded-memory details.
+Query accepts the same file input forms as Doctor and Stats, or one Lichess user
+as a remote input. Set the optional `LICHESS_TOKEN` environment variable for
+authenticated Lichess access. See [Query games](query.md) for missing-metadata
+behavior, remote-source semantics, output contracts, and bounded-memory details.
 
 ## Validation modes
 
