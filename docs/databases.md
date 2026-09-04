@@ -42,6 +42,51 @@ matching games, and JSONL reads stored metadata without reparsing movetext. The
 same filters therefore work on raw PGN for one-shot streaming jobs and on a
 `.gambit` file for repeated interactive analysis.
 
+## Inspect a database
+
+Use Info to see what the file contains without extracting PGN:
+
+```console
+$ gambit info games.gambit
+database: readable
+path: games.gambit
+schema version: 2
+database bytes: 7929856
+sources: 1
+fingerprinted sources: 1/1
+games: 1729
+positions: 110388
+mainline plies: 109130
+results: 813 white wins, 829 black wins, 87 draws, 0 unfinished
+dates: 2025.06.26 to 2026.09.02
+stored PGN bytes: 1311263
+compressed PGN bytes: 862041 (1.52x)
+integrity: not checked (use --check)
+elapsed: 0.003s
+```
+
+The default read-only summary aggregates database, source, game, position,
+result, date, and compression metadata. Stored PGN bytes exclude separators
+outside framed games. `fingerprinted sources` shows how many
+sources are ready for fast incremental comparison; schema-v1 files report zero
+until `index --update` encounters and migrates them.
+
+For a deeper health check, add `--check`:
+
+```console
+gambit info --check games.gambit
+gambit info --check --format json games.gambit
+```
+
+This runs SQLite's bounded `quick_check` diagnostics, validates every
+foreign-key relationship, decompresses each stored PGN frame, checks its
+declared length, and verifies schema-v2 source fingerprints. It is explicit
+because it reads the complete database and can take materially longer than the
+normal summary on a large file.
+A healthy check prints `integrity: ok` and exits 0. Detected integrity problems
+produce an `invalid` report and exit 1; file, schema, database, and output
+failures exit 3. Info never modifies the database.
+
 ## Build and recovery contract
 
 Indexing is one-pass and bounded-memory with respect to corpus size. Gambit

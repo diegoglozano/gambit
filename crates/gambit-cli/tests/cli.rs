@@ -92,6 +92,7 @@ fn help_describes_commands() {
     assert!(stdout.contains("gambit doctor"));
     assert!(stdout.contains("gambit stats"));
     assert!(stdout.contains("gambit index"));
+    assert!(stdout.contains("gambit info"));
     assert!(stdout.contains("gambit query"));
     assert!(stdout.contains("gambit sync"));
     assert!(stdout.contains("--lichess-user <NAME>"));
@@ -312,6 +313,102 @@ fn index_updates_only_new_and_changed_sources_and_rolls_back_failures() {
 }
 
 #[test]
+fn info_summarizes_and_checks_a_gambit_database() {
+    let directory = TestDirectory::new();
+    let input = directory.write(
+        "game.pgn",
+        b"[Date \"2026.09.05\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n",
+    );
+    let database = directory.path().join("game.gambit");
+    let built = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["index", "--output"])
+        .arg(&database)
+        .arg(&input)
+        .output()
+        .expect("build database");
+    assert!(built.status.success());
+
+    let info = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["info", "--format=json"])
+        .arg(&database)
+        .output()
+        .expect("inspect database");
+    assert!(info.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
+    assert_eq!(report["status"], "readable");
+    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["sources"], 1);
+    assert_eq!(report["fingerprinted_sources"], 1);
+    assert_eq!(report["games"], 1);
+    assert_eq!(report["positions"], 3);
+    assert_eq!(report["mainline_plies"], 2);
+    assert_eq!(report["earliest_date"], 20_260_905);
+    assert_eq!(report["latest_date"], 20_260_905);
+    assert_eq!(report["results"]["white_wins"], 1);
+    assert_eq!(report["results"]["black_wins"], 0);
+    assert_eq!(report["integrity_checked"], false);
+    assert_eq!(report["integrity_issues"], serde_json::json!([]));
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["info", "--check"])
+        .arg(&database)
+        .output()
+        .expect("check database");
+    assert!(checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("integrity: ok"));
+
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let compressed: Vec<u8> = connection
+        .query_row("SELECT pgn_zstd FROM games", [], |row| row.get(0))
+        .unwrap();
+    connection
+        .execute("UPDATE games SET pgn_zstd = X'00'", [])
+        .unwrap();
+    connection.close().unwrap();
+    let invalid_pgn = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["info", "--check"])
+        .arg(&database)
+        .output()
+        .expect("check invalid stored PGN");
+    assert_eq!(invalid_pgn.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&invalid_pgn.stdout).contains("invalid compressed PGN"));
+
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute("UPDATE games SET pgn_zstd = ?1", [compressed])
+        .unwrap();
+    connection
+        .execute("UPDATE sources SET fingerprint = zeroblob(32)", [])
+        .unwrap();
+    connection.close().unwrap();
+    let invalid_fingerprint = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["info", "--check"])
+        .arg(&database)
+        .output()
+        .expect("check invalid source fingerprint");
+    assert_eq!(invalid_fingerprint.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&invalid_fingerprint.stdout)
+            .contains("source fingerprint does not match")
+    );
+
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF; DELETE FROM sources;")
+        .unwrap();
+    connection.close().unwrap();
+    let invalid = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .args(["info", "--check"])
+        .arg(&database)
+        .output()
+        .expect("check invalid database");
+    assert_eq!(invalid.status.code(), Some(1));
+    let output = String::from_utf8_lossy(&invalid.stdout);
+    assert!(output.contains("database: invalid"));
+    assert!(output.contains("foreign key violation"));
+}
+
+#[test]
 fn query_rejects_a_non_gambit_database() {
     let file = TestFile::new("gambit", b"not a database");
     let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
@@ -319,6 +416,20 @@ fn query_rejects_a_non_gambit_database() {
         .arg(file.path())
         .output()
         .expect("query invalid database");
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Gambit database"));
+}
+
+#[test]
+fn info_rejects_a_non_gambit_database() {
+    let file = TestFile::new("gambit", b"not a database");
+    let output = Command::new(env!("CARGO_BIN_EXE_gambit"))
+        .arg("info")
+        .arg(file.path())
+        .output()
+        .expect("inspect invalid database");
 
     assert_eq!(output.status.code(), Some(3));
     assert!(output.stdout.is_empty());

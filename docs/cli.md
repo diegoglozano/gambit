@@ -6,6 +6,7 @@
 gambit doctor [OPTIONS] <PATH|->...
 gambit stats [OPTIONS] <PATH|->...
 gambit index [OPTIONS] --output <FILE> <PATH|->...
+gambit info [OPTIONS] <FILE>
 gambit query [OPTIONS] <PATH|->...
 gambit query [OPTIONS] --lichess-user <NAME>
 gambit sync --lichess-user <NAME> --output <DIRECTORY>
@@ -75,6 +76,19 @@ and builds a position lookup in bounded memory. A new database is published
 only after the complete build succeeds. Updates fingerprint every named source,
 skip unchanged sources before semantic work, and atomically commit the complete
 batch. See [Gambit databases](databases.md).
+
+## Info options
+
+| Option | Description |
+| --- | --- |
+| `--check` | Check SQLite structure, foreign keys, stored PGN frames, and source fingerprints in addition to the summary. |
+| `--format <human|json>` | Select the report format. The default is `human`. |
+| `-h`, `--help` | Print help. |
+
+Info accepts exactly one `.gambit` file. The normal summary is read-only and
+reports storage and chess-corpus totals. `--check` can scan the complete
+database and exits 1 if it finds an integrity problem. See
+[Gambit databases](databases.md#inspect-a-database).
 
 ## Query options
 

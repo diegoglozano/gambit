@@ -11,6 +11,9 @@ All notable changes to Gambit are documented in this file.
   changed sources replace their prior games, and failed batches roll back.
 - Added automatic schema-v1 database migration with lazy source-fingerprint
   recovery, keeping v0.7 databases queryable and incrementally updatable.
+- Added `gambit info` for database size, schema and fingerprint coverage,
+  corpus totals, result/date summaries, compression ratio, JSON output, and
+  optional SQLite, relationship, stored-PGN, and fingerprint integrity checks.
 
 ## [0.7.0] - 2026-09-04
 
