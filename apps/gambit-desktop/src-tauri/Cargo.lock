@@ -1151,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "gambit"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "blake3",
  "gambit-chess",
@@ -1165,11 +1165,11 @@ dependencies = [
 
 [[package]]
 name = "gambit-chess"
-version = "0.8.0"
+version = "0.9.0"
 
 [[package]]
 name = "gambit-desktop"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "gambit",
  "serde",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "gambit-pgn"
-version = "0.8.0"
+version = "0.9.0"
 
 [[package]]
 name = "gdk"
