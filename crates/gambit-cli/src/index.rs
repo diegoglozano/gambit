@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{self, Write as _};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -350,6 +350,41 @@ pub struct Builder {
     connection: Connection,
     pending: PendingDatabase,
     summary: IndexSummary,
+}
+
+/// Builds a new Gambit database from one or more PGN or `.pgn.zst` files.
+pub fn build_database_from_files<I, P>(
+    paths: I,
+    destination: &Path,
+) -> Result<IndexSummary, IndexError>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let mut builder = Builder::create(destination)?;
+    for path in paths {
+        let path = path.as_ref();
+        let source = path.to_string_lossy().into_owned();
+        let file = File::open(path).map_err(|error| IndexError::Io {
+            context: format!("failed to open {source}"),
+            error,
+        })?;
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("zst"))
+        {
+            let decoder =
+                zstd::stream::read::Decoder::new(file).map_err(|error| IndexError::Io {
+                    context: format!("failed to initialize zstd decoder for {source}"),
+                    error,
+                })?;
+            builder.add(decoder, &source)?;
+        } else {
+            builder.add(file, &source)?;
+        }
+    }
+    builder.finish()
 }
 
 impl Builder {
@@ -1791,6 +1826,29 @@ mod tests {
         let changed = fingerprint(&b"1. e4 *\n\n1. c4 *\n"[..], "changed").unwrap();
         assert_eq!(compact.digest, same.digest);
         assert_ne!(compact.digest, changed.digest);
+    }
+
+    #[test]
+    fn builds_database_from_plain_and_compressed_files() {
+        let root = std::env::temp_dir().join(format!("gambit-build-files-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let plain = root.join("plain.pgn");
+        let compressed = root.join("compressed.pgn.zst");
+        let database = root.join("games.gambit");
+        fs::write(&plain, b"1. e4 *\n").unwrap();
+        fs::write(
+            &compressed,
+            zstd::stream::encode_all(&b"1. d4 *\n"[..], 1).unwrap(),
+        )
+        .unwrap();
+
+        let summary = build_database_from_files([&plain, &compressed], &database).unwrap();
+
+        assert_eq!(summary.sources, 2);
+        assert_eq!(summary.games, 2);
+        assert_eq!(info(&database, true).unwrap().games, 2);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
