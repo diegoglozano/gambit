@@ -1,9 +1,5 @@
 mod doctor;
-mod index;
-mod lichess;
-mod query;
 mod stats;
-mod sync;
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -16,10 +12,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use doctor::{
     Diagnostic, DoctorOptions, GameHeaders, Report, ReportStatus, ValidationMode, inspect,
 };
-use query::{
+use gambit::query::{
     PlayerColor, QueryError, QueryFailure, QueryFormat, QueryOptions, QuerySummary, ResultFilter,
     query as query_games,
 };
+use gambit::{index, lichess, query, sync};
 use serde::Serialize;
 use stats::{
     DateStats, GameLengthStats, HeaderCoverage, RatingStats, ResultCounts, StatsDiagnostic,

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Gambit</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">G</div>
+          <div>
+            <strong>Gambit</strong>
+            <span>Chess library</span>
+          </div>
+        </div>
+
+        <nav aria-label="Primary navigation">
+          <button class="nav-item active" type="button">
+            <span aria-hidden="true">◫</span> Library
+          </button>
+          <button class="nav-item" type="button" disabled title="Coming next">
+            <span aria-hidden="true">⌁</span> Explore <small>Soon</small>
+          </button>
+        </nav>
+
+        <div class="database-card" id="database-card" hidden>
+          <span class="eyebrow">Active database</span>
+          <strong id="database-name">—</strong>
+          <span id="database-path">—</span>
+          <button id="change-database" class="text-button" type="button">Change database</button>
+        </div>
+
+        <footer>
+          <span class="status-dot"></span>
+          <span>Local and private</span>
+          <small>Gambit Desktop preview</small>
+        </footer>
+      </aside>
+
+      <main>
+        <section class="welcome" id="welcome-screen">
+          <div class="welcome-copy">
+            <span class="eyebrow">Your games, on your machine</span>
+            <h1>See the story behind every move.</h1>
+            <p>
+              Build a private chess library from Lichess, then browse every game
+              on a fast, distraction-free board.
+            </p>
+          </div>
+
+          <div class="setup-grid">
+            <form class="setup-card primary" id="sync-form">
+              <div class="card-icon" aria-hidden="true">↻</div>
+              <div>
+                <span class="eyebrow">Recommended</span>
+                <h2>Sync from Lichess</h2>
+                <p>Enter a public username. Later syncs fetch only what changed.</p>
+              </div>
+              <label>
+                Lichess username
+                <input id="username" name="username" autocomplete="username" placeholder="diegoglozano" required />
+              </label>
+              <label>
+                Start date <span>optional</span>
+                <input id="since" name="since" inputmode="numeric" placeholder="YYYY-MM-DD" />
+              </label>
+              <button class="primary-button" type="submit">
+                <span>Build my library</span><span aria-hidden="true">→</span>
+              </button>
+            </form>
+
+            <button class="setup-card secondary" id="open-database" type="button">
+              <div class="card-icon" aria-hidden="true">⌂</div>
+              <div>
+                <span class="eyebrow">Already use Gambit?</span>
+                <h2>Open a database</h2>
+                <p>Choose an existing <code>.gambit</code> file from this computer.</p>
+              </div>
+              <span class="secondary-action">Choose file <span aria-hidden="true">→</span></span>
+            </button>
+          </div>
+        </section>
+
+        <section class="workspace" id="workspace" hidden>
+          <header class="workspace-header">
+            <div>
+              <span class="eyebrow">Library</span>
+              <h1 id="library-title">Your games</h1>
+            </div>
+            <div class="workspace-actions">
+              <button class="sync-button" id="sync-again" type="button" hidden>↻ Sync now</button>
+              <form class="player-filter" id="player-filter">
+                <label for="player">Player</label>
+                <input id="player" name="player" placeholder="All players" />
+                <button type="submit">Filter</button>
+              </form>
+            </div>
+          </header>
+
+          <div class="stats-row" aria-label="Database summary">
+            <article><span>Games</span><strong id="stat-games">—</strong></article>
+            <article><span>Positions</span><strong id="stat-positions">—</strong></article>
+            <article><span>Date range</span><strong id="stat-dates">—</strong></article>
+            <article><span>Integrity</span><strong class="healthy">Ready</strong></article>
+          </div>
+
+          <div class="library-layout">
+            <section class="games-panel" aria-label="Games">
+              <div class="panel-heading">
+                <div>
+                  <h2>Games</h2>
+                  <span id="game-count">—</span>
+                </div>
+                <div class="pager">
+                  <button id="previous-page" type="button" aria-label="Previous page">←</button>
+                  <button id="next-page" type="button" aria-label="Next page">→</button>
+                </div>
+              </div>
+              <div class="game-list" id="game-list"></div>
+            </section>
+
+            <section class="board-panel" aria-label="Chess board">
+              <div class="game-heading">
+                <div>
+                  <div class="player-line"><span class="piece-dot black"></span><strong id="black-name">Select a game</strong><span id="black-rating"></span></div>
+                  <div class="player-line"><span class="piece-dot white"></span><strong id="white-name">—</strong><span id="white-rating"></span></div>
+                </div>
+                <span class="result-pill" id="game-result">—</span>
+              </div>
+              <div class="board-wrap">
+                <div class="board" id="board" role="img" aria-label="Chess position"></div>
+              </div>
+              <div class="board-controls">
+                <button id="first-move" type="button" aria-label="Starting position">|←</button>
+                <button id="previous-move" type="button" aria-label="Previous move">←</button>
+                <span id="move-position">Start</span>
+                <button id="next-move" type="button" aria-label="Next move">→</button>
+                <button id="last-move" type="button" aria-label="Final position">→|</button>
+              </div>
+            </section>
+
+            <section class="moves-panel" aria-label="Moves">
+              <div class="panel-heading">
+                <div>
+                  <h2>Moves</h2>
+                  <span id="game-date">—</span>
+                </div>
+                <a id="lichess-link" href="#" hidden>Open ↗</a>
+              </div>
+              <div class="move-list" id="move-list">
+                <p class="empty-message">Choose a game to replay it.</p>
+              </div>
+              <details class="pgn-details">
+                <summary>Raw PGN</summary>
+                <pre id="raw-pgn"></pre>
+              </details>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <div class="busy-overlay" id="busy-overlay" hidden>
+      <div class="spinner"></div>
+      <strong id="busy-title">Building your library…</strong>
+      <span id="busy-copy">Gambit is fetching and indexing your games locally.</span>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -4,6 +4,15 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added the first Gambit Desktop preview: a local-first Tauri app that syncs a
+  public Lichess account or opens an existing `.gambit` database, pages and
+  filters games, and replays legal mainlines on an interactive chessboard.
+- Added a reusable Gambit Rust library surface for collection sync, database
+  inspection, paged game metadata, stored PGN, and per-ply board states without
+  invoking or parsing the CLI.
+
 ## [0.8.0] - 2026-09-05
 
 ### Added
