@@ -20,11 +20,13 @@ to Apple for notarization automatically.
 
 ## Player workflow
 
-The first vertical slice supports two ways to enter the library:
+The first vertical slice supports three ways to enter the library:
 
 - Enter a public Lichess username and an optional first-sync date. Gambit stores
   the PGNs and resulting database in the operating system's application-data
   directory. **Sync now** later fetches and indexes only new or changed games.
+- Choose a `.pgn` or `.pgn.zst` file, then save and immediately open
+  a new `.gambit` database.
 - Choose an existing `.gambit` file from the native file picker.
 
 Once loaded, the app shows corpus totals and date coverage, pages through games
@@ -90,5 +92,5 @@ and notarization:
 - `APPLE_PASSWORD`: app-specific Apple ID password
 - `APPLE_TEAM_ID`: Apple Developer Team ID
 
-The workflow rejects a partially configured secret set. Automatic updates and
-Windows packaging remain later release milestones.
+The workflow uses ad-hoc signing until the complete secret set is present.
+Automatic updates and Windows packaging remain later release milestones.

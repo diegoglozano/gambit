@@ -4,6 +4,16 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added native PGN import to Gambit Desktop for building and opening a new
+  `.gambit` database from a `.pgn` or `.pgn.zst` file.
+
+### Fixed
+
+- Kept all 64 chessboard cells square regardless of whether a rank contains
+  pieces.
+
 ## [0.9.0] - 2026-09-05
 
 ### Added

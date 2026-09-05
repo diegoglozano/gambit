@@ -29,6 +29,8 @@ element("sync-form").addEventListener("submit", async (event) => {
 
 element("open-database").addEventListener("click", openDatabase);
 element("change-database").addEventListener("click", openDatabase);
+element("import-pgn").addEventListener("click", importPgn);
+element("import-pgn-workspace").addEventListener("click", importPgn);
 element("player-filter").addEventListener("submit", async (event) => {
   event.preventDefault();
   state.player = element("player").value.trim() || null;
@@ -64,6 +66,15 @@ async function openDatabase() {
   await withBusy("Opening database…", "Reading your library locally.", async () => {
     const session = await invoke("choose_database");
     if (session) await showSession(session);
+  });
+}
+
+async function importPgn() {
+  await withBusy("Building your database…", "Choose a PGN file and where to save the new local library.", async () => {
+    const session = await invoke("import_pgn");
+    if (!session) return;
+    await showSession(session);
+    showToast(`${session.info.games.toLocaleString()} games imported.`);
   });
 }
 

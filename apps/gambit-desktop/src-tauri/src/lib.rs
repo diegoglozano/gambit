@@ -58,6 +58,64 @@ async fn choose_database(
 }
 
 #[tauri::command]
+async fn import_pgn(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<DatabaseSession>, String> {
+    let selected = app.dialog().file().blocking_pick_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let first = selected
+        .into_path()
+        .map_err(|error| format!("selected item is not a local file: {error}"))?;
+    if !is_pgn_path(&first) {
+        return Err(String::from("choose a .pgn or .pgn.zst file"));
+    }
+    let suggested_name = format!(
+        "{}.gambit",
+        first
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("games")
+    );
+    let mut save_dialog = app
+        .dialog()
+        .file()
+        .add_filter("Gambit database", &["gambit"])
+        .set_file_name(suggested_name);
+    if let Some(parent) = first.parent() {
+        save_dialog = save_dialog.set_directory(parent);
+    }
+    let Some(selected) = save_dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+    let mut database = selected
+        .into_path()
+        .map_err(|error| format!("selected destination is not a local file: {error}"))?;
+    if !database
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("gambit"))
+    {
+        database.set_extension("gambit");
+    }
+
+    let build_input = first.clone();
+    let build_database = database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        index::build_database_from_files([build_input], &build_database)
+    })
+    .await
+    .map_err(|error| format!("index task failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+    let session = load_session(&database, None)?;
+    remember_session(&app, &database, None)?;
+    set_database(&state, database)?;
+    Ok(Some(session))
+}
+
+#[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn restore_session(
     app: AppHandle,
@@ -224,6 +282,19 @@ fn validated_username(username: &str) -> Result<String, String> {
     Ok(username.to_owned())
 }
 
+fn is_pgn_path(path: &Path) -> bool {
+    extension_is(path, "pgn")
+        || (extension_is(path, "zst")
+            && path
+                .file_stem()
+                .is_some_and(|stem| extension_is(Path::new(stem), "pgn")))
+}
+
+fn extension_is(path: &Path, expected: &str) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(expected))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the Gambit desktop application.
 ///
@@ -236,6 +307,7 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             choose_database,
+            import_pgn,
             restore_session,
             sync_user,
             list_games,
@@ -260,6 +332,14 @@ mod tests {
     #[test]
     fn rejects_non_lichess_links() {
         assert!(open_game_url(String::from("https://example.com/game")).is_err());
+    }
+
+    #[test]
+    fn accepts_only_supported_pgn_file_names() {
+        assert!(is_pgn_path(Path::new("games.pgn")));
+        assert!(is_pgn_path(Path::new("games.PGN.ZST")));
+        assert!(!is_pgn_path(Path::new("games.zst")));
+        assert!(!is_pgn_path(Path::new("games.gambit")));
     }
 
     #[test]

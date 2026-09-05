@@ -47,8 +47,8 @@
             <span class="eyebrow">Your games, on your machine</span>
             <h1>See the story behind every move.</h1>
             <p>
-              Build a private chess library from Lichess, then browse every game
-              on a fast, distraction-free board.
+              Build a private chess library from Lichess or your own PGN files,
+              then browse every game on a fast, distraction-free board.
             </p>
           </div>
 
@@ -73,6 +73,16 @@
               </button>
             </form>
 
+            <button class="setup-card secondary" id="import-pgn" type="button">
+              <div class="card-icon" aria-hidden="true">＋</div>
+              <div>
+                <span class="eyebrow">From your computer</span>
+                <h2>Import PGN</h2>
+                <p>Choose a <code>.pgn</code> or <code>.pgn.zst</code> file and save a new database.</p>
+              </div>
+              <span class="secondary-action">Choose a PGN file <span aria-hidden="true">→</span></span>
+            </button>
+
             <button class="setup-card secondary" id="open-database" type="button">
               <div class="card-icon" aria-hidden="true">⌂</div>
               <div>
@@ -92,6 +102,7 @@
               <h1 id="library-title">Your games</h1>
             </div>
             <div class="workspace-actions">
+              <button class="sync-button" id="import-pgn-workspace" type="button">＋ Import PGN</button>
               <button class="sync-button" id="sync-again" type="button" hidden>↻ Sync now</button>
               <form class="player-filter" id="player-filter">
                 <label for="player">Player</label>
