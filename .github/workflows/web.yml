@@ -8,6 +8,7 @@ on:
   workflow_run:
     workflows:
       - Release
+      - Desktop release
     types:
       - completed
   workflow_dispatch:
@@ -26,8 +27,11 @@ jobs:
     name: Build Oranda and MkDocs
     if: >-
       github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success')
+      (github.event.workflow_run.conclusion == 'success' &&
+      ((github.event.workflow_run.name == 'Release' &&
+      github.event.workflow_run.event == 'push') ||
+      (github.event.workflow_run.name == 'Desktop release' &&
+      github.event.workflow_run.event == 'workflow_run')))
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6

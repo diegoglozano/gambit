@@ -1,7 +1,22 @@
-# Gambit Desktop preview
+# Gambit Desktop
 
 Gambit Desktop is a local-first graphical client for Gambit databases. It is an
-early development preview rather than part of the signed binary release.
+early product release for macOS.
+
+## Install on macOS
+
+Download the universal DMG from the
+[latest GitHub Release](https://github.com/diegoglozano/gambit/releases/latest/download/gambit-desktop-universal-apple-darwin.dmg),
+open it, and drag **Gambit** into **Applications**. The same installer supports
+Apple Silicon and Intel Macs. A
+[SHA-256 checksum](https://github.com/diegoglozano/gambit/releases/latest/download/gambit-desktop-universal-apple-darwin.dmg.sha256)
+is published beside every installer.
+
+Until Apple Developer credentials are configured for the project, release DMGs
+use an ad-hoc signature and macOS may require you to right-click Gambit and
+choose **Open** on first launch. Once the release secrets described below are
+present, the same pipeline applies a Developer ID signature and submits the app
+to Apple for notarization automatically.
 
 ## Player workflow
 
@@ -44,13 +59,36 @@ On macOS, install the Tauri prerequisites and run:
 cargo run --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml
 ```
 
-To build a macOS preview bundle with the pinned Tauri CLI:
+To build a local app bundle with the pinned Tauri CLI:
 
 ```console
 cd apps/gambit-desktop
 npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles app
 ```
 
-Pull requests build an unsigned `gambit-desktop-macos-preview` artifact. Code
-signing, notarization, automatic updates, Windows packaging, and public desktop
-distribution remain later release milestones.
+Build the universal release DMG and its SHA-256 checksum with:
+
+```console
+./scripts/build-desktop-dmg.sh 0.8.0
+```
+
+Pull requests exercise that universal packaging path. After the main Release
+workflow publishes a version tag, the Desktop release workflow builds the DMG
+from the same commit and attaches it to the existing GitHub Release. A manual
+workflow dispatch can rebuild an existing tag.
+
+## Signing and notarization
+
+Without Apple credentials, the release workflow uses Tauri's ad-hoc identity.
+Configure all of these GitHub Actions secrets to enable Developer ID signing
+and notarization:
+
+- `APPLE_CERTIFICATE`: base64-encoded Developer ID Application `.p12`
+- `APPLE_CERTIFICATE_PASSWORD`: password used when exporting the `.p12`
+- `KEYCHAIN_PASSWORD`: temporary CI keychain password
+- `APPLE_ID`: Apple Developer account email
+- `APPLE_PASSWORD`: app-specific Apple ID password
+- `APPLE_TEAM_ID`: Apple Developer Team ID
+
+The workflow rejects a partially configured secret set. Automatic updates and
+Windows packaging remain later release milestones.

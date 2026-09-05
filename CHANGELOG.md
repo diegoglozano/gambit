@@ -13,6 +13,8 @@ All notable changes to Gambit are documented in this file.
   inspection, paged game metadata, stored PGN, and per-ply board states without
   invoking or parsing the CLI.
 - Gambit Desktop now remembers and automatically reopens the last library.
+- Versioned releases now attach a universal macOS DMG and SHA-256 checksum,
+  with optional Developer ID signing and Apple notarization through CI secrets.
 
 ## [0.8.0] - 2026-09-05
 

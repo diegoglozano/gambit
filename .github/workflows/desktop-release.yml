@@ -1,0 +1,148 @@
+name: Desktop release
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-release.yml"
+      - "scripts/build-desktop-dmg.sh"
+      - "apps/gambit-desktop/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to rebuild and upload
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build universal macOS DMG
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success')
+    runs-on: macos-14
+    permissions:
+      contents: read
+    outputs:
+      release-tag: ${{ steps.version.outputs.release-tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (github.event_name == 'workflow_dispatch' && inputs.tag || github.sha) }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal
+          rustup default 1.93.1
+      - id: version
+        name: Select desktop version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || (github.event_name == 'workflow_dispatch' && inputs.tag || '') }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]]; then
+            version='0.0.0-ci'
+            release_tag=''
+          else
+            release_tag="$RELEASE_TAG"
+            version="${release_tag##*/}"
+            version="${version#v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "unsupported release tag: $release_tag" >&2
+            exit 2
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release-tag=$release_tag" >> "$GITHUB_OUTPUT"
+      - name: Configure Apple signing and notarization
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            if [[ -n "$APPLE_CERTIFICATE_PASSWORD$APPLE_ID$APPLE_PASSWORD$APPLE_TEAM_ID$KEYCHAIN_PASSWORD" ]]; then
+              echo 'Apple release secrets are only partially configured' >&2
+              exit 1
+            fi
+            echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
+            echo 'Building an ad-hoc signed DMG; configure Apple secrets to enable notarization.'
+            exit 0
+          fi
+          if [[ -z "$APPLE_CERTIFICATE_PASSWORD" || -z "$APPLE_ID" || -z "$APPLE_PASSWORD" || -z "$APPLE_TEAM_ID" || -z "$KEYCHAIN_PASSWORD" ]]; then
+            echo 'Apple release secrets are only partially configured' >&2
+            exit 1
+          fi
+
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/gambit-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+
+          signing_identity=$(security find-identity -v -p codesigning "$keychain_path" \
+            | awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [[ -z "$signing_identity" ]]; then
+            echo 'No Developer ID Application identity was found in the certificate' >&2
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+      - name: Build pull-request DMG
+        if: github.event_name == 'pull_request'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
+      - name: Build release DMG
+        if: github.event_name != 'pull_request'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gambit-desktop-release
+          path: |
+            target/desktop-release/gambit-desktop-universal-apple-darwin.dmg
+            target/desktop-release/gambit-desktop-universal-apple-darwin.dmg.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Attach desktop DMG to GitHub Release
+    if: github.event_name != 'pull_request' && needs.build.result == 'success'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: gambit-desktop-release
+          path: desktop-release
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+        run: gh release upload "$RELEASE_TAG" desktop-release/* --clobber --repo "$GITHUB_REPOSITORY"
