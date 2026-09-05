@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/gambit-chess", "crates/gambit-cli", "crates/gambit-pgn"]
+exclude = ["apps/gambit-desktop/src-tauri"]
 resolver = "3"
 
 [workspace.package]

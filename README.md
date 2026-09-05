@@ -1,12 +1,26 @@
 # Gambit
 
-Gambit is a high-performance PGN inspection and validation tool backed by a
-dependency-free ingestion layer and a compact semantic chess core.
+Gambit is a local-first chess library and high-performance PGN toolkit backed by
+a dependency-free ingestion layer and a compact semantic chess core.
 
 [Read the documentation](https://diegoglozano.github.io/gambit/docs/) or
 [download the latest release](https://diegoglozano.github.io/gambit/artifacts/).
 
 ![Gambit 0.8 building, updating, and checking a chess database](./static/gambit-doctor.gif)
+
+## Gambit Desktop preview
+
+Gambit Desktop gives chess players a private graphical library without
+requiring a terminal or uploading games to a Gambit service. Enter a public
+Lichess username to create and incrementally maintain a local collection, or
+open an existing `.gambit` database. The preview includes database summaries,
+paged player filtering, a game browser, and an interactive mainline board.
+
+The desktop shell calls Gambit's Rust application services directly; it does
+not spawn the CLI or parse terminal output. The CLI remains the interface for
+automation, CI, and HPC workflows. See the
+[desktop preview guide](https://diegoglozano.github.io/gambit/docs/desktop/)
+for development instructions, current scope, and privacy details.
 
 ## Gambit databases
 

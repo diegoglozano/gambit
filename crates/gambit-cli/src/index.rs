@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-use gambit_chess::Position;
+use gambit_chess::{Color, Piece, Position, Square};
 use gambit_pgn::{Event, FrameError, GameReader, Outcome, Parser, ParserOptions, Tag};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OpenFlags, params, params_from_iter};
@@ -100,6 +100,66 @@ pub struct DatabaseInfo {
     pub integrity_checked: bool,
     pub integrity_issues: Vec<String>,
 }
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GameSummary {
+    pub id: i64,
+    pub source: String,
+    pub source_game: u64,
+    pub event: Option<String>,
+    pub site: Option<String>,
+    pub date: Option<String>,
+    pub white: Option<String>,
+    pub black: Option<String>,
+    pub white_elo: Option<u32>,
+    pub black_elo: Option<u32>,
+    pub result: Option<String>,
+    pub mainline_plies: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GamePage {
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u32,
+    pub games: Vec<GameSummary>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GameMove {
+    pub ply: u32,
+    pub san: String,
+    pub from: String,
+    pub to: String,
+    pub board: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GameDetail {
+    pub summary: GameSummary,
+    pub pgn: String,
+    pub initial_board: Option<String>,
+    pub moves: Vec<GameMove>,
+}
+
+#[derive(Debug)]
+pub enum LibraryError {
+    Database(String),
+    GameNotFound(i64),
+    InvalidGame(String),
+}
+
+impl fmt::Display for LibraryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Database(error) => write!(formatter, "failed to read Gambit database: {error}"),
+            Self::GameNotFound(id) => write!(formatter, "game {id} was not found"),
+            Self::InvalidGame(error) => write!(formatter, "failed to decode stored game: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for LibraryError {}
 
 impl DatabaseInfo {
     pub fn exit_code(&self) -> u8 {
@@ -1361,7 +1421,189 @@ fn build_query(options: &QueryOptions) -> (String, Vec<String>, Vec<Value>, Stri
     (from, predicates, values, position_ply)
 }
 
+/// Returns a newest-first page of games for the desktop and other structured clients.
+///
+/// `player` is matched case-insensitively against either player name. The page size is
+/// clamped to 200 records so callers cannot accidentally materialize an entire corpus.
+pub fn list_games(
+    path: &Path,
+    player: Option<&str>,
+    offset: u64,
+    limit: u32,
+) -> Result<GamePage, LibraryError> {
+    let connection = open_library_database(path)?;
+    let player_key = player.map(|value| Value::Blob(ascii_fold(value.as_bytes())));
+    let predicate = if player_key.is_some() {
+        " WHERE g.white_key = ?1 OR g.black_key = ?1"
+    } else {
+        ""
+    };
+    let values = player_key.into_iter().collect::<Vec<_>>();
+    let count_sql = format!("SELECT COUNT(*) FROM games g{predicate}");
+    let total: i64 = connection
+        .query_row(&count_sql, params_from_iter(values.iter()), |row| {
+            row.get(0)
+        })
+        .map_err(library_database_error)?;
+
+    let limit = limit.clamp(1, 200);
+    let sql = format!(
+        "SELECT {QUERY_COLUMNS}, NULL AS position_ply
+         FROM games g JOIN sources s ON s.id = g.source_id
+         {predicate}
+         ORDER BY g.played_on IS NULL, g.played_on DESC, g.id DESC
+         LIMIT ?{} OFFSET ?{}",
+        values.len() + 1,
+        values.len() + 2
+    );
+    let mut page_values = values;
+    page_values.push(Value::Integer(i64::from(limit)));
+    page_values.push(Value::Integer(i64::try_from(offset).unwrap_or(i64::MAX)));
+    let mut statement = connection.prepare(&sql).map_err(library_database_error)?;
+    let rows = statement
+        .query_map(params_from_iter(page_values), StoredGame::from_row)
+        .map_err(library_database_error)?;
+    let games = rows
+        .map(|row| row.map(|game| game.summary()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(library_database_error)?;
+    Ok(GamePage {
+        total: u64::try_from(total).unwrap_or(0),
+        offset,
+        limit,
+        games,
+    })
+}
+
+/// Reads one stored game and returns its PGN plus every legal mainline board state.
+pub fn game(path: &Path, id: i64) -> Result<GameDetail, LibraryError> {
+    let connection = open_library_database(path)?;
+    let sql = format!(
+        "SELECT {QUERY_COLUMNS}, NULL AS position_ply
+         FROM games g JOIN sources s ON s.id = g.source_id
+         WHERE g.id = ?1"
+    );
+    let stored = connection
+        .query_row(&sql, [id], StoredGame::from_row)
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => LibraryError::GameNotFound(id),
+            error => library_database_error(error),
+        })?;
+    let maximum = usize::try_from(stored.pgn_bytes)
+        .map_err(|_| LibraryError::InvalidGame(String::from("invalid stored PGN size")))?;
+    if maximum > MAXIMUM_GAME_BYTES {
+        return Err(LibraryError::InvalidGame(String::from(
+            "stored PGN exceeds the 16 MiB game limit",
+        )));
+    }
+    let pgn = zstd::bulk::decompress(&stored.pgn_zstd, maximum)
+        .map_err(|error| LibraryError::InvalidGame(error.to_string()))?;
+    if pgn.len() != maximum {
+        return Err(LibraryError::InvalidGame(String::from(
+            "stored PGN size does not match its metadata",
+        )));
+    }
+    let (initial_board, moves) = game_boards(&pgn)?;
+    Ok(GameDetail {
+        summary: stored.summary(),
+        pgn: String::from_utf8_lossy(&pgn).into_owned(),
+        initial_board,
+        moves,
+    })
+}
+
+fn open_library_database(path: &Path) -> Result<Connection, LibraryError> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(library_database_error)?;
+    validate_database(&connection).map_err(|error| LibraryError::Database(error.to_string()))?;
+    Ok(connection)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn library_database_error(error: rusqlite::Error) -> LibraryError {
+    LibraryError::Database(error.to_string())
+}
+
+fn game_boards(pgn: &[u8]) -> Result<(Option<String>, Vec<GameMove>), LibraryError> {
+    let mut fen = None;
+    let mut variant = None;
+    let mut position = Position::initial();
+    let mut initial_board = None;
+    let mut moves = Vec::new();
+    let mut variation_depth = 0_u32;
+    let mut board_supported = true;
+    for event in Parser::with_options(pgn, ParserOptions::STRICT) {
+        let event = event.map_err(|error| LibraryError::InvalidGame(error.to_string()))?;
+        match event {
+            Event::Tag(tag) if tag.name() == b"FEN" && fen.is_none() => {
+                fen = Some(tag.value().into_owned());
+            }
+            Event::Tag(tag) if tag.name() == b"Variant" && variant.is_none() => {
+                variant = Some(tag.value().into_owned());
+            }
+            Event::MovetextStart { .. } => {
+                board_supported = variant
+                    .as_deref()
+                    .is_none_or(|value| value.eq_ignore_ascii_case(b"standard"));
+                if board_supported {
+                    position = fen
+                        .as_deref()
+                        .map_or_else(|| Ok(Position::initial()), Position::from_fen)
+                        .map_err(|error| LibraryError::InvalidGame(error.to_string()))?;
+                    initial_board = Some(encode_board(position));
+                }
+            }
+            Event::San(token) if variation_depth == 0 && board_supported => {
+                let chess_move = position
+                    .play_san(token.as_bytes())
+                    .map_err(|error| LibraryError::InvalidGame(error.to_string()))?;
+                let ply = u32::try_from(moves.len() + 1)
+                    .map_err(|_| LibraryError::InvalidGame(String::from("too many moves")))?;
+                moves.push(GameMove {
+                    ply,
+                    san: String::from_utf8_lossy(token.as_bytes()).into_owned(),
+                    from: chess_move.from().to_string(),
+                    to: chess_move.to().to_string(),
+                    board: encode_board(position),
+                });
+            }
+            Event::VariationStart(_) => variation_depth += 1,
+            Event::VariationEnd(_) => variation_depth = variation_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok((initial_board, moves))
+}
+
+fn encode_board(position: Position) -> String {
+    let mut board = String::with_capacity(64);
+    for index in 0..64 {
+        let square = Square::from_index(index).expect("board index is a square");
+        let symbol = position.piece_at(square).map_or('.', |(color, piece)| {
+            let symbol = match piece {
+                Piece::Pawn => 'p',
+                Piece::Knight => 'n',
+                Piece::Bishop => 'b',
+                Piece::Rook => 'r',
+                Piece::Queen => 'q',
+                Piece::King => 'k',
+            };
+            if color == Color::White {
+                symbol.to_ascii_uppercase()
+            } else {
+                symbol
+            }
+        });
+        board.push(symbol);
+    }
+    board
+}
+
 struct StoredGame {
+    id: i64,
     source: String,
     source_game: u64,
     pgn_zstd: Vec<u8>,
@@ -1381,6 +1623,7 @@ struct StoredGame {
 impl StoredGame {
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
+            id: row.get(0)?,
             source: row.get(1)?,
             source_game: to_u64(row.get(2)?)?,
             pgn_zstd: row.get(3)?,
@@ -1396,6 +1639,23 @@ impl StoredGame {
             mainline_plies: to_u64(row.get(13)?)?,
             position_ply: row.get::<_, Option<i64>>(14)?.map(to_u64).transpose()?,
         })
+    }
+
+    fn summary(&self) -> GameSummary {
+        GameSummary {
+            id: self.id,
+            source: self.source.clone(),
+            source_game: self.source_game,
+            event: self.event.as_deref().map(lossy).map(Cow::into_owned),
+            site: self.site.as_deref().map(lossy).map(Cow::into_owned),
+            date: self.date.as_deref().map(lossy).map(Cow::into_owned),
+            white: self.white.as_deref().map(lossy).map(Cow::into_owned),
+            black: self.black.as_deref().map(lossy).map(Cow::into_owned),
+            white_elo: self.white_elo,
+            black_elo: self.black_elo,
+            result: decode_outcome(self.result).map(str::to_owned),
+            mainline_plies: self.mainline_plies,
+        }
     }
 
     fn as_json(&self) -> MatchRecord<'_> {
@@ -1531,6 +1791,34 @@ mod tests {
         let changed = fingerprint(&b"1. e4 *\n\n1. c4 *\n"[..], "changed").unwrap();
         assert_eq!(compact.digest, same.digest);
         assert_ne!(compact.digest, changed.digest);
+    }
+
+    #[test]
+    fn library_api_pages_games_and_returns_mainline_boards() {
+        let path =
+            std::env::temp_dir().join(format!("gambit-library-api-{}.gambit", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let pgn = b"[Event \"Friendly\"]\n[Site \"https://lichess.org/abcdefgh\"]\n[Date \"2026.09.05\"]\n[White \"DiegoGLozano\"]\n[Black \"Opponent\"]\n[WhiteElo \"1234\"]\n[BlackElo \"1200\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Nf3 1-0\n";
+        let mut builder = Builder::create(&path).unwrap();
+        builder.add(&pgn[..], "friendly.pgn").unwrap();
+        builder.finish().unwrap();
+
+        let page = list_games(&path, Some("diegoglozano"), 0, 50).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.games.len(), 1);
+        assert_eq!(page.games[0].white.as_deref(), Some("DiegoGLozano"));
+        assert_eq!(page.games[0].result.as_deref(), Some("white_win"));
+
+        let detail = game(&path, page.games[0].id).unwrap();
+        assert_eq!(detail.moves.len(), 3);
+        assert_eq!(detail.moves[0].san, "e4");
+        assert_eq!(detail.moves[0].from, "e2");
+        assert_eq!(detail.moves[0].to, "e4");
+        assert_eq!(detail.moves[0].board.as_bytes()[28], b'P');
+        assert!(detail.pgn.contains("Friendly"));
+        assert_eq!(detail.initial_board.as_deref().map(str::len), Some(64));
+
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

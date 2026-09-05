@@ -59,3 +59,31 @@ jobs:
           rustup default 1.93.1
       - name: Run CLI tests
         run: cargo test -p gambit --test cli
+
+  desktop:
+    name: Desktop app (macos-14)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.1
+      - name: Check frontend JavaScript
+        run: node --check apps/gambit-desktop/ui/main.js
+      - name: Check desktop formatting
+        run: cargo fmt --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml -- --check
+      - name: Lint desktop backend
+        run: cargo clippy --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Test desktop backend
+        run: cargo test --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml
+      - name: Build preview application
+        working-directory: apps/gambit-desktop
+        run: npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles app
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gambit-desktop-macos-preview
+          path: apps/gambit-desktop/src-tauri/target/debug/bundle/macos/Gambit.app
