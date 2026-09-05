@@ -27,6 +27,9 @@
     "active": true,
     "targets": "all",
     "category": "Game",
-    "shortDescription": "Explore your chess games locally"
+    "shortDescription": "Explore your chess games locally",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

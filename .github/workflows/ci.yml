@@ -80,10 +80,13 @@ jobs:
         run: cargo clippy --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Test desktop backend
         run: cargo test --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml
-      - name: Build preview application
+      - name: Build preview installer
         working-directory: apps/gambit-desktop
-        run: npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles app
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles dmg
       - uses: actions/upload-artifact@v7
         with:
           name: gambit-desktop-macos-preview
-          path: apps/gambit-desktop/src-tauri/target/debug/bundle/macos/Gambit.app
+          path: apps/gambit-desktop/src-tauri/target/debug/bundle/dmg/*.dmg
+          if-no-files-found: error
