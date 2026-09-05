@@ -76,18 +76,10 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          if [[ -z "$APPLE_CERTIFICATE" ]]; then
-            if [[ -n "$APPLE_CERTIFICATE_PASSWORD$APPLE_ID$APPLE_PASSWORD$APPLE_TEAM_ID$KEYCHAIN_PASSWORD" ]]; then
-              echo 'Apple release secrets are only partially configured' >&2
-              exit 1
-            fi
+          if [[ -z "$APPLE_CERTIFICATE" || -z "$APPLE_CERTIFICATE_PASSWORD" || -z "$APPLE_ID" || -z "$APPLE_PASSWORD" || -z "$APPLE_TEAM_ID" || -z "$KEYCHAIN_PASSWORD" ]]; then
             echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
-            echo 'Building an ad-hoc signed DMG; configure Apple secrets to enable notarization.'
+            echo 'Building an ad-hoc signed DMG; configure all Apple secrets to enable notarization.'
             exit 0
-          fi
-          if [[ -z "$APPLE_CERTIFICATE_PASSWORD" || -z "$APPLE_ID" || -z "$APPLE_PASSWORD" || -z "$APPLE_TEAM_ID" || -z "$KEYCHAIN_PASSWORD" ]]; then
-            echo 'Apple release secrets are only partially configured' >&2
-            exit 1
           fi
 
           certificate_path="$RUNNER_TEMP/developer-id.p12"
