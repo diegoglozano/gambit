@@ -12,4 +12,5 @@ cargo run --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml
 
 The first vertical slice can synchronize a public Lichess account into the
 application data directory, open an existing `.gambit` file, page through its
-games, and replay standard-chess mainlines on an interactive board.
+games, and replay standard-chess mainlines on an interactive board. The last
+library is reopened automatically on the next launch.

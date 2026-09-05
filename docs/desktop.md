@@ -15,14 +15,16 @@ The first vertical slice supports two ways to enter the library:
 Once loaded, the app shows corpus totals and date coverage, pages through games
 newest-first, filters by an exact player name case-insensitively, and replays a
 selected standard-chess mainline. Arrow keys and board controls move through
-the game. Raw PGN remains available for inspection.
+the game. Raw PGN remains available for inspection. Gambit remembers the last
+library and reopens it automatically on the next launch.
 
 ## Privacy
 
 The app reads databases locally and does not upload them to Gambit. Public game
 sync communicates directly with the Lichess API. Authentication and OS
 credential storage are intentionally deferred until the public-game experience
-is stable.
+is stable. To resume the previous library, Gambit stores its local database path
+and, when applicable, public Lichess username in the application-data directory.
 
 ## Architecture
 

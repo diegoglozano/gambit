@@ -12,6 +12,7 @@ All notable changes to Gambit are documented in this file.
 - Added a reusable Gambit Rust library surface for collection sync, database
   inspection, paged game metadata, stored PGN, and per-ply board states without
   invoking or parsing the CLI.
+- Gambit Desktop now remembers and automatically reopens the last library.
 
 ## [0.8.0] - 2026-09-05
 

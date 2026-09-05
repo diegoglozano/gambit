@@ -22,7 +22,7 @@ element("sync-form").addEventListener("submit", async (event) => {
   const since = element("since").value.trim() || null;
   await withBusy("Building your library…", "Gambit is fetching and indexing your games locally.", async () => {
     const session = await invoke("sync_user", { input: { username, since } });
-    await showSession(session, username);
+    await showSession(session);
     showToast(`${session.info.games.toLocaleString()} games are ready.`);
   });
 });
@@ -38,7 +38,7 @@ element("sync-again").addEventListener("click", async () => {
   if (!state.managedUser) return;
   await withBusy("Syncing your latest games…", "Only new or changed Lichess games will be indexed.", async () => {
     const session = await invoke("sync_user", { input: { username: state.managedUser, since: null } });
-    await showSession(session, state.managedUser);
+    await showSession(session);
     showToast("Your library is up to date.");
   });
 });
@@ -63,11 +63,12 @@ window.addEventListener("keydown", (event) => {
 async function openDatabase() {
   await withBusy("Opening database…", "Reading your library locally.", async () => {
     const session = await invoke("choose_database");
-    if (session) await showSession(session, null);
+    if (session) await showSession(session);
   });
 }
 
-async function showSession(session, player) {
+async function showSession(session) {
+  const player = session.managed_user ?? null;
   state.session = session;
   state.player = player;
   state.managedUser = player;
@@ -287,6 +288,15 @@ function basename(path) {
   return path.split(/[\\/]/).pop() || path;
 }
 
+async function restorePreviousSession() {
+  try {
+    const session = await invoke("restore_session");
+    if (session) await showSession(session);
+  } catch (error) {
+    showToast(`Your previous library could not be reopened: ${error}`, true);
+  }
+}
+
 async function mockInvoke(command) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" ? 650 : 80));
   if (command === "get_game") return mockDetail();
@@ -302,6 +312,7 @@ function mockSession() {
   ];
   return {
     path: "/Users/diego/Library/Application Support/Gambit/collections/diegoglozano/diegoglozano.gambit",
+    managed_user: "diegoglozano",
     info: { games: 1729, positions: 110859, earliest_date: 20250626, latest_date: 20260904 },
     page: { total: 1729, offset: 0, limit: 100, games },
   };
@@ -332,3 +343,4 @@ function movePiece(board, from, to) {
 }
 
 renderBoard("RNBQKBNRPPPPPPPP................................pppppppprnbqkbnr", null);
+if (nativeInvoke) restorePreviousSession();

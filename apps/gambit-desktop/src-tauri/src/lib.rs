@@ -1,3 +1,5 @@
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -15,8 +17,16 @@ struct AppState {
 #[derive(Serialize)]
 struct DatabaseSession {
     path: String,
+    managed_user: Option<String>,
     info: DatabaseInfo,
     page: GamePage,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SavedSession {
+    version: u8,
+    database: PathBuf,
+    managed_user: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -42,7 +52,22 @@ async fn choose_database(
         .into_path()
         .map_err(|error| format!("selected item is not a local file: {error}"))?;
     let session = load_session(&path, None)?;
+    remember_session(&app, &path, None)?;
     set_database(&state, path)?;
+    Ok(Some(session))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<DatabaseSession>, String> {
+    let Some(saved) = read_saved_session(&app)? else {
+        return Ok(None);
+    };
+    let session = load_session(&saved.database, saved.managed_user.as_deref())?;
+    set_database(&state, saved.database)?;
     Ok(Some(session))
 }
 
@@ -72,6 +97,7 @@ async fn sync_user(
         .map_err(|error| format!("sync task failed: {error}"))?
         .map_err(|error| error.to_string())?;
     let session = load_session(&database, Some(&username))?;
+    remember_session(&app, &database, Some(&username))?;
     set_database(&state, database)?;
     Ok(session)
 }
@@ -109,9 +135,63 @@ fn load_session(path: &Path, player: Option<&str>) -> Result<DatabaseSession, St
     let page = index::list_games(path, player, 0, 100).map_err(|error| error.to_string())?;
     Ok(DatabaseSession {
         path: path.to_string_lossy().into_owned(),
+        managed_user: player.map(str::to_owned),
         info,
         page,
     })
+}
+
+fn remember_session(
+    app: &AppHandle,
+    database: &Path,
+    managed_user: Option<&str>,
+) -> Result<(), String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to locate application data: {error}"))?;
+    write_saved_session(&app_data, database, managed_user)
+}
+
+fn read_saved_session(app: &AppHandle) -> Result<Option<SavedSession>, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to locate application data: {error}"))?;
+    let path = app_data.join("session.json");
+    let contents = match fs::read(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
+    };
+    let saved: SavedSession = serde_json::from_slice(&contents)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    if saved.version != 1 {
+        return Err(format!(
+            "{} uses an unsupported session version",
+            path.display()
+        ));
+    }
+    Ok(Some(saved))
+}
+
+fn write_saved_session(
+    app_data: &Path,
+    database: &Path,
+    managed_user: Option<&str>,
+) -> Result<(), String> {
+    fs::create_dir_all(app_data)
+        .map_err(|error| format!("failed to create {}: {error}", app_data.display()))?;
+    let path = app_data.join("session.json");
+    let saved = SavedSession {
+        version: 1,
+        database: database.to_owned(),
+        managed_user: managed_user.map(str::to_owned),
+    };
+    let contents = serde_json::to_vec_pretty(&saved)
+        .map_err(|error| format!("failed to encode {}: {error}", path.display()))?;
+    fs::write(&path, contents)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 fn database(state: &State<'_, AppState>) -> Result<PathBuf, String> {
@@ -156,6 +236,7 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             choose_database,
+            restore_session,
             sync_user,
             list_games,
             get_game,
@@ -179,5 +260,22 @@ mod tests {
     #[test]
     fn rejects_non_lichess_links() {
         assert!(open_game_url(String::from("https://example.com/game")).is_err());
+    }
+
+    #[test]
+    fn saved_session_round_trips_managed_library() {
+        let root =
+            std::env::temp_dir().join(format!("gambit-desktop-session-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let database = root.join("collections/diego/diego.gambit");
+
+        write_saved_session(&root, &database, Some("diego")).unwrap();
+        let contents = fs::read(root.join("session.json")).unwrap();
+        let saved: SavedSession = serde_json::from_slice(&contents).unwrap();
+
+        assert_eq!(saved.version, 1);
+        assert_eq!(saved.database, database);
+        assert_eq!(saved.managed_user.as_deref(), Some("diego"));
+        fs::remove_dir_all(root).unwrap();
     }
 }
