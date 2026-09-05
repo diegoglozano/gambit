@@ -108,7 +108,12 @@ jobs:
             echo 'No Developer ID Application identity was found in the certificate' >&2
             exit 1
           fi
-          echo "APPLE_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+          {
+            echo "APPLE_SIGNING_IDENTITY=$signing_identity"
+            echo "APPLE_ID=$APPLE_ID"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
       - name: Build pull-request DMG
         if: github.event_name == 'pull_request'
         env:
@@ -116,10 +121,6 @@ jobs:
         run: ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
       - name: Build release DMG
         if: github.event_name != 'pull_request'
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
       - uses: actions/upload-artifact@v7
         with:
