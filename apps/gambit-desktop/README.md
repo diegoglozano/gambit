@@ -18,5 +18,5 @@ library is reopened automatically on the next launch.
 Build a universal macOS DMG from the repository root with:
 
 ```console
-./scripts/build-desktop-dmg.sh 0.8.0
+./scripts/build-desktop-dmg.sh 0.9.0
 ```
