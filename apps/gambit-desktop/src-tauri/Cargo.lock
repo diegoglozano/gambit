@@ -1212,6 +1212,7 @@ name = "gambit-desktop"
 version = "0.11.0"
 dependencies = [
  "gambit",
+ "gambit-chess",
  "serde",
  "serde_json",
  "tauri",

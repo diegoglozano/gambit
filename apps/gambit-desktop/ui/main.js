@@ -19,6 +19,7 @@ const state = {
   detail: null,
   ply: 0,
   player: null,
+  filters: {},
   managedUser: null,
   boardFlipped: false,
   syncTimelineStart: null,
@@ -34,29 +35,50 @@ element("sync-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = element("username").value.trim();
   const since = element("since").value.trim() || null;
-  await withBusy("Building your library…", "Lichess streams your game history before Gambit indexes it locally.", async () => {
-    const session = await invoke("sync_user", { input: { username, since } });
-    await showSession(session);
-    showToast(`${session.info.games.toLocaleString()} games are ready.`);
-  }, { sync: true, since });
+  const tokenInput = element("lichess-token");
+  const token = tokenInput.value.trim() || null;
+  try {
+    await withBusy("Building your library…", "Lichess streams your game history before Gambit indexes it locally.", async () => {
+      const session = await invoke("sync_user", { input: { username, since, token } });
+      await showSession(session);
+      showToast(`${session.info.games.toLocaleString()} games are ready.`);
+    }, { sync: true, since });
+  } finally {
+    tokenInput.value = "";
+  }
 });
 
 element("open-database").addEventListener("click", openDatabase);
-element("change-database").addEventListener("click", openDatabase);
+element("change-database").addEventListener("click", showLibraries);
 element("import-pgn").addEventListener("click", importPgn);
 element("import-pgn-workspace").addEventListener("click", importPgn);
+element("update-database").addEventListener("click", updateDatabase);
+element("close-libraries").addEventListener("click", () => element("library-dialog").close());
+element("open-another-database").addEventListener("click", async () => {
+  element("library-dialog").close();
+  await openDatabase();
+});
 element("check-updates").addEventListener("click", () => checkForUpdates(false));
 element("dismiss-update").addEventListener("click", () => element("update-dialog").close());
 element("install-update").addEventListener("click", installAvailableUpdate);
-element("player-filter").addEventListener("submit", async (event) => {
+element("game-filters").addEventListener("submit", async (event) => {
   event.preventDefault();
-  state.player = element("player").value.trim() || null;
+  state.filters = readFilters();
+  state.player = state.filters.player;
   await loadPage(0);
 });
+element("clear-filters").addEventListener("click", async () => {
+  setFilterForm({});
+  state.filters = {};
+  state.player = null;
+  await loadPage(0);
+});
+element("export-games").addEventListener("click", exportGames);
+element("verify-database").addEventListener("click", verifyDatabase);
 element("sync-again").addEventListener("click", async () => {
   if (!state.managedUser) return;
   await withBusy("Syncing your latest games…", "Only new or changed Lichess games will be indexed.", async () => {
-    const session = await invoke("sync_user", { input: { username: state.managedUser, since: null } });
+    const session = await invoke("sync_user", { input: { username: state.managedUser, since: null, token: null } });
     await showSession(session);
     showToast("Your library is up to date.");
   }, { sync: true });
@@ -92,12 +114,78 @@ async function openDatabase() {
   });
 }
 
+async function showLibraries() {
+  try {
+    const libraries = await invoke("list_databases");
+    renderLibraries(libraries);
+    element("library-dialog").showModal();
+  } catch (error) {
+    showToast(String(error), true);
+  }
+}
+
+function renderLibraries(libraries) {
+  const list = element("library-list");
+  list.replaceChildren();
+  if (!libraries.length) {
+    list.append(text("No recent databases yet.", "empty-message"));
+    return;
+  }
+  for (const library of libraries) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "library-row";
+    button.disabled = !library.exists;
+    const title = text(basename(library.path));
+    const detail = text(library.managed_user ? `Lichess · ${library.managed_user}` : library.path);
+    button.append(title, detail);
+    if (library.active) button.append(text("Active", "library-badge"));
+    button.addEventListener("click", async () => {
+      element("library-dialog").close();
+      await withBusy("Opening database…", "Reading your library locally.", async () => {
+        const session = await invoke("open_database", { path: library.path });
+        await showSession(session);
+      });
+    });
+    list.append(button);
+  }
+}
+
 async function importPgn() {
-  await withBusy("Building your database…", "Choose a PGN file and where to save the new local library.", async () => {
+  await withBusy("Building your database…", "Choose PGN files and where to save the new local library.", async () => {
     const session = await invoke("import_pgn");
     if (!session) return;
     await showSession(session);
     showToast(`${session.info.games.toLocaleString()} games imported.`);
+  });
+}
+
+async function updateDatabase() {
+  if (!state.session) return;
+  await withBusy("Updating your database…", "Choose PGN files to add or refresh in this library.", async () => {
+    const session = await invoke("update_database");
+    if (!session) return;
+    await showSession(session);
+    showToast(`${session.info.games.toLocaleString()} games are ready.`);
+  });
+}
+
+async function exportGames() {
+  if (!state.session) return;
+  await withBusy("Exporting games…", "Writing the matching games to a PGN file.", async () => {
+    const report = await invoke("export_games", { filters: state.filters });
+    if (report) showToast(`${report.games.toLocaleString()} matching games exported.`);
+  });
+}
+
+async function verifyDatabase() {
+  if (!state.session) return;
+  await withBusy("Verifying database…", "Checking SQLite structure, stored PGN, and source fingerprints.", async () => {
+    const info = await invoke("check_database");
+    state.session.info = info;
+    renderDatabaseInfo(info);
+    if (info.integrity_issues.length) showToast(`${info.integrity_issues.length} integrity issue(s) found.`, true);
+    else showToast("Database integrity verified.");
   });
 }
 
@@ -140,6 +228,7 @@ async function showSession(session) {
   const player = session.managed_user ?? null;
   state.session = session;
   state.player = player;
+  state.filters = player ? { player } : {};
   state.managedUser = player;
   state.detail = null;
   state.ply = 0;
@@ -148,12 +237,10 @@ async function showSession(session) {
   element("database-card").hidden = false;
   element("database-name").textContent = basename(session.path);
   element("database-path").textContent = session.path;
-  element("player").value = player ?? "";
+  setFilterForm(state.filters);
   element("sync-again").hidden = !player;
   element("library-title").textContent = player ? `${player}'s games` : "Your games";
-  element("stat-games").textContent = session.info.games.toLocaleString();
-  element("stat-positions").textContent = session.info.positions.toLocaleString();
-  element("stat-dates").textContent = dateRange(session.info);
+  renderDatabaseInfo(session.info);
   renderPage(session.page);
   if (session.page.games.length) await selectGame(session.page.games[0].id);
 }
@@ -161,7 +248,7 @@ async function showSession(session) {
 async function loadPage(offset) {
   if (!state.session) return;
   try {
-    const page = await invoke("list_games", { player: state.player, offset, limit: state.session.page.limit });
+    const page = await invoke("list_games", { filters: state.filters, offset, limit: state.session.page.limit });
     state.session.page = page;
     renderPage(page);
     if (page.games.length) await selectGame(page.games[0].id);
@@ -179,7 +266,7 @@ function renderPage(page) {
   if (!page.games.length) {
     const empty = document.createElement("p");
     empty.className = "empty-message";
-    empty.textContent = "No games match this player.";
+    empty.textContent = "No games match these filters.";
     list.append(empty);
     return;
   }
@@ -392,6 +479,68 @@ function resultLabel(result) {
   return { white_win: "1–0", black_win: "0–1", draw: "½–½", unfinished: "*" }[result] ?? "—";
 }
 
+function readFilters() {
+  const values = {
+    player: element("player").value,
+    opponent: element("opponent").value,
+    color: element("color").value,
+    result: element("result").value,
+    since: element("filter-since").value,
+    until: element("filter-until").value,
+    minimum_rating: element("minimum-rating").value,
+    maximum_rating: element("maximum-rating").value,
+    position: element("position").value,
+  };
+  return Object.fromEntries(
+    Object.entries(values)
+      .map(([key, value]) => [key, value.trim()])
+      .filter(([, value]) => value),
+  );
+}
+
+function setFilterForm(filters) {
+  element("player").value = filters.player ?? "";
+  element("opponent").value = filters.opponent ?? "";
+  element("color").value = filters.color ?? "";
+  element("result").value = filters.result ?? "";
+  element("filter-since").value = filters.since ?? "";
+  element("filter-until").value = filters.until ?? "";
+  element("minimum-rating").value = filters.minimum_rating ?? "";
+  element("maximum-rating").value = filters.maximum_rating ?? "";
+  element("position").value = filters.position ?? "";
+}
+
+function renderDatabaseInfo(info) {
+  element("stat-games").textContent = Number(info.games).toLocaleString();
+  element("stat-positions").textContent = Number(info.positions).toLocaleString();
+  const results = info.results;
+  element("stat-results").textContent = results
+    ? `${Number(results.white_wins).toLocaleString()} / ${Number(results.draws).toLocaleString()} / ${Number(results.black_wins).toLocaleString()}`
+    : "—";
+  element("stat-storage").textContent = humanBytes(info.pgn_bytes);
+  element("stat-dates").textContent = dateRange(info);
+  const integrity = element("stat-integrity");
+  integrity.classList.remove("healthy", "unhealthy");
+  if (!info.integrity_checked) {
+    integrity.textContent = "Not checked";
+  } else if (info.integrity_issues.length) {
+    integrity.textContent = `${info.integrity_issues.length} issue(s)`;
+    integrity.classList.add("unhealthy");
+  } else {
+    integrity.textContent = "Verified";
+    integrity.classList.add("healthy");
+  }
+}
+
+function humanBytes(bytes) {
+  if (bytes === undefined || bytes === null) return "—";
+  const value = Number(bytes);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(value / 1024 ** 3).toFixed(1)} GiB`;
+}
+
 function dateRange(info) {
   if (!info.earliest_date || !info.latest_date) return "No dates";
   return info.earliest_date === info.latest_date ? formatDate(info.earliest_date) : `${formatDate(info.earliest_date)} – ${formatDate(info.latest_date)}`;
@@ -441,6 +590,14 @@ async function mockInvoke(command) {
   if (command === "install_update" || command === "restart_app") return null;
   if (command === "get_game") return mockDetail();
   if (command === "list_games") return mockSession().page;
+  if (command === "list_databases") {
+    const session = mockSession();
+    return [{ path: session.path, managed_user: session.managed_user, exists: true, active: true }];
+  }
+  if (command === "check_database") {
+    return { ...mockSession().info, integrity_checked: true, integrity_issues: [] };
+  }
+  if (command === "export_games") return { path: "/tmp/games-export.pgn", games: 3, bytes: 2048 };
   return mockSession();
 }
 
@@ -453,7 +610,16 @@ function mockSession() {
   return {
     path: "/Users/diego/Library/Application Support/Gambit/collections/diegoglozano/diegoglozano.gambit",
     managed_user: "diegoglozano",
-    info: { games: 1729, positions: 110859, earliest_date: 20250626, latest_date: 20260904 },
+    info: {
+      games: 1729,
+      positions: 110859,
+      pgn_bytes: 1311263,
+      earliest_date: 20250626,
+      latest_date: 20260904,
+      results: { white_wins: 813, black_wins: 829, draws: 87, unfinished: 0 },
+      integrity_checked: false,
+      integrity_issues: [],
+    },
     page: { total: 1729, offset: 0, limit: 100, games },
   };
 }

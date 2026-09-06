@@ -31,7 +31,7 @@
           <span class="eyebrow">Active database</span>
           <strong id="database-name">—</strong>
           <span id="database-path">—</span>
-          <button id="change-database" class="text-button" type="button">Change database</button>
+          <button id="change-database" class="text-button" type="button">Libraries</button>
         </div>
 
         <footer>
@@ -69,6 +69,14 @@
                 Start date <span>optional</span>
                 <input id="since" name="since" inputmode="numeric" placeholder="YYYY-MM-DD" />
               </label>
+              <details class="token-details">
+                <summary>Speed up with a Lichess token</summary>
+                <label>
+                  Personal access token <span>optional</span>
+                  <input id="lichess-token" name="token" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="lip_…" />
+                </label>
+                <small>Authenticated exports are faster. The token is used for this sync only and is never saved.</small>
+              </details>
               <button class="primary-button" type="submit">
                 <span>Build my library</span><span aria-hidden="true">→</span>
               </button>
@@ -79,9 +87,9 @@
               <div>
                 <span class="eyebrow">From your computer</span>
                 <h2>Import PGN</h2>
-                <p>Choose a <code>.pgn</code> or <code>.pgn.zst</code> file and save a new database.</p>
+                <p>Choose one or more <code>.pgn</code> or <code>.pgn.zst</code> files and save a new database.</p>
               </div>
-              <span class="secondary-action">Choose a PGN file <span aria-hidden="true">→</span></span>
+              <span class="secondary-action">Choose PGN files <span aria-hidden="true">→</span></span>
             </button>
 
             <button class="setup-card secondary" id="open-database" type="button">
@@ -103,21 +111,39 @@
               <h1 id="library-title">Your games</h1>
             </div>
             <div class="workspace-actions">
-              <button class="sync-button" id="import-pgn-workspace" type="button">＋ Import PGN</button>
+              <button class="sync-button" id="import-pgn-workspace" type="button">＋ New database</button>
+              <button class="sync-button" id="update-database" type="button">＋ Add / update PGN</button>
               <button class="sync-button" id="sync-again" type="button" hidden>↻ Sync now</button>
-              <form class="player-filter" id="player-filter">
-                <label for="player">Player</label>
-                <input id="player" name="player" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="All players" />
-                <button type="submit">Filter</button>
-              </form>
             </div>
           </header>
+
+          <details class="query-panel" open>
+            <summary>Search and filter games</summary>
+            <form id="game-filters">
+              <label>Player<input id="player" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Any player" /></label>
+              <label>Opponent<input id="opponent" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Any opponent" /></label>
+              <label>Color<select id="color"><option value="">Any</option><option value="white">White</option><option value="black">Black</option></select></label>
+              <label>Result<select id="result"><option value="">Any</option><option value="win">Win</option><option value="loss">Loss</option><option value="draw">Draw</option><option value="unfinished">Unfinished</option></select></label>
+              <label>From<input id="filter-since" type="date" /></label>
+              <label>To<input id="filter-until" type="date" /></label>
+              <label>Minimum rating<input id="minimum-rating" type="number" min="0" inputmode="numeric" placeholder="Any" /></label>
+              <label>Maximum rating<input id="maximum-rating" type="number" min="0" inputmode="numeric" placeholder="Any" /></label>
+              <label class="fen-filter">Position FEN<input id="position" autocomplete="off" spellcheck="false" placeholder="Paste a complete six-field FEN" /></label>
+              <div class="filter-actions">
+                <button type="button" id="clear-filters">Clear</button>
+                <button type="button" id="export-games">Export PGN</button>
+                <button class="apply-filter" type="submit">Apply filters</button>
+              </div>
+            </form>
+          </details>
 
           <div class="stats-row" aria-label="Database summary">
             <article><span>Games</span><strong id="stat-games">—</strong></article>
             <article><span>Positions</span><strong id="stat-positions">—</strong></article>
+            <article><span>Results W / D / B</span><strong id="stat-results">—</strong></article>
+            <article><span>Stored PGN</span><strong id="stat-storage">—</strong></article>
             <article><span>Date range</span><strong id="stat-dates">—</strong></article>
-            <article><span>Integrity</span><strong class="healthy">Ready</strong></article>
+            <article class="integrity-stat"><span>Integrity</span><strong id="stat-integrity">Not checked</strong><button id="verify-database" type="button">Verify</button></article>
           </div>
 
           <div class="library-layout">
@@ -194,6 +220,15 @@
       <div class="dialog-actions">
         <button id="dismiss-update" type="button">Not now</button>
         <button id="install-update" class="primary-button" type="button">Update and restart</button>
+      </div>
+    </dialog>
+    <dialog class="library-dialog" id="library-dialog">
+      <span class="eyebrow">Databases</span>
+      <h2>Your libraries</h2>
+      <div id="library-list" class="library-list"></div>
+      <div class="dialog-actions">
+        <button id="open-another-database" type="button">Open another…</button>
+        <button id="close-libraries" class="primary-button" type="button">Done</button>
       </div>
     </dialog>
     <script type="module" src="./main.js"></script>
