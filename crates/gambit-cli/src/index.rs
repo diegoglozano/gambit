@@ -387,6 +387,47 @@ where
     builder.finish()
 }
 
+/// Adds new files and replaces changed files in an existing Gambit database.
+pub fn update_database_from_files<I, P>(
+    paths: I,
+    destination: &Path,
+) -> Result<IndexSummary, IndexError>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let mut updater = Updater::open(destination)?;
+    for path in paths {
+        let path = path.as_ref();
+        let source = path.to_string_lossy().into_owned();
+        let fingerprint = fingerprint(open_index_file(path, &source)?, &source)?;
+        if updater.prepare(&source, &fingerprint)? == UpdateAction::Write {
+            updater.add(open_index_file(path, &source)?, &source, &fingerprint)?;
+        }
+    }
+    updater.finish()
+}
+
+fn open_index_file(path: &Path, source: &str) -> Result<Box<dyn Read>, IndexError> {
+    let file = File::open(path).map_err(|error| IndexError::Io {
+        context: format!("failed to open {source}"),
+        error,
+    })?;
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zst"))
+    {
+        let decoder = zstd::stream::read::Decoder::new(file).map_err(|error| IndexError::Io {
+            context: format!("failed to initialize zstd decoder for {source}"),
+            error,
+        })?;
+        Ok(Box::new(decoder))
+    } else {
+        Ok(Box::new(file))
+    }
+}
+
 impl Builder {
     pub fn create(destination: &Path) -> Result<Self, IndexError> {
         if destination.exists() {
@@ -1466,15 +1507,28 @@ pub fn list_games(
     offset: u64,
     limit: u32,
 ) -> Result<GamePage, LibraryError> {
-    let connection = open_library_database(path)?;
-    let player_key = player.map(|value| Value::Blob(ascii_fold(value.as_bytes())));
-    let predicate = if player_key.is_some() {
-        " WHERE g.white_key = ?1 OR g.black_key = ?1"
-    } else {
-        ""
+    let options = QueryOptions {
+        player: player.map(str::to_owned),
+        ..QueryOptions::default()
     };
-    let values = player_key.into_iter().collect::<Vec<_>>();
-    let count_sql = format!("SELECT COUNT(*) FROM games g{predicate}");
+    search_games(path, &options, offset, limit)
+}
+
+/// Returns a newest-first page using the same indexed filters as Query.
+pub fn search_games(
+    path: &Path,
+    options: &QueryOptions,
+    offset: u64,
+    limit: u32,
+) -> Result<GamePage, LibraryError> {
+    let connection = open_library_database(path)?;
+    let (from, predicates, values, position_ply) = build_query(options);
+    let where_clause = if predicates.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", predicates.join(" AND "))
+    };
+    let count_sql = format!("SELECT COUNT(*) {from}{where_clause}");
     let total: i64 = connection
         .query_row(&count_sql, params_from_iter(values.iter()), |row| {
             row.get(0)
@@ -1483,9 +1537,8 @@ pub fn list_games(
 
     let limit = limit.clamp(1, 200);
     let sql = format!(
-        "SELECT {QUERY_COLUMNS}, NULL AS position_ply
-         FROM games g JOIN sources s ON s.id = g.source_id
-         {predicate}
+        "SELECT {QUERY_COLUMNS}, {position_ply} AS position_ply
+         {from}{where_clause}
          ORDER BY g.played_on IS NULL, g.played_on DESC, g.id DESC
          LIMIT ?{} OFFSET ?{}",
         values.len() + 1,
@@ -1848,6 +1901,16 @@ mod tests {
         assert_eq!(summary.sources, 2);
         assert_eq!(summary.games, 2);
         assert_eq!(info(&database, true).unwrap().games, 2);
+
+        let added = root.join("added.pgn");
+        fs::write(&plain, b"1. c4 *\n").unwrap();
+        fs::write(&added, b"1. Nf3 *\n").unwrap();
+        let update = update_database_from_files([&plain, &compressed, &added], &database).unwrap();
+        assert_eq!(update.sources, 2);
+        assert_eq!(update.replaced_sources, 1);
+        assert_eq!(update.skipped_sources, 1);
+        assert_eq!(update.games, 2);
+        assert_eq!(info(&database, true).unwrap().games, 3);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1875,6 +1938,31 @@ mod tests {
         assert_eq!(detail.moves[0].board.as_bytes()[28], b'P');
         assert!(detail.pgn.contains("Friendly"));
         assert_eq!(detail.initial_board.as_deref().map(str::len), Some(64));
+
+        let filtered = search_games(
+            &path,
+            &QueryOptions {
+                player: Some(String::from("diegoglozano")),
+                opponent: Some(String::from("opponent")),
+                color: Some(PlayerColor::White),
+                result: Some(ResultFilter::Win),
+                since: Some(20_260_901),
+                until: Some(20_260_930),
+                minimum_rating: Some(1200),
+                maximum_rating: Some(1300),
+                position: Some(
+                    Position::from_fen(
+                        b"rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+                    )
+                    .unwrap(),
+                ),
+            },
+            0,
+            50,
+        )
+        .unwrap();
+        assert_eq!(filtered.total, 1);
+        assert_eq!(filtered.games[0].id, page.games[0].id);
 
         fs::remove_file(path).unwrap();
     }

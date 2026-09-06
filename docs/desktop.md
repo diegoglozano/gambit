@@ -26,18 +26,27 @@ The first vertical slice supports three ways to enter the library:
   the PGNs and resulting database in the operating system's application-data
   directory. During the first import, live progress reports the number of games
   downloaded and the latest history date reached before local indexing begins.
-  **Sync now** later fetches and indexes only new or changed games.
-- Choose a `.pgn` or `.pgn.zst` file, then save and immediately open
-  a new `.gambit` database.
+  **Sync now** later fetches and indexes only new or changed games. For a faster
+  initial export, expand **Speed up with a Lichess token** and provide a
+  [personal access token](https://lichess.org/account/oauth/token). The token is
+  sent directly to Lichess for that sync and is not stored.
+- Choose one or more `.pgn` or `.pgn.zst` files, then save and immediately open
+  a new `.gambit` database. From an open library, **Add / update PGN** adds new
+  sources, skips unchanged sources, and replaces games from changed sources.
 - Choose an existing `.gambit` file from the native file picker.
 
-Once loaded, the app shows corpus totals and date coverage, pages through games
-newest-first, filters by an exact player name case-insensitively, and replays a
-selected standard-chess mainline. The board automatically faces the selected
-player and can be flipped manually. Arrow keys and board controls move through
-the game without moving the surrounding window. Raw PGN remains available for
-inspection. Gambit remembers the last library and reopens it automatically on
-the next launch.
+Once loaded, the app shows corpus, result, storage, and date totals; can verify
+database integrity; and pages through games newest-first. Search uses the same
+indexed filters as the CLI: player, opponent, player color, player-relative
+result, date bounds, player rating bounds, and a complete six-field position
+FEN. Matching games can be exported as PGN.
+
+The app replays a selected standard-chess mainline. The board automatically
+faces the selected player and can be flipped manually. Arrow keys and board
+controls move through the game without moving the surrounding window. Raw PGN
+remains available for inspection. Gambit remembers up to 12 recent libraries;
+**Libraries** switches among them, and the active library reopens automatically
+on the next launch.
 
 ## Updates
 
@@ -54,11 +63,12 @@ manually once, and later releases can update from inside the app.
 
 ## Privacy
 
-The app reads databases locally and does not upload them to Gambit. Public game
-sync communicates directly with the Lichess API. Authentication and OS
-credential storage are intentionally deferred until the public-game experience
-is stable. To resume the previous library, Gambit stores its local database path
-and, when applicable, public Lichess username in the application-data directory.
+The app reads databases locally and does not upload them to Gambit. Game sync
+communicates directly with the Lichess API. An optional personal access token is
+kept only for the duration of one sync; Gambit does not write it to disk or to
+the saved session. To resume and switch libraries, Gambit stores recent local
+database paths and, when applicable, public Lichess usernames in the
+application-data directory.
 
 ## Architecture
 

@@ -13,11 +13,12 @@ a dependency-free ingestion layer and a compact semantic chess core.
 Gambit Desktop gives chess players a private graphical library without
 requiring a terminal or uploading games to a Gambit service. Enter a public
 Lichess username to create and incrementally maintain a local collection,
-import a PGN corpus into a new `.gambit` database, or open an existing database.
-The app includes database summaries, paged player filtering, a game browser,
-and an interactive mainline board. After the first updater-enabled version is
-installed, Gambit checks for signed releases and asks before installing and
-restarting into an update.
+import one or more PGN corpora into a new or existing `.gambit` database, or
+switch among recently opened databases. The app includes database summaries
+and verification, the CLI's indexed game filters, filtered PGN export, a game
+browser, and an interactive mainline board. After the first updater-enabled
+version is installed, Gambit checks for signed releases and asks before
+installing and restarting into an update.
 
 Versioned releases include a universal macOS DMG for Apple Silicon and Intel:
 
