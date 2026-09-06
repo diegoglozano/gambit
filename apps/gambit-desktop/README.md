@@ -28,7 +28,7 @@ manually.
 Build a universal macOS DMG from the repository root with:
 
 ```console
-./scripts/build-desktop-dmg.sh 0.12.0
+./scripts/build-desktop-dmg.sh 0.13.0
 ```
 
 Release builds require `TAURI_SIGNING_PRIVATE_KEY` and

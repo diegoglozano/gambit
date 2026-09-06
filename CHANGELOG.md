@@ -4,6 +4,8 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-06
+
 ### Added
 
 - Desktop filters now update the game list automatically, debounce typed input,
@@ -195,7 +197,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/diegoglozano/gambit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/diegoglozano/gambit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/diegoglozano/gambit/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/diegoglozano/gambit/compare/v0.9.0...v0.10.0
