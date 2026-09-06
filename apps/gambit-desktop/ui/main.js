@@ -1,4 +1,13 @@
+import {
+  boardCoordinates,
+  containedScrollDelta,
+  parseSyncDate,
+  perspectivePlayerIsBlack,
+  timelineProgress,
+} from "./view-model.mjs";
+
 const nativeInvoke = window.__TAURI__?.core?.invoke;
+const nativeListen = window.__TAURI__?.event?.listen;
 
 const pieces = {
   P: "♙", N: "♘", B: "♗", R: "♖", Q: "♕", K: "♔",
@@ -11,6 +20,9 @@ const state = {
   ply: 0,
   player: null,
   managedUser: null,
+  boardFlipped: false,
+  syncTimelineStart: null,
+  syncTimelineEnd: null,
   update: null,
   updateCheckRunning: false,
 };
@@ -22,11 +34,11 @@ element("sync-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = element("username").value.trim();
   const since = element("since").value.trim() || null;
-  await withBusy("Building your library…", "Gambit is fetching and indexing your games locally.", async () => {
+  await withBusy("Building your library…", "Lichess streams your game history before Gambit indexes it locally.", async () => {
     const session = await invoke("sync_user", { input: { username, since } });
     await showSession(session);
     showToast(`${session.info.games.toLocaleString()} games are ready.`);
-  });
+  }, { sync: true, since });
 });
 
 element("open-database").addEventListener("click", openDatabase);
@@ -47,7 +59,7 @@ element("sync-again").addEventListener("click", async () => {
     const session = await invoke("sync_user", { input: { username: state.managedUser, since: null } });
     await showSession(session);
     showToast("Your library is up to date.");
-  });
+  }, { sync: true });
 });
 element("previous-page").addEventListener("click", () => loadPage(Math.max(0, state.session.page.offset - state.session.page.limit)));
 element("next-page").addEventListener("click", () => loadPage(state.session.page.offset + state.session.page.limit));
@@ -55,6 +67,10 @@ element("first-move").addEventListener("click", () => setPly(0));
 element("previous-move").addEventListener("click", () => setPly(state.ply - 1));
 element("next-move").addEventListener("click", () => setPly(state.ply + 1));
 element("last-move").addEventListener("click", () => setPly(state.detail?.moves.length ?? 0));
+element("flip-board").addEventListener("click", () => {
+  state.boardFlipped = !state.boardFlipped;
+  setPly(state.ply, false);
+});
 element("lichess-link").addEventListener("click", async (event) => {
   event.preventDefault();
   const url = element("lichess-link").href;
@@ -62,7 +78,9 @@ element("lichess-link").addEventListener("click", async (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.target instanceof HTMLInputElement) return;
+  if (!state.detail || event.metaKey || event.ctrlKey || event.altKey || document.querySelector("dialog[open]")) return;
+  if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") event.preventDefault();
   if (event.key === "ArrowLeft") setPly(state.ply - 1);
   if (event.key === "ArrowRight") setPly(state.ply + 1);
 });
@@ -185,6 +203,7 @@ async function selectGame(id) {
     const detail = await invoke("get_game", { id });
     state.detail = detail;
     state.ply = 0;
+    state.boardFlipped = perspectivePlayerIsBlack(state.player, state.managedUser, detail.summary.black);
     document.querySelectorAll(".game-row").forEach((row) => row.classList.toggle("active", Number(row.dataset.gameId) === id));
     renderGame(detail);
   } catch (error) {
@@ -209,7 +228,7 @@ function renderGame(detail) {
     link.hidden = true;
   }
   renderMoves(detail.moves);
-  setPly(0);
+  setPly(0, false);
 }
 
 function renderMoves(moves) {
@@ -242,7 +261,7 @@ function moveButton(move) {
   return button;
 }
 
-function setPly(requested) {
+function setPly(requested, scrollMove = true) {
   if (!state.detail) return;
   const maximum = state.detail.moves.length;
   state.ply = Math.max(0, Math.min(requested, maximum));
@@ -255,7 +274,7 @@ function setPly(requested) {
   element("previous-move").disabled = state.ply === 0;
   element("next-move").disabled = state.ply === maximum;
   element("last-move").disabled = state.ply === maximum;
-  document.querySelector(`.move-button[data-ply="${state.ply}"]`)?.scrollIntoView({ block: "nearest" });
+  if (scrollMove) scrollMoveIntoView(state.ply);
 }
 
 function renderBoard(board, lastMove) {
@@ -265,25 +284,72 @@ function renderBoard(board, lastMove) {
     target.textContent = "Board unavailable";
     return;
   }
-  for (let rank = 7; rank >= 0; rank -= 1) {
-    for (let file = 0; file < 8; file += 1) {
-      const squareName = `${String.fromCharCode(97 + file)}${rank + 1}`;
-      const square = document.createElement("div");
-      square.className = `square ${(file + rank) % 2 ? "light" : "dark"}`;
-      if (lastMove && (lastMove.from === squareName || lastMove.to === squareName)) square.classList.add("last");
-      const symbol = pieces[board[rank * 8 + file]];
-      if (symbol) square.append(text(symbol, "piece"));
-      if (file === 0) square.append(text(String(rank + 1), "coordinate rank"));
-      if (rank === 0) square.append(text(String.fromCharCode(97 + file), "coordinate file"));
-      target.append(square);
-    }
+  target.setAttribute("aria-label", `Chess position, ${state.boardFlipped ? "Black" : "White"} perspective`);
+  for (const { rank, file, row, column } of boardCoordinates(state.boardFlipped)) {
+    const squareName = `${String.fromCharCode(97 + file)}${rank + 1}`;
+    const square = document.createElement("div");
+    square.className = `square ${(file + rank) % 2 ? "light" : "dark"}`;
+    if (lastMove && (lastMove.from === squareName || lastMove.to === squareName)) square.classList.add("last");
+    const symbol = pieces[board[rank * 8 + file]];
+    if (symbol) square.append(text(symbol, "piece"));
+    if (column === 0) square.append(text(String(rank + 1), "coordinate rank"));
+    if (row === 7) square.append(text(String.fromCharCode(97 + file), "coordinate file"));
+    target.append(square);
   }
 }
 
-async function withBusy(title, copy, action) {
+function scrollMoveIntoView(ply) {
+  if (ply === 0) return;
+  const list = element("move-list");
+  const button = list.querySelector(`.move-button[data-ply="${ply}"]`);
+  if (!button) return;
+  const listBounds = list.getBoundingClientRect();
+  const buttonBounds = button.getBoundingClientRect();
+  list.scrollTop += containedScrollDelta(listBounds, buttonBounds);
+}
+
+function beginSyncProgress(since) {
+  state.syncTimelineStart = parseSyncDate(since);
+  state.syncTimelineEnd = Date.now();
+  const progress = element("sync-progress-bar");
+  progress.removeAttribute("value");
+  element("sync-progress-copy").textContent = "Connecting to Lichess…";
+  element("sync-progress").hidden = false;
+}
+
+function updateSyncProgress(progress) {
+  if (element("sync-progress").hidden) return;
+  const bar = element("sync-progress-bar");
+  const copy = element("sync-progress-copy");
+  if (progress.phase === "connecting") {
+    bar.removeAttribute("value");
+    copy.textContent = "Connecting to Lichess…";
+    return;
+  }
+  if (progress.phase === "indexing") {
+    bar.value = 100;
+    copy.textContent = `Downloaded ${gameCount(progress.games)}. Building the local index…`;
+    return;
+  }
+  const reached = parseSyncDate(progress.date);
+  if (reached !== null && state.syncTimelineStart === null) state.syncTimelineStart = reached;
+  const percentage = timelineProgress(state.syncTimelineStart, state.syncTimelineEnd, reached);
+  if (percentage === null) bar.removeAttribute("value");
+  else bar.value = percentage;
+  const date = progress.date ? ` · reached ${progress.date.replaceAll(".", "-")}` : "";
+  copy.textContent = `Downloaded ${gameCount(progress.games)}${date}`;
+}
+
+function gameCount(games) {
+  return `${Number(games).toLocaleString()} ${games === 1 ? "game" : "games"}`;
+}
+
+async function withBusy(title, copy, action, options = {}) {
   const overlay = element("busy-overlay");
   element("busy-title").textContent = title;
   element("busy-copy").textContent = copy;
+  if (options.sync) beginSyncProgress(options.since ?? null);
+  else element("sync-progress").hidden = true;
   overlay.hidden = false;
   try {
     await action();
@@ -291,6 +357,7 @@ async function withBusy(title, copy, action) {
     showToast(String(error), true);
   } finally {
     overlay.hidden = true;
+    element("sync-progress").hidden = true;
   }
 }
 
@@ -349,6 +416,13 @@ async function restorePreviousSession() {
 }
 
 async function initializeNativeApp() {
+  if (nativeListen) {
+    try {
+      await nativeListen("sync-progress", (event) => updateSyncProgress(event.payload));
+    } catch {
+      // Sync still has its indeterminate spinner if native progress events are unavailable.
+    }
+  }
   try {
     element("app-version").textContent = await invoke("app_version");
   } catch {

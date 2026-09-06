@@ -73,7 +73,9 @@ jobs:
           rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
           rustup default 1.93.1
       - name: Check frontend JavaScript
-        run: node --check apps/gambit-desktop/ui/main.js
+        run: |
+          node --check --input-type=module < apps/gambit-desktop/ui/main.js
+          node --test apps/gambit-desktop/ui/view-model.test.mjs
       - name: Check desktop formatting
         run: cargo fmt --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml -- --check
       - name: Lint desktop backend

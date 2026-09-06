@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -64,6 +65,13 @@ pub struct SyncReport {
     pub index: IndexSummary,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct SyncProgress {
+    pub phase: &'static str,
+    pub games: u64,
+    pub date: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum CollectionError {
     InvalidRequest(String),
@@ -100,6 +108,14 @@ impl From<index::IndexError> for CollectionError {
 
 /// Synchronizes one Lichess collection and transactionally maintains its database.
 pub fn sync_lichess(request: &SyncRequest) -> Result<SyncReport, CollectionError> {
+    sync_lichess_with_progress(request, |_| {})
+}
+
+/// Synchronizes one Lichess collection while reporting streaming progress.
+pub fn sync_lichess_with_progress<F: FnMut(SyncProgress)>(
+    request: &SyncRequest,
+    mut on_progress: F,
+) -> Result<SyncReport, CollectionError> {
     if request.username.trim().is_empty() {
         return Err(CollectionError::InvalidRequest(String::from(
             "Lichess username cannot be empty",
@@ -131,10 +147,16 @@ pub fn sync_lichess(request: &SyncRequest) -> Result<SyncReport, CollectionError
         include_ongoing: true,
         oldest_first: true,
     };
+    on_progress(SyncProgress {
+        phase: "connecting",
+        games: 0,
+        date: None,
+    });
     let mut response = lichess::user_games(&api_request, request.token.as_deref())
         .map_err(CollectionError::Lichess)?;
     sync::start(&plan)?;
-    let mut summary = sync::ingest(response.body_mut().as_reader(), &plan, None)?;
+    let (mut summary, latest_date) =
+        ingest_user_stream(response.body_mut().as_reader(), &plan, &mut on_progress)?;
 
     let refreshed_unfinished = plan.unfinished_game_ids.len();
     for game_id in &plan.unfinished_game_ids {
@@ -158,6 +180,11 @@ pub fn sync_lichess(request: &SyncRequest) -> Result<SyncReport, CollectionError
 
     let statuses = std::mem::take(&mut summary.statuses);
     let unfinished = sync::finish(&plan, statuses)?;
+    on_progress(SyncProgress {
+        phase: "indexing",
+        games: summary.received,
+        date: latest_date,
+    });
     let (index_mode, index) = maintain_database(&request.destination, &request.database)?;
     Ok(SyncReport {
         username: request.username.trim().to_owned(),
@@ -173,6 +200,32 @@ pub fn sync_lichess(request: &SyncRequest) -> Result<SyncReport, CollectionError
         index_mode,
         index,
     })
+}
+
+fn ingest_user_stream<R: Read, F: FnMut(SyncProgress)>(
+    reader: R,
+    plan: &sync::SyncPlan,
+    on_progress: &mut F,
+) -> Result<(sync::IngestSummary, Option<String>), CollectionError> {
+    let mut latest_date = None;
+    let summary = sync::ingest_with_progress(reader, plan, None, |games, date| {
+        if let Some(date) = date {
+            latest_date = Some(date.to_owned());
+        }
+        if games == 1 || games % 25 == 0 {
+            on_progress(SyncProgress {
+                phase: "downloading",
+                games,
+                date: latest_date.clone(),
+            });
+        }
+    })?;
+    on_progress(SyncProgress {
+        phase: "downloading",
+        games: summary.received,
+        date: latest_date.clone(),
+    });
+    Ok((summary, latest_date))
 }
 
 /// Builds or incrementally updates a database from a managed sync destination.

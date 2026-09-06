@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use gambit::collection::{self, SyncRequest};
 use gambit::index::{self, DatabaseInfo, GameDetail, GamePage};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -159,10 +159,15 @@ async fn sync_user(
     )
     .map_err(|error| error.to_string())?;
     let database = request.database.clone();
-    tauri::async_runtime::spawn_blocking(move || collection::sync_lichess(&request))
-        .await
-        .map_err(|error| format!("sync task failed: {error}"))?
-        .map_err(|error| error.to_string())?;
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        collection::sync_lichess_with_progress(&request, |progress| {
+            let _ = progress_app.emit("sync-progress", progress);
+        })
+    })
+    .await
+    .map_err(|error| format!("sync task failed: {error}"))?
+    .map_err(|error| error.to_string())?;
     let session = load_session(&database, Some(&username))?;
     remember_session(&app, &database, Some(&username))?;
     set_database(&state, database)?;

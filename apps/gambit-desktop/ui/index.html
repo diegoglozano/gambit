@@ -63,7 +63,7 @@
               </div>
               <label>
                 Lichess username
-                <input id="username" name="username" autocomplete="username" placeholder="diegoglozano" required />
+                <input id="username" name="username" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="diegoglozano" required />
               </label>
               <label>
                 Start date <span>optional</span>
@@ -107,7 +107,7 @@
               <button class="sync-button" id="sync-again" type="button" hidden>↻ Sync now</button>
               <form class="player-filter" id="player-filter">
                 <label for="player">Player</label>
-                <input id="player" name="player" placeholder="All players" />
+                <input id="player" name="player" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="All players" />
                 <button type="submit">Filter</button>
               </form>
             </div>
@@ -152,6 +152,7 @@
                 <span id="move-position">Start</span>
                 <button id="next-move" type="button" aria-label="Next move">→</button>
                 <button id="last-move" type="button" aria-label="Final position">→|</button>
+                <button id="flip-board" type="button" aria-label="Flip board" title="Flip board">⇅ Flip</button>
               </div>
             </section>
 
@@ -181,6 +182,10 @@
       <div class="spinner"></div>
       <strong id="busy-title">Building your library…</strong>
       <span id="busy-copy">Gambit is fetching and indexing your games locally.</span>
+      <div class="sync-progress" id="sync-progress" hidden>
+        <progress id="sync-progress-bar" max="100"></progress>
+        <span id="sync-progress-copy" aria-live="polite">Connecting to Lichess…</span>
+      </div>
     </div>
     <dialog class="update-dialog" id="update-dialog">
       <span class="eyebrow">Update available</span>
