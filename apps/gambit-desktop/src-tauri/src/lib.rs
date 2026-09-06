@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use gambit::collection::{self, SyncRequest};
-use gambit::index::{self, DatabaseInfo, GameDetail, GamePage};
+use gambit::index::{
+    self, DatabaseInfo, ExploreReport, GameDetail, GameOrder, GamePage, GameSort, SortDirection,
+};
 use gambit::query::{self, PlayerColor, QueryFormat, QueryOptions, ResultFilter};
 use gambit_chess::Position;
 use serde::{Deserialize, Serialize};
@@ -299,12 +301,30 @@ async fn sync_user(
 fn list_games(
     state: State<'_, AppState>,
     filters: GameFilters,
+    sort: Option<String>,
+    direction: Option<String>,
     offset: u64,
     limit: u32,
 ) -> Result<GamePage, String> {
     let database = database(&state)?;
     let options = query_options(&filters)?;
-    index::search_games(&database, &options, offset, limit).map_err(|error| error.to_string())
+    let order = game_order(sort.as_deref(), direction.as_deref())?;
+    index::search_games_ordered(&database, &options, offset, limit, order)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn explore_database(
+    state: State<'_, AppState>,
+    player: Option<String>,
+) -> Result<ExploreReport, String> {
+    let database = database(&state)?;
+    let player = filter_text(player.as_deref());
+    tauri::async_runtime::spawn_blocking(move || index::explore(&database, player.as_deref()))
+        .await
+        .map_err(|error| format!("explore task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -632,6 +652,22 @@ fn query_options(filters: &GameFilters) -> Result<QueryOptions, String> {
     })
 }
 
+fn game_order(sort: Option<&str>, direction: Option<&str>) -> Result<GameOrder, String> {
+    let sort = match sort.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("date") => GameSort::Date,
+        Some("rating") => GameSort::Rating,
+        Some("result") => GameSort::Result,
+        Some("player") => GameSort::Player,
+        Some(_) => return Err(String::from("sort must be date, rating, result, or player")),
+    };
+    let direction = match direction.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("desc") => SortDirection::Descending,
+        Some("asc") => SortDirection::Ascending,
+        Some(_) => return Err(String::from("direction must be asc or desc")),
+    };
+    Ok(GameOrder { sort, direction })
+}
+
 fn filter_text(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -757,6 +793,7 @@ pub fn run() {
             restore_session,
             sync_user,
             list_games,
+            explore_database,
             check_database,
             export_games,
             get_game,
@@ -901,5 +938,19 @@ mod tests {
                 .unwrap_err()
                 .contains("must not be later")
         );
+    }
+
+    #[test]
+    fn converts_desktop_sort_controls_to_library_order() {
+        assert_eq!(
+            game_order(Some("rating"), Some("asc")).unwrap(),
+            GameOrder {
+                sort: GameSort::Rating,
+                direction: SortDirection::Ascending,
+            }
+        );
+        assert_eq!(game_order(None, None).unwrap(), GameOrder::default());
+        assert!(game_order(Some("opening"), None).is_err());
+        assert!(game_order(None, Some("sideways")).is_err());
     }
 }

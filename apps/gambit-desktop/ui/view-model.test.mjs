@@ -4,9 +4,12 @@ import test from "node:test";
 import {
   boardCoordinates,
   containedScrollDelta,
+  createRequestGate,
+  formatExploreMonth,
   parseSyncDate,
   perspectivePlayerIsBlack,
   timelineProgress,
+  validateLiveFilters,
 } from "./view-model.mjs";
 
 test("board coordinates reverse ranks and files for Black", () => {
@@ -39,4 +42,28 @@ test("history progress follows dates but remains below completion while download
   assert.ok(timelineProgress(start, end, middle) < 51);
   assert.equal(timelineProgress(start, end, end), 98);
   assert.equal(timelineProgress(null, end, middle), null);
+});
+
+test("only the latest asynchronous request remains current", () => {
+  const gate = createRequestGate();
+  const first = gate.next();
+  const second = gate.next();
+  assert.equal(gate.isCurrent(first), false);
+  assert.equal(gate.isCurrent(second), true);
+  gate.invalidate();
+  assert.equal(gate.isCurrent(second), false);
+});
+
+test("live filters wait for complete dependent and range values", () => {
+  assert.match(validateLiveFilters({ opponent: "Other" }), /Choose a player/);
+  assert.match(validateLiveFilters({ position: "8/8/8/8/8/8/8/8 w" }), /six-field FEN/);
+  assert.match(validateLiveFilters({ since: "2026-09-02", until: "2026-09-01" }), /start date/);
+  assert.match(validateLiveFilters({ player: "Alice", minimum_rating: "1500", maximum_rating: "1400" }), /minimum rating/);
+  assert.equal(validateLiveFilters({ player: "Alice", opponent: "Bob" }), null);
+  assert.equal(validateLiveFilters({ position: "8/8/8/8/8/8/8/8 w - - 0 1" }), null);
+});
+
+test("explore months use compact labels", () => {
+  assert.equal(formatExploreMonth(202609), "Sep ’26");
+  assert.equal(formatExploreMonth(0), "0");
 });

@@ -4,6 +4,16 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Desktop filters now update the game list automatically, debounce typed input,
+  validate incomplete or conflicting ranges inline, and prevent stale requests
+  from replacing newer results.
+- Added desktop game sorting by date, rating, result, or White player in either
+  direction.
+- Added an Explore view for common opening lines, results over time, frequent
+  opponents, and recurring positions, with representative-game drill-downs.
+
 ## [0.12.0] - 2026-09-06
 
 ### Added

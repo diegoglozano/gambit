@@ -1,9 +1,12 @@
 import {
   boardCoordinates,
   containedScrollDelta,
+  createRequestGate,
+  formatExploreMonth,
   parseSyncDate,
   perspectivePlayerIsBlack,
   timelineProgress,
+  validateLiveFilters,
 } from "./view-model.mjs";
 
 const nativeInvoke = window.__TAURI__?.core?.invoke;
@@ -26,10 +29,19 @@ const state = {
   syncTimelineEnd: null,
   update: null,
   updateCheckRunning: false,
+  sort: "date",
+  sortDirection: "desc",
+  explore: null,
+  explorePlayer: null,
 };
 
 const element = (id) => document.getElementById(id);
 const invoke = nativeInvoke ?? mockInvoke;
+const pageRequests = createRequestGate();
+const detailRequests = createRequestGate();
+const exploreRequests = createRequestGate();
+const FILTER_DEBOUNCE_MS = 250;
+let filterTimer = null;
 
 element("sync-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -61,20 +73,30 @@ element("open-another-database").addEventListener("click", async () => {
 element("check-updates").addEventListener("click", () => checkForUpdates(false));
 element("dismiss-update").addEventListener("click", () => element("update-dialog").close());
 element("install-update").addEventListener("click", installAvailableUpdate);
-element("game-filters").addEventListener("submit", async (event) => {
+element("nav-library").addEventListener("click", () => showView("library"));
+element("nav-explore").addEventListener("click", () => showView("explore"));
+element("game-filters").addEventListener("submit", (event) => {
   event.preventDefault();
-  state.filters = readFilters();
-  state.player = state.filters.player;
-  await loadPage(0);
+  queueLiveFilters(0);
 });
-element("clear-filters").addEventListener("click", async () => {
+element("game-filters").querySelectorAll("input, select").forEach((field) => {
+  const eventName = field.tagName === "SELECT" || field.type === "date" ? "change" : "input";
+  field.addEventListener(eventName, () => queueLiveFilters(eventName === "input" ? FILTER_DEBOUNCE_MS : 0));
+});
+element("clear-filters").addEventListener("click", () => {
   setFilterForm({});
-  state.filters = {};
-  state.player = null;
-  await loadPage(0);
+  queueLiveFilters(0);
 });
 element("export-games").addEventListener("click", exportGames);
 element("verify-database").addEventListener("click", verifyDatabase);
+element("sort-games").addEventListener("change", () => {
+  state.sort = element("sort-games").value;
+  loadPage(0);
+});
+element("sort-direction").addEventListener("change", () => {
+  state.sortDirection = element("sort-direction").value;
+  loadPage(0);
+});
 element("sync-again").addEventListener("click", async () => {
   if (!state.managedUser) return;
   await withBusy("Syncing your latest games…", "Only new or changed Lichess games will be indexed.", async () => {
@@ -226,34 +248,68 @@ async function installAvailableUpdate() {
 
 async function showSession(session) {
   const player = session.managed_user ?? null;
+  window.clearTimeout(filterTimer);
+  filterTimer = null;
+  pageRequests.invalidate();
+  detailRequests.invalidate();
+  exploreRequests.invalidate();
   state.session = session;
   state.player = player;
   state.filters = player ? { player } : {};
   state.managedUser = player;
+  state.sort = "date";
+  state.sortDirection = "desc";
+  state.explore = null;
+  state.explorePlayer = null;
   state.detail = null;
   state.ply = 0;
   element("welcome-screen").hidden = true;
-  element("workspace").hidden = false;
   element("database-card").hidden = false;
+  element("nav-explore").disabled = false;
   element("database-name").textContent = basename(session.path);
   element("database-path").textContent = session.path;
   setFilterForm(state.filters);
+  element("sort-games").value = state.sort;
+  element("sort-direction").value = state.sortDirection;
+  setFilterStatus("Filters update automatically");
   element("sync-again").hidden = !player;
   element("library-title").textContent = player ? `${player}'s games` : "Your games";
   renderDatabaseInfo(session.info);
   renderPage(session.page);
+  showView("library");
   if (session.page.games.length) await selectGame(session.page.games[0].id);
 }
 
-async function loadPage(offset) {
+async function loadPage(offset, options = {}) {
   if (!state.session) return;
+  const request = pageRequests.next();
+  const selectedId = state.detail?.summary.id ?? null;
+  setFilterStatus("Updating…", "pending");
   try {
-    const page = await invoke("list_games", { filters: state.filters, offset, limit: state.session.page.limit });
+    const page = await invoke("list_games", {
+      filters: state.filters,
+      sort: state.sort,
+      direction: state.sortDirection,
+      offset,
+      limit: state.session.page.limit,
+    });
+    if (!pageRequests.isCurrent(request)) return;
     state.session.page = page;
     renderPage(page);
-    if (page.games.length) await selectGame(page.games[0].id);
+    setFilterStatus(`${gameCount(page.total)} matching`);
+    if (selectedId !== null && page.games.some((game) => game.id === selectedId)) {
+      markSelectedGame(selectedId);
+      state.boardFlipped = perspectivePlayerIsBlack(state.player, state.managedUser, state.detail?.summary.black);
+      setPly(state.ply, false);
+    } else if (page.games.length) {
+      await selectGame(page.games[0].id);
+    } else {
+      clearGame();
+    }
   } catch (error) {
-    showToast(String(error), true);
+    if (!pageRequests.isCurrent(request)) return;
+    setFilterStatus(String(error), "error");
+    if (!options.live) showToast(String(error), true);
   }
 }
 
@@ -286,16 +342,40 @@ function renderPage(page) {
 }
 
 async function selectGame(id) {
+  const request = detailRequests.next();
   try {
     const detail = await invoke("get_game", { id });
+    if (!detailRequests.isCurrent(request)) return;
     state.detail = detail;
     state.ply = 0;
     state.boardFlipped = perspectivePlayerIsBlack(state.player, state.managedUser, detail.summary.black);
-    document.querySelectorAll(".game-row").forEach((row) => row.classList.toggle("active", Number(row.dataset.gameId) === id));
+    markSelectedGame(id);
     renderGame(detail);
   } catch (error) {
-    showToast(String(error), true);
+    if (detailRequests.isCurrent(request)) showToast(String(error), true);
   }
+}
+
+function markSelectedGame(id) {
+  document.querySelectorAll(".game-row").forEach((row) => row.classList.toggle("active", Number(row.dataset.gameId) === id));
+}
+
+function clearGame() {
+  detailRequests.invalidate();
+  state.detail = null;
+  state.ply = 0;
+  element("white-name").textContent = "—";
+  element("black-name").textContent = "No matching game";
+  element("white-rating").textContent = "";
+  element("black-rating").textContent = "";
+  element("game-result").textContent = "—";
+  element("game-date").textContent = "—";
+  element("raw-pgn").textContent = "";
+  element("lichess-link").hidden = true;
+  element("move-list").replaceChildren(text("Adjust the filters to find a game.", "empty-message"));
+  renderBoard(null, null);
+  for (const id of ["first-move", "previous-move", "next-move", "last-move"]) element(id).disabled = true;
+  element("move-position").textContent = "Start";
 }
 
 function renderGame(detail) {
@@ -468,6 +548,203 @@ function row(className, ...children) {
   return node;
 }
 
+function queueLiveFilters(delay) {
+  window.clearTimeout(filterTimer);
+  pageRequests.invalidate();
+  setFilterStatus(delay ? "Waiting for you to finish typing…" : "Updating…", "pending");
+  filterTimer = window.setTimeout(applyLiveFilters, delay);
+}
+
+async function applyLiveFilters() {
+  filterTimer = null;
+  const filters = readFilters();
+  const validation = validateLiveFilters(filters);
+  if (validation) {
+    setFilterStatus(validation, "error");
+    return;
+  }
+  const previousPlayer = state.player?.toLowerCase() ?? null;
+  state.filters = filters;
+  state.player = filters.player ?? null;
+  if ((state.player?.toLowerCase() ?? null) !== previousPlayer) {
+    state.explore = null;
+    exploreRequests.invalidate();
+  }
+  await loadPage(0, { live: true });
+}
+
+function setFilterStatus(message, tone = "") {
+  const status = element("filter-status");
+  status.textContent = message;
+  status.classList.toggle("pending", tone === "pending");
+  status.classList.toggle("error", tone === "error");
+  element("export-games").disabled = tone === "pending" || tone === "error";
+}
+
+function showView(view) {
+  if (!state.session) return;
+  const exploring = view === "explore";
+  element("workspace").hidden = exploring;
+  element("explore-view").hidden = !exploring;
+  element("nav-library").classList.toggle("active", !exploring);
+  element("nav-explore").classList.toggle("active", exploring);
+  if (exploring) loadExplore();
+}
+
+async function loadExplore() {
+  if (!state.session) return;
+  const player = state.filters.player ?? state.managedUser ?? null;
+  if (state.explore && state.explorePlayer?.toLowerCase() === player?.toLowerCase()) {
+    renderExplore(state.explore);
+    return;
+  }
+  const request = exploreRequests.next();
+  element("explore-content").setAttribute("aria-busy", "true");
+  element("explore-scope").textContent = "Reading patterns from your local database…";
+  try {
+    const report = await invoke("explore_database", { player });
+    if (!exploreRequests.isCurrent(request)) return;
+    state.explore = report;
+    state.explorePlayer = player;
+    renderExplore(report);
+  } catch (error) {
+    if (!exploreRequests.isCurrent(request)) return;
+    element("explore-scope").textContent = `Explore could not be loaded: ${error}`;
+    showToast(String(error), true);
+  } finally {
+    if (exploreRequests.isCurrent(request)) element("explore-content").removeAttribute("aria-busy");
+  }
+}
+
+function renderExplore(report) {
+  const focus = report.player;
+  element("explore-scope").textContent = focus
+    ? `Patterns from games featuring ${focus}. Change the Player filter in Library to explore someone else.`
+    : "Patterns across every player in this local library.";
+  element("explore-game-count").textContent = gameCount(report.games);
+  element("players-title").textContent = focus ? "Frequent opponents" : "Most active players";
+  element("timeline-legend").textContent = focus ? "Wins · Draws · Losses" : "White · Draws · Black";
+  renderOpenings(report.openings, report.games);
+  renderTimeline(report.timeline);
+  renderExplorePlayers(report.players);
+  renderCommonPositions(report.positions);
+}
+
+function renderOpenings(openings, total) {
+  const list = element("opening-list");
+  list.replaceChildren();
+  if (!openings.length) {
+    renderExploreEmpty(list, "No standard opening positions are available.");
+    return;
+  }
+  openings.forEach((opening, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ranked-row";
+    const percentage = total ? Math.round((opening.games / total) * 100) : 0;
+    button.append(
+      text(String(index + 1).padStart(2, "0"), "ranked-number"),
+      row("ranked-copy", text(opening.line || "Starting position", "ranked-title"), text(`${percentage}% of explored games`)),
+      text(gameCount(opening.games), "ranked-value"),
+    );
+    button.addEventListener("click", () => openExplorePosition(opening));
+    list.append(button);
+  });
+}
+
+function renderTimeline(periods) {
+  const chart = element("timeline-chart");
+  chart.replaceChildren();
+  if (!periods.length) {
+    renderExploreEmpty(chart, "No dated games are available.");
+    return;
+  }
+  const maximum = Math.max(...periods.map((period) => period.games), 1);
+  for (const period of periods) {
+    const timeline = document.createElement("div");
+    timeline.className = "timeline-row";
+    const stack = document.createElement("div");
+    stack.className = "timeline-stack";
+    stack.style.width = `${Math.max(8, (period.games / maximum) * 100)}%`;
+    stack.title = `${period.wins} / ${period.draws} / ${period.losses}`;
+    for (const [kind, count] of [["win", period.wins], ["draw", period.draws], ["loss", period.losses], ["unfinished", period.unfinished]]) {
+      if (!count) continue;
+      const segment = document.createElement("span");
+      segment.className = `timeline-segment ${kind}`;
+      segment.style.flexBasis = `${(count / period.games) * 100}%`;
+      stack.append(segment);
+    }
+    timeline.append(text(formatExploreMonth(period.month)), stack, text(String(period.games), "timeline-total"));
+    chart.append(timeline);
+  }
+}
+
+function renderExplorePlayers(players) {
+  const list = element("player-list");
+  list.replaceChildren();
+  if (!players.length) {
+    renderExploreEmpty(list, "No named players are available.");
+    return;
+  }
+  players.forEach((player, index) => {
+    const item = row(
+      "ranked-row",
+      text(String(index + 1).padStart(2, "0"), "ranked-number"),
+      row("ranked-copy", text(player.name, "ranked-title"), text(`${player.wins} · ${player.draws} · ${player.losses}`)),
+      text(gameCount(player.games), "ranked-value"),
+    );
+    list.append(item);
+  });
+}
+
+function renderCommonPositions(positions) {
+  const list = element("position-list");
+  list.replaceChildren();
+  if (!positions.length) {
+    renderExploreEmpty(list, "No repeated middlegame positions were found.");
+    return;
+  }
+  for (const position of positions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "position-card";
+    button.append(
+      renderMiniBoard(position.board),
+      row(
+        "position-copy",
+        text(gameCount(position.games), "position-count"),
+        text(`First seen after ${Math.ceil(position.ply / 2)} moves`),
+        text(position.line || "Standard position"),
+      ),
+    );
+    button.addEventListener("click", () => openExplorePosition(position));
+    list.append(button);
+  }
+}
+
+function renderMiniBoard(board) {
+  const target = document.createElement("div");
+  target.className = "mini-board";
+  target.setAttribute("aria-hidden", "true");
+  for (const { rank, file } of boardCoordinates(false)) {
+    const square = document.createElement("span");
+    square.className = `mini-square ${(file + rank) % 2 ? "light" : "dark"}`;
+    square.textContent = pieces[board[rank * 8 + file]] ?? "";
+    target.append(square);
+  }
+  return target;
+}
+
+function renderExploreEmpty(target, message) {
+  target.append(text(message, "empty-message"));
+}
+
+async function openExplorePosition(position) {
+  showView("library");
+  await selectGame(position.game_id);
+  setPly(position.ply);
+}
+
 function text(value, className) {
   const node = document.createElement("span");
   if (className) node.className = className;
@@ -581,7 +858,7 @@ async function initializeNativeApp() {
   window.setTimeout(() => checkForUpdates(true), 1500);
 }
 
-async function mockInvoke(command) {
+async function mockInvoke(command, args = {}) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
@@ -589,7 +866,13 @@ async function mockInvoke(command) {
   }
   if (command === "install_update" || command === "restart_app") return null;
   if (command === "get_game") return mockDetail();
-  if (command === "list_games") return mockSession().page;
+  if (command === "list_games") {
+    const page = mockSession().page;
+    if (args.sort === "rating") page.games.sort((a, b) => Math.max(b.white_elo ?? 0, b.black_elo ?? 0) - Math.max(a.white_elo ?? 0, a.black_elo ?? 0));
+    if (args.direction === "asc") page.games.reverse();
+    return page;
+  }
+  if (command === "explore_database") return mockExplore(args.player);
   if (command === "list_databases") {
     const session = mockSession();
     return [{ path: session.path, managed_user: session.managed_user, exists: true, active: true }];
@@ -637,6 +920,38 @@ function mockDetail() {
       { ply: 1, san: "e4", from: "e2", to: "e4", board: e4 },
       { ply: 2, san: "e5", from: "e7", to: "e5", board: e5 },
       { ply: 3, san: "Nf3", from: "g1", to: "f3", board: nf3 },
+    ],
+  };
+}
+
+function mockExplore(player) {
+  const detail = mockDetail();
+  const board = detail.moves.at(-1).board;
+  return {
+    player: player ?? null,
+    games: 1729,
+    players: [
+      { name: "QuietKnight", games: 34, wins: 18, draws: 3, losses: 13, unfinished: 0 },
+      { name: "CastleCoffee", games: 27, wins: 12, draws: 2, losses: 13, unfinished: 0 },
+      { name: "EndgameEnjoyer", games: 21, wins: 9, draws: 4, losses: 8, unfinished: 0 },
+    ],
+    timeline: [
+      { month: 202604, games: 98, wins: 49, draws: 5, losses: 44, unfinished: 0 },
+      { month: 202605, games: 121, wins: 63, draws: 7, losses: 51, unfinished: 0 },
+      { month: 202606, games: 108, wins: 50, draws: 6, losses: 52, unfinished: 0 },
+      { month: 202607, games: 134, wins: 70, draws: 5, losses: 59, unfinished: 0 },
+      { month: 202608, games: 146, wins: 71, draws: 9, losses: 66, unfinished: 0 },
+      { month: 202609, games: 42, wins: 19, draws: 3, losses: 20, unfinished: 0 },
+    ],
+    openings: [
+      { line: "1. e4 e5 2. Nf3 Nc6", board, games: 286, game_id: 1, ply: 3 },
+      { line: "1. d4 Nf6 2. c4 e6", board, games: 201, game_id: 2, ply: 3 },
+      { line: "1. e4 c5 2. Nf3 d6", board, games: 184, game_id: 3, ply: 3 },
+    ],
+    positions: [
+      { line: "1. e4 e5 2. Nf3", board, games: 83, game_id: 1, ply: 3 },
+      { line: "1. d4 Nf6 2. c4", board, games: 64, game_id: 2, ply: 3 },
+      { line: "1. e4 c5 2. Nf3", board, games: 51, game_id: 3, ply: 3 },
     ],
   };
 }
