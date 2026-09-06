@@ -219,11 +219,21 @@ pub fn ingest<R: Read>(
     plan: &SyncPlan,
     expected_game_id: Option<&str>,
 ) -> Result<IngestSummary, SyncError> {
+    ingest_with_progress(reader, plan, expected_game_id, |_, _| {})
+}
+
+/// Ingests a PGN stream and reports each successfully stored game.
+pub fn ingest_with_progress<R: Read, F: FnMut(u64, Option<&str>)>(
+    reader: R,
+    plan: &SyncPlan,
+    expected_game_id: Option<&str>,
+    mut on_progress: F,
+) -> Result<IngestSummary, SyncError> {
     let mut reader = GameReader::new(reader);
     let mut summary = IngestSummary::default();
     while let Some(game) = reader.read_game().map_err(SyncError::Frame)? {
         summary.received += 1;
-        let (game_id, unfinished) = inspect_game(game, summary.received)?;
+        let (game_id, unfinished, date) = inspect_game(game, summary.received)?;
         if let Some(expected) = expected_game_id {
             if game_id != expected {
                 return Err(SyncError::UnexpectedGameId {
@@ -241,6 +251,7 @@ pub fn ingest<R: Read>(
             game_id,
             unfinished,
         });
+        on_progress(summary.received, date.as_deref());
     }
     if expected_game_id.is_some() && summary.received != 1 {
         return Err(SyncError::UnexpectedGameCount {
@@ -349,8 +360,10 @@ fn write_state(path: &Path, state: &SyncState) -> Result<(), SyncError> {
     result
 }
 
-fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool), SyncError> {
+fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool, Option<String>), SyncError> {
     let mut game_id = None;
+    let mut date = None;
+    let mut utc_date = None;
     let mut outcome = None;
     let mut variation_depth = 0_u32;
     for event in Parser::with_options(game, ParserOptions::STRICT) {
@@ -361,6 +374,12 @@ fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool), SyncError> {
             Event::Tag(tag) if tag.name() == b"Site" && game_id.is_none() => {
                 game_id = game_id_from_site(tag.value().as_ref());
             }
+            Event::Tag(tag) if tag.name() == b"UTCDate" && utc_date.is_none() => {
+                utc_date = Some(String::from_utf8_lossy(tag.value().as_ref()).into_owned());
+            }
+            Event::Tag(tag) if tag.name() == b"Date" && date.is_none() => {
+                date = Some(String::from_utf8_lossy(tag.value().as_ref()).into_owned());
+            }
             Event::VariationStart(_) => variation_depth += 1,
             Event::VariationEnd(_) => variation_depth -= 1,
             Event::Outcome { outcome: value, .. } if variation_depth == 0 => outcome = Some(value),
@@ -368,7 +387,11 @@ fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool), SyncError> {
         }
     }
     let game_id = game_id.ok_or(SyncError::MissingGameId { game: number })?;
-    Ok((game_id, outcome == Some(Outcome::Unknown)))
+    Ok((
+        game_id,
+        outcome == Some(Outcome::Unknown),
+        utc_date.or(date),
+    ))
 }
 
 fn game_id_from_site(site: &[u8]) -> Option<String> {
@@ -523,6 +546,29 @@ mod tests {
         finish(&second, refreshed.statuses).unwrap();
         let third = prepare(&directory.0, "diegoglozano", 4_000_000, None).unwrap();
         assert!(third.unfinished_game_ids.is_empty());
+    }
+
+    #[test]
+    fn reports_stored_game_count_and_best_available_date() {
+        let directory = TestDirectory::new();
+        let plan = prepare(&directory.0, "diegoglozano", 1, None).unwrap();
+        start(&plan).unwrap();
+        let pgn = b"[Site \"https://lichess.org/AbCd1234\"]\n[Date \"2026.09.01\"]\n[UTCDate \"2026.09.02\"]\n\n1. e4 *\n\n[Site \"https://lichess.org/EfGh5678\"]\n[Date \"2026.09.03\"]\n\n1. d4 *\n";
+        let mut progress = Vec::new();
+
+        let summary = ingest_with_progress(&pgn[..], &plan, None, |games, date| {
+            progress.push((games, date.map(str::to_owned)));
+        })
+        .unwrap();
+
+        assert_eq!(summary.received, 2);
+        assert_eq!(
+            progress,
+            [
+                (1, Some(String::from("2026.09.02"))),
+                (2, Some(String::from("2026.09.03")))
+            ]
+        );
     }
 
     #[test]

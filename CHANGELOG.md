@@ -4,6 +4,20 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added live Lichess sync progress to Gambit Desktop with downloaded-game
+  counts, the latest history date reached, and a separate indexing phase.
+- Gambit Desktop now opens games from the selected player's perspective and
+  includes a manual board-flip control.
+
+### Fixed
+
+- Disabled autocapitalization, autocorrection, and spellchecking for Lichess
+  usernames and exact player filters.
+- Kept arrow-key replay navigation from scrolling the application window while
+  still following the active move inside its own list.
+
 ## [0.10.0] - 2026-09-06
 
 ### Added

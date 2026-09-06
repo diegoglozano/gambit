@@ -24,16 +24,20 @@ The first vertical slice supports three ways to enter the library:
 
 - Enter a public Lichess username and an optional first-sync date. Gambit stores
   the PGNs and resulting database in the operating system's application-data
-  directory. **Sync now** later fetches and indexes only new or changed games.
+  directory. During the first import, live progress reports the number of games
+  downloaded and the latest history date reached before local indexing begins.
+  **Sync now** later fetches and indexes only new or changed games.
 - Choose a `.pgn` or `.pgn.zst` file, then save and immediately open
   a new `.gambit` database.
 - Choose an existing `.gambit` file from the native file picker.
 
 Once loaded, the app shows corpus totals and date coverage, pages through games
 newest-first, filters by an exact player name case-insensitively, and replays a
-selected standard-chess mainline. Arrow keys and board controls move through
-the game. Raw PGN remains available for inspection. Gambit remembers the last
-library and reopens it automatically on the next launch.
+selected standard-chess mainline. The board automatically faces the selected
+player and can be flipped manually. Arrow keys and board controls move through
+the game without moving the surrounding window. Raw PGN remains available for
+inspection. Gambit remembers the last library and reopens it automatically on
+the next launch.
 
 ## Updates
 
