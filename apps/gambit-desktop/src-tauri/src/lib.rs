@@ -8,6 +8,7 @@ use gambit::index::{self, DatabaseInfo, GameDetail, GamePage};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 
 #[derive(Default)]
 struct AppState {
@@ -33,6 +34,14 @@ struct SavedSession {
 struct SyncInput {
     username: String,
     since: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AvailableUpdate {
+    current_version: String,
+    version: String,
+    notes: Option<String>,
+    published_at: Option<String>,
 }
 
 #[tauri::command]
@@ -188,6 +197,55 @@ fn open_game_url(url: String) -> Result<(), String> {
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<Option<AvailableUpdate>, String> {
+    let update = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(update.map(|update| AvailableUpdate {
+        current_version: update.current_version,
+        version: update.version,
+        notes: update.body,
+        published_at: update.date.map(|date| date.to_string()),
+    }))
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle, expected_version: String) -> Result<(), String> {
+    let update = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| String::from("the update is no longer available"))?;
+    if update.version != expected_version {
+        return Err(format!(
+            "Gambit {expected_version} was replaced by {}; check again before updating",
+            update.version
+        ));
+    }
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 fn load_session(path: &Path, player: Option<&str>) -> Result<DatabaseSession, String> {
     let info = index::info(path, false).map_err(|error| error.to_string())?;
     let page = index::list_games(path, player, 0, 100).map_err(|error| error.to_string())?;
@@ -304,6 +362,7 @@ fn extension_is(path: &Path, expected: &str) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             choose_database,
@@ -312,7 +371,11 @@ pub fn run() {
             sync_user,
             list_games,
             get_game,
-            open_game_url
+            open_game_url,
+            app_version,
+            check_for_update,
+            install_update,
+            restart_app
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Gambit Desktop");

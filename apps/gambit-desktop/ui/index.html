@@ -37,7 +37,8 @@
         <footer>
           <span class="status-dot"></span>
           <span>Local and private</span>
-          <small>Gambit Desktop preview</small>
+          <small>Gambit <span id="app-version">Desktop preview</span></small>
+          <button id="check-updates" class="footer-button" type="button">Check for updates</button>
         </footer>
       </aside>
 
@@ -181,6 +182,15 @@
       <strong id="busy-title">Building your library…</strong>
       <span id="busy-copy">Gambit is fetching and indexing your games locally.</span>
     </div>
+    <dialog class="update-dialog" id="update-dialog">
+      <span class="eyebrow">Update available</span>
+      <h2>Gambit <span id="update-version">—</span> is ready.</h2>
+      <p id="update-notes">Download the update securely, install it, and restart Gambit.</p>
+      <div class="dialog-actions">
+        <button id="dismiss-update" type="button">Not now</button>
+        <button id="install-update" class="primary-button" type="button">Update and restart</button>
+      </div>
+    </dialog>
     <script type="module" src="./main.js"></script>
   </body>
 </html>

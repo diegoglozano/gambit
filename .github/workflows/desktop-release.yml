@@ -113,13 +113,19 @@ jobs:
         run: ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
       - name: Build release DMG
         if: github.event_name != 'pull_request'
-        run: ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" || -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]]; then
+            echo 'The Tauri updater signing secrets are required for desktop releases.' >&2
+            exit 1
+          fi
+          ./scripts/build-desktop-dmg.sh '${{ steps.version.outputs.version }}'
       - uses: actions/upload-artifact@v7
         with:
           name: gambit-desktop-release
-          path: |
-            target/desktop-release/gambit-desktop-universal-apple-darwin.dmg
-            target/desktop-release/gambit-desktop-universal-apple-darwin.dmg.sha256
+          path: target/desktop-release/*
           if-no-files-found: error
 
   publish:
@@ -134,6 +140,17 @@ jobs:
         with:
           name: gambit-desktop-release
           path: desktop-release
+      - name: Add GitHub Release notes to updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json body,publishedAt > "$RUNNER_TEMP/release.json"
+          jq --slurpfile release "$RUNNER_TEMP/release.json" \
+            '.notes = $release[0].body | .pub_date = $release[0].publishedAt' \
+            desktop-release/latest.json > "$RUNNER_TEMP/latest.json"
+          mv "$RUNNER_TEMP/latest.json" desktop-release/latest.json
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

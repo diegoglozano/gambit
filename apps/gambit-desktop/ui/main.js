@@ -11,6 +11,8 @@ const state = {
   ply: 0,
   player: null,
   managedUser: null,
+  update: null,
+  updateCheckRunning: false,
 };
 
 const element = (id) => document.getElementById(id);
@@ -31,6 +33,9 @@ element("open-database").addEventListener("click", openDatabase);
 element("change-database").addEventListener("click", openDatabase);
 element("import-pgn").addEventListener("click", importPgn);
 element("import-pgn-workspace").addEventListener("click", importPgn);
+element("check-updates").addEventListener("click", () => checkForUpdates(false));
+element("dismiss-update").addEventListener("click", () => element("update-dialog").close());
+element("install-update").addEventListener("click", installAvailableUpdate);
 element("player-filter").addEventListener("submit", async (event) => {
   event.preventDefault();
   state.player = element("player").value.trim() || null;
@@ -75,6 +80,41 @@ async function importPgn() {
     if (!session) return;
     await showSession(session);
     showToast(`${session.info.games.toLocaleString()} games imported.`);
+  });
+}
+
+async function checkForUpdates(silent) {
+  if (state.updateCheckRunning) return;
+  state.updateCheckRunning = true;
+  const button = element("check-updates");
+  button.disabled = true;
+  button.textContent = "Checking…";
+  try {
+    const update = await invoke("check_for_update");
+    if (!update) {
+      if (!silent) showToast("Gambit is up to date.");
+      return;
+    }
+    state.update = update;
+    element("update-version").textContent = update.version;
+    element("update-notes").textContent = update.notes?.trim() || "Download the update securely, install it, and restart Gambit.";
+    if (!element("update-dialog").open) element("update-dialog").showModal();
+  } catch (error) {
+    if (!silent) showToast(`Could not check for updates: ${error}`, true);
+  } finally {
+    state.updateCheckRunning = false;
+    button.disabled = false;
+    button.textContent = "Check for updates";
+  }
+}
+
+async function installAvailableUpdate() {
+  if (!state.update) return;
+  const version = state.update.version;
+  element("update-dialog").close();
+  await withBusy(`Installing Gambit ${version}…`, "The signed update is downloading. Gambit will restart when it is ready.", async () => {
+    await invoke("install_update", { expectedVersion: version });
+    await invoke("restart_app");
   });
 }
 
@@ -308,8 +348,23 @@ async function restorePreviousSession() {
   }
 }
 
+async function initializeNativeApp() {
+  try {
+    element("app-version").textContent = await invoke("app_version");
+  } catch {
+    element("app-version").textContent = "Desktop";
+  }
+  await restorePreviousSession();
+  window.setTimeout(() => checkForUpdates(true), 1500);
+}
+
 async function mockInvoke(command) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" ? 650 : 80));
+  if (command === "app_version") return "Preview";
+  if (command === "check_for_update") {
+    return { current_version: "0.9.0", version: "0.10.0", notes: "A faster, friendlier Gambit is ready." };
+  }
+  if (command === "install_update" || command === "restart_app") return null;
   if (command === "get_game") return mockDetail();
   if (command === "list_games") return mockSession().page;
   return mockSession();
@@ -354,4 +409,4 @@ function movePiece(board, from, to) {
 }
 
 renderBoard("RNBQKBNRPPPPPPPP................................pppppppprnbqkbnr", null);
-if (nativeInvoke) restorePreviousSession();
+if (nativeInvoke) initializeNativeApp();

@@ -26,10 +26,19 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "category": "Game",
     "shortDescription": "Explore your chess games locally",
     "macOS": {
       "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxNUVDOTQ4QTRDRDUxRjAKUldUd1VjMmtTTWxld1IxQlNHYi9Va2gyRFZDaDEyRGVGc1B6VTcwVFVwQUxGdnUyNFJHMTdHN2EK",
+      "endpoints": [
+        "https://github.com/diegoglozano/gambit/releases/latest/download/latest.json"
+      ]
     }
   }
 }

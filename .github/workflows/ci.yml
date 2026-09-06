@@ -84,7 +84,9 @@ jobs:
         working-directory: apps/gambit-desktop
         env:
           APPLE_SIGNING_IDENTITY: '-'
-        run: npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles dmg
+        run: >-
+          npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles dmg
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v7
         with:
           name: gambit-desktop-macos-preview
