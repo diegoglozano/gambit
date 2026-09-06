@@ -888,17 +888,21 @@ mod tests {
             opponent: Some(String::from("Opponent")),
             ..GameFilters::default()
         };
-        assert!(query_options(&filters)
-            .unwrap_err()
-            .contains("require a player"));
+        assert!(
+            query_options(&filters)
+                .unwrap_err()
+                .contains("require a player")
+        );
 
         let filters = GameFilters {
             since: Some(String::from("2026-10-01")),
             until: Some(String::from("2026-09-01")),
             ..GameFilters::default()
         };
-        assert!(query_options(&filters)
-            .unwrap_err()
-            .contains("must not be later"));
+        assert!(
+            query_options(&filters)
+                .unwrap_err()
+                .contains("must not be later")
+        );
     }
 }
