@@ -27,10 +27,15 @@ workflow. The tag version must match the `gambit` package version.
    ```
 
 5. Watch the `Release` workflow through artifact builds and publication.
-6. Watch the `Web` workflow rebuild the Oranda install page after `Release`
+6. Watch the `Desktop release` workflow attach the DMG, signed updater archive,
+   signature, and `latest.json`. The updater signing secrets must remain backed
+   up; rotating or losing the private key strands existing installations.
+7. Watch the `Web` workflow rebuild the Oranda install page after `Release`
    completes.
-7. Verify `gambit --version` from an installed artifact and run Doctor against
+8. Verify `gambit --version` from an installed artifact and run Doctor against
    one plain PGN plus one `.pgn.zst` file.
+9. From the previous Gambit Desktop version, use **Check for updates** and
+   verify the new version installs and relaunches successfully.
 
 Do not reuse or move a published version tag. If publication fails after the
 GitHub release is visible, diagnose the workflow before creating a new patch

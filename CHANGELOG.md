@@ -8,6 +8,8 @@ All notable changes to Gambit are documented in this file.
 
 - Added native PGN import to Gambit Desktop for building and opening a new
   `.gambit` database from a `.pgn` or `.pgn.zst` file.
+- Added signed in-app updates to Gambit Desktop, with automatic update checks,
+  release notes, and user-confirmed installation and restart.
 
 ### Fixed
 

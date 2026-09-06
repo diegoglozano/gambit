@@ -14,10 +14,16 @@ The first vertical slice can synchronize a public Lichess account into the
 application data directory, build a new `.gambit` database from PGN files, open
 an existing database, page through its games, and replay standard-chess
 mainlines on an interactive board. The last library is reopened automatically
-on the next launch.
+on the next launch. Installed builds check GitHub Releases for signed updates
+and ask before downloading, installing, and restarting. Because v0.9.0 predates
+the updater, users must install the first updater-enabled release manually.
 
 Build a universal macOS DMG from the repository root with:
 
 ```console
 ./scripts/build-desktop-dmg.sh 0.9.0
 ```
+
+Release builds require `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. They produce the DMG plus a signed
+universal `.app.tar.gz`, its signature, and `latest.json` for Tauri's updater.

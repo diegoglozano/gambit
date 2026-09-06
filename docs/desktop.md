@@ -35,6 +35,19 @@ selected standard-chess mainline. Arrow keys and board controls move through
 the game. Raw PGN remains available for inspection. Gambit remembers the last
 library and reopens it automatically on the next launch.
 
+## Updates
+
+Gambit checks for updates shortly after launch without interrupting normal use.
+When a newer release exists, the app shows its release notes and asks before it
+downloads or installs anything. **Check for updates** in the sidebar runs the
+same check manually. After installation, Gambit restarts into the new version.
+
+Updater archives are cryptographically signed independently from Apple's app
+signature. The app rejects an archive that does not match the updater public
+key embedded in the installed version. Because v0.9.0 did not include this
+updater, it cannot discover the first updater-enabled release; install that DMG
+manually once, and later releases can update from inside the app.
+
 ## Privacy
 
 The app reads databases locally and does not upload them to Gambit. Public game
@@ -76,8 +89,8 @@ Build the universal release DMG and its SHA-256 checksum with:
 
 Pull requests exercise that universal packaging path. After the main Release
 workflow publishes a version tag, the Desktop release workflow builds the DMG
-from the same commit and attaches it to the existing GitHub Release. A manual
-workflow dispatch can rebuild an existing tag.
+and signed updater files from the same commit and attaches them to the existing
+GitHub Release. A manual workflow dispatch can rebuild an existing tag.
 
 ## Signing and notarization
 
@@ -93,4 +106,13 @@ and notarization:
 - `APPLE_TEAM_ID`: Apple Developer Team ID
 
 The workflow uses ad-hoc signing until the complete secret set is present.
-Automatic updates and Windows packaging remain later release milestones.
+
+Updater signing is mandatory for every desktop release and uses two additional
+secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`: encrypted Tauri updater private key
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: password for that key
+
+The updater private key must be backed up permanently. Existing installations
+trust its matching embedded public key and cannot migrate automatically if the
+private key is lost. Windows packaging remains a later release milestone.
