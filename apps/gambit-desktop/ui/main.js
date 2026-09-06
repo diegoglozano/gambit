@@ -362,7 +362,7 @@ async function mockInvoke(command) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
-    return { current_version: "0.9.0", version: "0.10.0", notes: "A faster, friendlier Gambit is ready." };
+    return { current_version: "0.10.0", version: "0.11.0", notes: "A faster, friendlier Gambit is ready." };
   }
   if (command === "install_update" || command === "restart_app") return null;
   if (command === "get_game") return mockDetail();

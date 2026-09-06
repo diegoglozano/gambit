@@ -4,6 +4,8 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-06
+
 ### Added
 
 - Added native PGN import to Gambit Desktop for building and opening a new
@@ -144,7 +146,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/diegoglozano/gambit/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/diegoglozano/gambit/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/diegoglozano/gambit/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/diegoglozano/gambit/compare/v0.6.1...v0.7.0
