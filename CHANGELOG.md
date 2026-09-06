@@ -4,6 +4,29 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-06
+
+### Added
+
+- Gambit Desktop now remembers up to 12 recent databases and switches between
+  them without replacing or rebuilding either library.
+- Added the CLI's indexed player, opponent, color, result, date, rating, and
+  position filters to the desktop game browser, with matching-game PGN export.
+- Added desktop database integrity verification plus result, storage, and
+  position summaries.
+- Desktop PGN workflows now build from multiple `.pgn` or `.pgn.zst` files and
+  add, skip, or replace sources incrementally using content fingerprints.
+- Added an optional one-sync Lichess personal access token for faster account
+  exports without persisting the credential.
+- Exposed structured full-filter paging and file-based incremental updates from
+  the reusable Gambit library shared by the CLI and desktop app.
+
+### Fixed
+
+- Kept macOS Open and Save panels usable with the custom `.gambit` extension by
+  validating database paths after selection instead of filtering them as an
+  unknown native content type.
+
 ## [0.11.0] - 2026-09-06
 
 ### Added
@@ -162,7 +185,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/diegoglozano/gambit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/diegoglozano/gambit/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/diegoglozano/gambit/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/diegoglozano/gambit/compare/v0.8.0...v0.9.0
