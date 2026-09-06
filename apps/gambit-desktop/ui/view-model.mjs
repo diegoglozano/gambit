@@ -31,3 +31,53 @@ export function timelineProgress(start, end, reached) {
   const percentage = ((reached - start) / (end - start)) * 100;
   return Math.max(1, Math.min(98, percentage));
 }
+
+export function createRequestGate() {
+  let current = 0;
+  return {
+    next() {
+      current += 1;
+      return current;
+    },
+    isCurrent(request) {
+      return request === current;
+    },
+    invalidate() {
+      current += 1;
+    },
+  };
+}
+
+export function validateLiveFilters(filters) {
+  if (!filters.player && (
+    filters.opponent
+    || filters.color
+    || filters.minimum_rating
+    || filters.maximum_rating
+    || filters.result === "win"
+    || filters.result === "loss"
+  )) {
+    return "Choose a player before using opponent, color, rating, win, or loss.";
+  }
+  if (filters.position && filters.position.trim().split(/\s+/).length !== 6) {
+    return "Finish the six-field FEN to update the results.";
+  }
+  if (filters.since && filters.until && filters.since > filters.until) {
+    return "The start date must not be later than the end date.";
+  }
+  if (
+    filters.minimum_rating
+    && filters.maximum_rating
+    && Number(filters.minimum_rating) > Number(filters.maximum_rating)
+  ) {
+    return "The minimum rating must not exceed the maximum rating.";
+  }
+  return null;
+}
+
+export function formatExploreMonth(value) {
+  const month = Number(value) % 100;
+  const year = Math.floor(Number(value) / 100) % 100;
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return month >= 1 && month <= 12 ? `${names[month - 1]} ’${String(year).padStart(2, "0")}` : String(value);
+}

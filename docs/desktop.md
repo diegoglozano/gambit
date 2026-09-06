@@ -36,10 +36,17 @@ The first vertical slice supports three ways to enter the library:
 - Choose an existing `.gambit` file from the native file picker.
 
 Once loaded, the app shows corpus, result, storage, and date totals; can verify
-database integrity; and pages through games newest-first. Search uses the same
-indexed filters as the CLI: player, opponent, player color, player-relative
-result, date bounds, player rating bounds, and a complete six-field position
-FEN. Matching games can be exported as PGN.
+database integrity; and pages through games. Search uses the same indexed
+filters as the CLI: player, opponent, player color, player-relative result, date
+bounds, player rating bounds, and a complete six-field position FEN. Results
+update automatically as filters change, with a short debounce while typing.
+Games can be sorted by date, rating, result, or White player, and matching games
+can be exported as PGN.
+
+**Explore** summarizes common opening lines, results over the latest 12 active
+months, frequent opponents, and recurring positions for the Player filter (or
+the managed Lichess user by default). Opening and position cards open a
+representative game at the relevant ply.
 
 The app replays a selected standard-chess mainline. The board automatically
 faces the selected player and can be flipped manually. Arrow keys and board

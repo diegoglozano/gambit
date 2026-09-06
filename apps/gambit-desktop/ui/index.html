@@ -19,11 +19,11 @@
         </div>
 
         <nav aria-label="Primary navigation">
-          <button class="nav-item active" type="button">
+          <button class="nav-item active" id="nav-library" type="button">
             <span aria-hidden="true">◫</span> Library
           </button>
-          <button class="nav-item" type="button" disabled title="Coming next">
-            <span aria-hidden="true">⌁</span> Explore <small>Soon</small>
+          <button class="nav-item" id="nav-explore" type="button" disabled>
+            <span aria-hidden="true">⌁</span> Explore
           </button>
         </nav>
 
@@ -130,9 +130,9 @@
               <label>Maximum rating<input id="maximum-rating" type="number" min="0" inputmode="numeric" placeholder="Any" /></label>
               <label class="fen-filter">Position FEN<input id="position" autocomplete="off" spellcheck="false" placeholder="Paste a complete six-field FEN" /></label>
               <div class="filter-actions">
+                <span class="filter-status" id="filter-status" role="status" aria-live="polite">Filters update automatically</span>
                 <button type="button" id="clear-filters">Clear</button>
                 <button type="button" id="export-games">Export PGN</button>
-                <button class="apply-filter" type="submit">Apply filters</button>
               </div>
             </form>
           </details>
@@ -153,9 +153,25 @@
                   <h2>Games</h2>
                   <span id="game-count">—</span>
                 </div>
-                <div class="pager">
-                  <button id="previous-page" type="button" aria-label="Previous page">←</button>
-                  <button id="next-page" type="button" aria-label="Next page">→</button>
+                <div class="game-list-controls">
+                  <label>Sort
+                    <select id="sort-games" aria-label="Sort games">
+                      <option value="date">Date</option>
+                      <option value="rating">Rating</option>
+                      <option value="result">Result</option>
+                      <option value="player">White player</option>
+                    </select>
+                  </label>
+                  <label>Order
+                    <select id="sort-direction" aria-label="Sort direction">
+                      <option value="desc">Descending</option>
+                      <option value="asc">Ascending</option>
+                    </select>
+                  </label>
+                  <div class="pager">
+                    <button id="previous-page" type="button" aria-label="Previous page">←</button>
+                    <button id="next-page" type="button" aria-label="Next page">→</button>
+                  </div>
                 </div>
               </div>
               <div class="game-list" id="game-list"></div>
@@ -198,6 +214,51 @@
                 <pre id="raw-pgn"></pre>
               </details>
             </section>
+          </div>
+        </section>
+
+        <section class="explore-view" id="explore-view" hidden>
+          <header class="workspace-header explore-header">
+            <div>
+              <span class="eyebrow">Explore</span>
+              <h1>Your chess patterns</h1>
+              <p id="explore-scope">Insights from this local library.</p>
+            </div>
+            <span class="explore-game-count" id="explore-game-count">—</span>
+          </header>
+
+          <div class="explore-grid" id="explore-content">
+            <article class="explore-card openings-card">
+              <div class="explore-card-heading">
+                <div><span class="eyebrow">Repertoire</span><h2>Common opening lines</h2></div>
+                <small>Position after move 2</small>
+              </div>
+              <div class="ranked-list" id="opening-list"></div>
+            </article>
+
+            <article class="explore-card timeline-card">
+              <div class="explore-card-heading">
+                <div><span class="eyebrow">Form</span><h2>Results over time</h2></div>
+                <small id="timeline-legend">Wins · Draws · Losses</small>
+              </div>
+              <div class="timeline-chart" id="timeline-chart"></div>
+            </article>
+
+            <article class="explore-card players-card">
+              <div class="explore-card-heading">
+                <div><span class="eyebrow">Matchups</span><h2 id="players-title">Frequent opponents</h2></div>
+                <small>W · D · L</small>
+              </div>
+              <div class="ranked-list" id="player-list"></div>
+            </article>
+
+            <article class="explore-card positions-card">
+              <div class="explore-card-heading">
+                <div><span class="eyebrow">Patterns</span><h2>Common positions</h2></div>
+                <small>Moves 4–20</small>
+              </div>
+              <div class="position-grid" id="position-list"></div>
+            </article>
           </div>
         </section>
       </main>
