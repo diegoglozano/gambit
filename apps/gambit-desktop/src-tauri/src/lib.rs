@@ -89,17 +89,18 @@ async fn choose_database(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<DatabaseSession>, String> {
-    let selected = app
-        .dialog()
-        .file()
-        .add_filter("Gambit database", &["gambit"])
-        .blocking_pick_file();
+    // macOS disables unknown custom extensions when they are used as a native
+    // content-type filter. Validate after selection so `.gambit` remains usable.
+    let selected = app.dialog().file().blocking_pick_file();
     let Some(selected) = selected else {
         return Ok(None);
     };
     let path = selected
         .into_path()
         .map_err(|error| format!("selected item is not a local file: {error}"))?;
+    if !extension_is(&path, "gambit") {
+        return Err(String::from("choose a .gambit database"));
+    }
     let managed_user = known_managed_user(&app, &path)?;
     let session = load_session(&path, managed_user.as_deref())?;
     remember_session(&app, &path, managed_user.as_deref())?;
@@ -172,11 +173,7 @@ async fn import_pgn(
             .and_then(|stem| stem.to_str())
             .unwrap_or("games")
     );
-    let mut save_dialog = app
-        .dialog()
-        .file()
-        .add_filter("Gambit database", &["gambit"])
-        .set_file_name(suggested_name);
+    let mut save_dialog = app.dialog().file().set_file_name(suggested_name);
     if let Some(parent) = first.parent() {
         save_dialog = save_dialog.set_directory(parent);
     }
