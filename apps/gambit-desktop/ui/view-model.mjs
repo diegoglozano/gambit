@@ -123,3 +123,64 @@ export function reviewSummaries(gameIds, details) {
   const byId = new Map(details.map((detail) => [detail.summary.id, detail.summary]));
   return gameIds.map((id) => byId.get(id)).filter(Boolean);
 }
+
+export function reviewPatternKey(opening, player = null) {
+  return `v1:${String(player ?? "").trim().toLowerCase()}:${Number(opening?.ply ?? 0)}:${String(opening?.line ?? "")}`;
+}
+
+export function reviewProgressMatches(opening, progress, player = null) {
+  return Boolean(progress && progress.pattern === reviewPatternKey(opening, player));
+}
+
+export function reconcileReviewProgress(opening, saved, player = null) {
+  const gameIds = [...new Set((opening.review_game_ids?.length
+    ? opening.review_game_ids
+    : [opening.game_id]).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  const matches = reviewProgressMatches(opening, saved, player);
+  const reviewed = matches
+    ? [...new Set(saved.reviewed_game_ids ?? [])].filter((id) => gameIds.includes(id))
+    : [];
+  const deferred = matches
+    ? [...new Set(saved.deferred_game_ids ?? [])].filter((id) => gameIds.includes(id) && !reviewed.includes(id))
+    : [];
+  const current = matches && gameIds.includes(saved.current_game_id)
+    ? saved.current_game_id
+    : gameIds.find((id) => !reviewed.includes(id) && !deferred.includes(id)) ?? gameIds[0] ?? null;
+  return {
+    pattern: reviewPatternKey(opening, player),
+    title: opening.line || "Recurring opening losses",
+    game_ids: gameIds,
+    reviewed_game_ids: reviewed,
+    deferred_game_ids: deferred,
+    current_game_id: current,
+    ply: Number(opening.ply ?? 0),
+    matching_losses: Number(opening.losses ?? gameIds.length),
+  };
+}
+
+export function prepareReviewProgress(opening, saved, player = null) {
+  const progress = reconcileReviewProgress(opening, saved, player);
+  if (progress.reviewed_game_ids.length === progress.game_ids.length) {
+    progress.reviewed_game_ids = [];
+    progress.deferred_game_ids = [];
+  }
+  const untouched = progress.game_ids.filter((id) => (
+    !progress.reviewed_game_ids.includes(id) && !progress.deferred_game_ids.includes(id)
+  ));
+  if (!untouched.length && progress.deferred_game_ids.length) progress.deferred_game_ids = [];
+  const available = progress.game_ids.filter((id) => (
+    !progress.reviewed_game_ids.includes(id) && !progress.deferred_game_ids.includes(id)
+  ));
+  if (!available.includes(progress.current_game_id)) progress.current_game_id = available[0] ?? progress.game_ids[0] ?? null;
+  return progress;
+}
+
+export function nextReviewGameId(progress, currentGameId) {
+  const available = progress.game_ids.filter((id) => (
+    !progress.reviewed_game_ids.includes(id) && !progress.deferred_game_ids.includes(id)
+  ));
+  if (!available.length) return null;
+  const currentIndex = progress.game_ids.indexOf(currentGameId);
+  return [...progress.game_ids.slice(currentIndex + 1), ...progress.game_ids.slice(0, currentIndex + 1)]
+    .find((id) => available.includes(id)) ?? available[0];
+}

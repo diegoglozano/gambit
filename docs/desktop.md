@@ -68,9 +68,14 @@ Starting the recommendation opens a review set containing up to six recent
 losses that reached the highlighted opening position. Review mode shows only
 those queued games and makes its result, opening position, and “latest six of
 the matching losses” scope visible. It keeps the position aligned across games
-and provides previous, next, progress, and exit controls. Exiting restores the
-player's previous filters, sort, page, selection, and originating view without
-changing the database.
+and provides previous, next, reviewed, defer, open-on-Lichess, and exit
+controls. Reviewed and deferred games remain visible in the set with their
+status, while the next untouched game opens automatically. Progress is stored
+on the Mac for that library, appears on Today, and resumes after relaunching the
+app. When every game has been reviewed or deferred, a session summary returns
+the player to Today (or Explore for an unmanaged library). Exiting early still
+restores the player's previous filters, sort, page, selection, and originating
+view without changing the database.
 
 The app replays a selected standard-chess mainline. The board automatically
 faces the selected player and can be flipped manually. Arrow keys and board
@@ -101,6 +106,8 @@ the saved session. To resume and switch libraries, Gambit stores recent local
 database paths and, when applicable, public Lichess usernames in the
 application-data directory. Managed-library entries also store the counts and
 timestamp from their latest successful check so Today remains useful offline.
+Review progress is stored in the same local session file and is scoped to its
+source library.
 
 ## Architecture
 

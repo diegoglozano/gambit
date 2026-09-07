@@ -137,6 +137,7 @@
               <span class="eyebrow">Work on this</span>
               <h2 id="today-focus-title">—</h2>
               <p id="today-focus-description">—</p>
+              <p class="today-review-progress" id="today-review-progress" hidden>—</p>
               <button id="today-review-focus" type="button">Review a loss →</button>
             </div>
             <div class="today-focus-score">
@@ -170,12 +171,26 @@
               </div>
             </div>
             <div class="review-controls">
-              <small id="review-progress">1 of 1</small>
-              <button id="previous-review" type="button" aria-label="Previous review game">← Previous</button>
-              <button id="next-review" type="button" aria-label="Next review game">Next →</button>
-              <button id="finish-review" type="button">Exit review</button>
+              <div class="review-navigation">
+                <small id="review-progress">0 of 1 reviewed · game 1</small>
+                <button id="previous-review" type="button" aria-label="Previous review game">← Previous</button>
+                <button id="next-review" type="button" aria-label="Next review game">Next →</button>
+              </div>
+              <div class="review-actions">
+                <button id="review-on-lichess" type="button">Open on Lichess ↗</button>
+                <button id="defer-review" type="button">Defer</button>
+                <button class="review-primary" id="mark-reviewed" type="button">Mark reviewed ✓</button>
+                <button id="finish-review" type="button">Exit</button>
+              </div>
             </div>
           </div>
+
+          <section class="review-complete" id="review-complete" hidden>
+            <span class="eyebrow">Review session</span>
+            <h2 id="review-complete-title">Review complete</h2>
+            <p id="review-complete-copy">Your progress is saved on this Mac.</p>
+            <button id="complete-review" type="button">Back to Today →</button>
+          </section>
 
           <details class="query-panel" id="query-panel" open>
             <summary>Search and filter games</summary>
@@ -206,7 +221,7 @@
             <article class="integrity-stat"><span>Integrity</span><strong id="stat-integrity">Not checked</strong><button id="verify-database" type="button">Verify</button></article>
           </div>
 
-          <div class="library-layout">
+          <div class="library-layout" id="library-layout">
             <section class="games-panel" aria-label="Games">
               <div class="panel-heading">
                 <div>
