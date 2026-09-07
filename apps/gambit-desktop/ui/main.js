@@ -3,8 +3,10 @@ import {
   containedScrollDelta,
   createRequestGate,
   formatExploreMonth,
+  formatPlayerRecord,
   parseSyncDate,
   perspectivePlayerIsBlack,
+  selectFocusOpening,
   timelineProgress,
   validateLiveFilters,
 } from "./view-model.mjs";
@@ -33,6 +35,10 @@ const state = {
   sortDirection: "desc",
   explore: null,
   explorePlayer: null,
+  currentView: "library",
+  syncRunning: false,
+  syncReport: null,
+  review: null,
 };
 
 const element = (id) => document.getElementById(id);
@@ -51,9 +57,9 @@ element("sync-form").addEventListener("submit", async (event) => {
   const token = tokenInput.value.trim() || null;
   try {
     await withBusy("Building your library…", "Lichess streams your game history before Gambit indexes it locally.", async () => {
-      const session = await invoke("sync_user", { input: { username, since, token } });
-      await showSession(session);
-      showToast(`${session.info.games.toLocaleString()} games are ready.`);
+      const result = await invoke("sync_user", { input: { username, since, token } });
+      await showSession(result.session, { syncReport: result.session.last_sync, view: "today" });
+      showToast(`${result.session.info.games.toLocaleString()} games are ready.`);
     }, { sync: true, since });
   } finally {
     tokenInput.value = "";
@@ -73,6 +79,7 @@ element("open-another-database").addEventListener("click", async () => {
 element("check-updates").addEventListener("click", () => checkForUpdates(false));
 element("dismiss-update").addEventListener("click", () => element("update-dialog").close());
 element("install-update").addEventListener("click", installAvailableUpdate);
+element("nav-today").addEventListener("click", () => showView("today"));
 element("nav-library").addEventListener("click", () => showView("library"));
 element("nav-explore").addEventListener("click", () => showView("explore"));
 element("game-filters").addEventListener("submit", (event) => {
@@ -97,16 +104,13 @@ element("sort-direction").addEventListener("change", () => {
   state.sortDirection = element("sort-direction").value;
   loadPage(0);
 });
-element("sync-again").addEventListener("click", async () => {
-  if (!state.managedUser) return;
-  await withBusy("Syncing your latest games…", "Only new or changed Lichess games will be indexed.", async () => {
-    const session = await invoke("sync_user", { input: { username: state.managedUser, since: null, token: null } });
-    await showSession(session);
-    showToast("Your library is up to date.");
-  }, { sync: true });
-});
+element("sync-again").addEventListener("click", syncManagedLibrary);
+element("today-sync").addEventListener("click", syncManagedLibrary);
 element("previous-page").addEventListener("click", () => loadPage(Math.max(0, state.session.page.offset - state.session.page.limit)));
 element("next-page").addEventListener("click", () => loadPage(state.session.page.offset + state.session.page.limit));
+element("previous-review").addEventListener("click", () => moveReview(-1));
+element("next-review").addEventListener("click", () => moveReview(1));
+element("finish-review").addEventListener("click", () => finishReview());
 element("first-move").addEventListener("click", () => setPly(0));
 element("previous-move").addEventListener("click", () => setPly(state.ply - 1));
 element("next-move").addEventListener("click", () => setPly(state.ply + 1));
@@ -192,6 +196,73 @@ async function updateDatabase() {
   });
 }
 
+async function syncManagedLibrary() {
+  if (!state.managedUser || state.syncRunning) return;
+  setSyncRunning(true);
+  try {
+    await withBusy("Syncing your latest games…", "Only new or changed Lichess games will be indexed.", async () => {
+      try {
+        const result = await invoke("sync_active_user");
+        await showSession(result.session, { syncReport: result.session.last_sync, view: "today" });
+        showToast(syncToast(result.report));
+      } catch (error) {
+        renderTodaySyncError(String(error));
+        throw error;
+      }
+    }, { sync: true });
+  } finally {
+    setSyncRunning(false);
+  }
+}
+
+async function autoSyncManagedLibrary() {
+  if (!state.managedUser || state.syncRunning) return;
+  const expectedPath = state.session?.path;
+  setSyncRunning(true);
+  if (!state.syncReport) renderTodaySyncPending("Checking Lichess for new games…");
+  try {
+    const result = await invoke("auto_sync_active_user", { path: expectedPath });
+    if (state.session?.path !== expectedPath) return;
+    if (!result) {
+      renderTodaySync(state.syncReport);
+      return;
+    }
+    state.session.info = result.session.info;
+    state.syncReport = result.session.last_sync ?? result.report;
+    state.explore = null;
+    state.explorePlayer = null;
+    renderDatabaseInfo(result.session.info);
+    renderTodaySync(result.report);
+    if (state.currentView === "today") await loadToday();
+    else if (state.currentView === "explore") await loadExplore();
+    else await loadPage(0);
+    if (result.report.created || result.report.updated) showToast(syncToast(result.report));
+  } catch (error) {
+    if (state.session?.path === expectedPath) {
+      renderTodaySyncError(String(error));
+      showToast(`Background sync failed: ${error}`, true);
+    }
+  } finally {
+    setSyncRunning(false);
+  }
+}
+
+function setSyncRunning(running) {
+  state.syncRunning = running;
+  element("sync-again").disabled = running;
+  element("today-sync").disabled = running;
+  element("sync-again").textContent = running ? "↻ Syncing…" : "↻ Sync now";
+  element("today-sync").textContent = running ? "↻ Syncing…" : "↻ Sync now";
+}
+
+function syncToast(report) {
+  if (!report.created && !report.updated) return "Your library is up to date.";
+  const changed = [];
+  if (report.created) changed.push(`${gameCount(report.created)} added`);
+  if (report.updated) changed.push(`${gameCount(report.updated)} refreshed`);
+  return `${changed.join(" · ")}.`;
+}
+
 async function exportGames() {
   if (!state.session) return;
   await withBusy("Exporting games…", "Writing the matching games to a PGN file.", async () => {
@@ -246,7 +317,7 @@ async function installAvailableUpdate() {
   });
 }
 
-async function showSession(session) {
+async function showSession(session, options = {}) {
   const player = session.managed_user ?? null;
   window.clearTimeout(filterTimer);
   filterTimer = null;
@@ -261,10 +332,13 @@ async function showSession(session) {
   state.sortDirection = "desc";
   state.explore = null;
   state.explorePlayer = null;
+  state.syncReport = options.syncReport ?? session.last_sync ?? null;
+  state.review = null;
   state.detail = null;
   state.ply = 0;
   element("welcome-screen").hidden = true;
   element("database-card").hidden = false;
+  element("nav-today").disabled = !player;
   element("nav-explore").disabled = false;
   element("database-name").textContent = basename(session.path);
   element("database-path").textContent = session.path;
@@ -276,7 +350,9 @@ async function showSession(session) {
   element("library-title").textContent = player ? `${player}'s games` : "Your games";
   renderDatabaseInfo(session.info);
   renderPage(session.page);
-  showView("library");
+  renderReviewBar();
+  renderTodaySync(state.syncReport);
+  showView(options.view ?? (player ? "today" : "library"));
   if (session.page.games.length) await selectGame(session.page.games[0].id);
 }
 
@@ -331,7 +407,10 @@ function renderPage(page) {
     button.type = "button";
     button.className = "game-row";
     button.dataset.gameId = game.id;
-    button.addEventListener("click", () => selectGame(game.id));
+    button.addEventListener("click", () => {
+      finishReview(false);
+      selectGame(game.id);
+    });
     button.append(
       row("game-row-top", text(game.date ?? "Unknown date"), text(resultLabel(game.result), "game-row-result")),
       playerRow(game.white, game.white_elo, "White"),
@@ -485,6 +564,7 @@ function beginSyncProgress(since) {
 }
 
 function updateSyncProgress(progress) {
+  updateTodaySyncProgress(progress);
   if (element("sync-progress").hidden) return;
   const bar = element("sync-progress-bar");
   const copy = element("sync-progress-copy");
@@ -505,6 +585,70 @@ function updateSyncProgress(progress) {
   else bar.value = percentage;
   const date = progress.date ? ` · reached ${progress.date.replaceAll(".", "-")}` : "";
   copy.textContent = `Downloaded ${gameCount(progress.games)}${date}`;
+}
+
+function updateTodaySyncProgress(progress) {
+  if (!state.managedUser || !state.syncRunning) return;
+  if (progress.phase === "connecting") {
+    renderTodaySyncPending("Connecting to Lichess…");
+  } else if (progress.phase === "indexing") {
+    renderTodaySyncPending(`Downloaded ${gameCount(progress.games)}. Updating your local library…`);
+  } else {
+    const date = progress.date ? ` through ${progress.date.replaceAll(".", "-")}` : "";
+    renderTodaySyncPending(`Downloaded ${gameCount(progress.games)}${date}…`);
+  }
+}
+
+function renderTodaySync(report) {
+  element("today-total-games").textContent = state.session ? Number(state.session.info.games).toLocaleString() : "—";
+  if (!report) {
+    element("today-sync-heading").textContent = "Your local library is ready";
+    element("today-sync-copy").textContent = state.managedUser
+      ? "Gambit will check Lichess without blocking your library."
+      : "Open a managed Lichess library to see new games here.";
+    element("today-new-games").textContent = "—";
+    element("today-new-record").textContent = "—";
+    element("today-updated-games").textContent = "—";
+    return;
+  }
+  element("today-new-games").textContent = Number(report.created).toLocaleString();
+  element("today-new-record").textContent = formatPlayerRecord(report.results) ?? "—";
+  element("today-updated-games").textContent = Number(report.updated).toLocaleString();
+  const checked = formatLastChecked(report.checked_at_milliseconds ?? report.cursor_milliseconds);
+  if (report.created || report.updated) {
+    element("today-sync-heading").textContent = report.created
+      ? `${gameCount(report.created)} ready to review`
+      : "Changed games were refreshed";
+    element("today-sync-copy").textContent = report.updated
+      ? `${gameCount(report.updated)} changed since the previous local copy.${checked}`
+      : `Your newest games are now part of the patterns below.${checked}`;
+  } else {
+    element("today-sync-heading").textContent = "You're up to date";
+    element("today-sync-copy").textContent = `No new or changed Lichess games were found.${checked}`;
+  }
+}
+
+function renderTodaySyncPending(message) {
+  element("today-sync-heading").textContent = "Checking your latest games";
+  element("today-sync-copy").textContent = message;
+  element("today-new-games").textContent = "…";
+  element("today-new-record").textContent = "…";
+  element("today-updated-games").textContent = "…";
+  element("today-total-games").textContent = state.session ? Number(state.session.info.games).toLocaleString() : "—";
+}
+
+function renderTodaySyncError(error) {
+  element("today-sync-heading").textContent = "Your local library is still available";
+  element("today-sync-copy").textContent = `Lichess could not be checked: ${error}`;
+  element("today-new-games").textContent = state.syncReport ? Number(state.syncReport.created).toLocaleString() : "—";
+  element("today-new-record").textContent = state.syncReport ? formatPlayerRecord(state.syncReport.results) ?? "—" : "—";
+  element("today-updated-games").textContent = state.syncReport ? Number(state.syncReport.updated).toLocaleString() : "—";
+}
+
+function formatLastChecked(milliseconds) {
+  const date = new Date(Number(milliseconds));
+  if (!milliseconds || Number.isNaN(date.getTime())) return "";
+  return ` Last checked ${date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`;
 }
 
 function gameCount(games) {
@@ -583,12 +727,56 @@ function setFilterStatus(message, tone = "") {
 
 function showView(view) {
   if (!state.session) return;
+  if (view === "today" && !state.managedUser) view = "library";
+  state.currentView = view;
+  const today = view === "today";
   const exploring = view === "explore";
-  element("workspace").hidden = exploring;
+  element("today-view").hidden = !today;
+  element("workspace").hidden = today || exploring;
   element("explore-view").hidden = !exploring;
-  element("nav-library").classList.toggle("active", !exploring);
+  element("nav-today").classList.toggle("active", today);
+  element("nav-library").classList.toggle("active", view === "library");
   element("nav-explore").classList.toggle("active", exploring);
-  if (exploring) loadExplore();
+  if (today) loadToday();
+  else if (exploring) loadExplore();
+}
+
+async function loadToday() {
+  if (!state.session || !state.managedUser) return;
+  element("today-title").textContent = `Welcome back, ${state.managedUser}`;
+  element("today-subtitle").textContent = "See what changed, then review one pattern from your games.";
+  if (state.syncRunning && !state.syncReport) renderTodaySyncPending("Checking Lichess for new games…");
+  else renderTodaySync(state.syncReport);
+
+  const player = state.managedUser;
+  if (state.explore && state.explorePlayer?.toLowerCase() === player.toLowerCase()) {
+    renderTodayFocus(selectFocusOpening(state.explore.openings));
+    return;
+  }
+  const request = exploreRequests.next();
+  element("today-focus").hidden = true;
+  try {
+    const report = await invoke("explore_database", { player });
+    if (!exploreRequests.isCurrent(request)) return;
+    state.explore = report;
+    state.explorePlayer = player;
+    renderTodayFocus(selectFocusOpening(report.openings));
+  } catch (error) {
+    if (exploreRequests.isCurrent(request)) showToast(`Could not load your review pattern: ${error}`, true);
+  }
+}
+
+function renderTodayFocus(opening) {
+  const card = element("today-focus");
+  card.hidden = !opening;
+  if (!opening) return;
+  const board = renderMiniBoard(opening.board);
+  element("today-focus-board").replaceChildren(board);
+  element("today-focus-title").textContent = opening.line || "A recurring opening position";
+  element("today-focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. Review the evidence before deciding what to change.`;
+  element("today-focus-score").textContent = `${opening.score}%`;
+  element("today-review-focus").textContent = reviewButtonLabel(opening);
+  element("today-review-focus").onclick = () => startReview(opening);
 }
 
 async function loadExplore() {
@@ -599,6 +787,7 @@ async function loadExplore() {
     return;
   }
   const request = exploreRequests.next();
+  element("explore-focus").hidden = true;
   element("explore-content").setAttribute("aria-busy", "true");
   element("explore-scope").textContent = "Reading patterns from your local database…";
   try {
@@ -624,10 +813,27 @@ function renderExplore(report) {
   element("explore-game-count").textContent = gameCount(report.games);
   element("players-title").textContent = focus ? "Frequent opponents" : "Most active players";
   element("timeline-legend").textContent = focus ? "Wins · Draws · Losses" : "White · Draws · Black";
+  renderFocusOpening(focus ? selectFocusOpening(report.openings) : null);
   renderOpenings(report.openings, report.games);
   renderTimeline(report.timeline);
   renderExplorePlayers(report.players);
   renderCommonPositions(report.positions);
+}
+
+function renderFocusOpening(opening) {
+  const card = element("explore-focus");
+  card.hidden = !opening;
+  if (!opening) return;
+  element("focus-title").textContent = opening.line || "A recurring opening position";
+  element("focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. This is your lowest-scoring common line; review the games before deciding what to change.`;
+  element("focus-score").textContent = `${opening.score}%`;
+  element("review-focus").textContent = reviewButtonLabel(opening);
+  element("review-focus").onclick = () => startReview(opening);
+}
+
+function reviewButtonLabel(opening) {
+  const count = opening.review_game_ids?.length || 1;
+  return `Review ${count} ${count === 1 ? "loss" : "losses"} →`;
 }
 
 function renderOpenings(openings, total) {
@@ -745,6 +951,52 @@ async function openExplorePosition(position) {
   setPly(position.ply);
 }
 
+async function startReview(opening) {
+  const gameIds = opening.review_game_ids?.length ? opening.review_game_ids : [opening.game_id];
+  state.review = {
+    gameIds,
+    index: 0,
+    ply: opening.ply,
+    title: opening.line || "Recurring opening losses",
+  };
+  showView("library");
+  await openReviewGame();
+}
+
+async function moveReview(delta) {
+  if (!state.review) return;
+  const next = state.review.index + delta;
+  if (next < 0 || next >= state.review.gameIds.length) return;
+  state.review.index = next;
+  await openReviewGame();
+}
+
+async function openReviewGame() {
+  if (!state.review) return;
+  renderReviewBar();
+  await selectGame(state.review.gameIds[state.review.index]);
+  setPly(state.review.ply);
+}
+
+function renderReviewBar() {
+  const bar = element("review-bar");
+  bar.hidden = !state.review;
+  if (!state.review) return;
+  const current = state.review.index + 1;
+  const total = state.review.gameIds.length;
+  element("review-title").textContent = state.review.title;
+  element("review-progress").textContent = `${current} of ${total}`;
+  element("previous-review").disabled = current === 1;
+  element("next-review").disabled = current === total;
+}
+
+function finishReview(notify = true) {
+  if (!state.review) return;
+  state.review = null;
+  renderReviewBar();
+  if (notify) showToast("Review complete.");
+}
+
 function text(value, className) {
   const node = document.createElement("span");
   if (className) node.className = className;
@@ -835,7 +1087,10 @@ function basename(path) {
 async function restorePreviousSession() {
   try {
     const session = await invoke("restore_session");
-    if (session) await showSession(session);
+    if (session) {
+      await showSession(session);
+      if (session.managed_user) void autoSyncManagedLibrary();
+    }
   } catch (error) {
     showToast(`Your previous library could not be reopened: ${error}`, true);
   }
@@ -859,13 +1114,16 @@ async function initializeNativeApp() {
 }
 
 async function mockInvoke(command, args = {}) {
-  await new Promise((resolve) => setTimeout(resolve, command === "sync_user" ? 650 : 80));
+  await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
     return { current_version: "0.13.0", version: "0.14.0", notes: "A faster, friendlier Gambit is ready." };
   }
   if (command === "install_update" || command === "restart_app") return null;
   if (command === "get_game") return mockDetail();
+  if (command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user") {
+    return { session: mockSession(), report: mockSyncReport() };
+  }
   if (command === "list_games") {
     const page = mockSession().page;
     if (args.sort === "rating") page.games.sort((a, b) => Math.max(b.white_elo ?? 0, b.black_elo ?? 0) - Math.max(a.white_elo ?? 0, a.black_elo ?? 0));
@@ -884,6 +1142,23 @@ async function mockInvoke(command, args = {}) {
   return mockSession();
 }
 
+function mockSyncReport() {
+  const checkedAt = Date.now();
+  return {
+    username: "diegoglozano",
+    received: 7,
+    created: 5,
+    updated: 1,
+    unchanged: 1,
+    results: { wins: 3, draws: 1, losses: 1, unfinished: 0, unclassified: 0 },
+    cursor_milliseconds: checkedAt - 500,
+    checked_at_milliseconds: checkedAt,
+    refreshed_unfinished: 0,
+    unfinished: 0,
+    index_mode: "update",
+  };
+}
+
 function mockSession() {
   const games = [
     { id: 1, source: "lichess", source_game: 1, event: "Rated rapid game", site: "https://lichess.org/abcdefgh", date: "2026.09.04", white: "diegoglozano", black: "QuietKnight", white_elo: 1241, black_elo: 1218, result: "white_win", mainline_plies: 3 },
@@ -893,6 +1168,7 @@ function mockSession() {
   return {
     path: "/Users/diego/Library/Application Support/Gambit/collections/diegoglozano/diegoglozano.gambit",
     managed_user: "diegoglozano",
+    last_sync: mockSyncReport(),
     info: {
       games: 1729,
       positions: 110859,
@@ -944,14 +1220,14 @@ function mockExplore(player) {
       { month: 202609, games: 42, wins: 19, draws: 3, losses: 20, unfinished: 0 },
     ],
     openings: [
-      { line: "1. e4 e5 2. Nf3 Nc6", board, games: 286, game_id: 1, ply: 3 },
-      { line: "1. d4 Nf6 2. c4 e6", board, games: 201, game_id: 2, ply: 3 },
-      { line: "1. e4 c5 2. Nf3 d6", board, games: 184, game_id: 3, ply: 3 },
+      { line: "1. e4 e5 2. Nf3 Nc6", board, games: 286, wins: 128, draws: 18, losses: 140, unfinished: 0, review_game_ids: [1, 2, 3], game_id: 1, ply: 3 },
+      { line: "1. d4 Nf6 2. c4 e6", board, games: 201, wins: 102, draws: 12, losses: 87, unfinished: 0, review_game_ids: [2, 3], game_id: 2, ply: 3 },
+      { line: "1. e4 c5 2. Nf3 d6", board, games: 184, wins: 96, draws: 8, losses: 80, unfinished: 0, review_game_ids: [3], game_id: 3, ply: 3 },
     ],
     positions: [
-      { line: "1. e4 e5 2. Nf3", board, games: 83, game_id: 1, ply: 3 },
-      { line: "1. d4 Nf6 2. c4", board, games: 64, game_id: 2, ply: 3 },
-      { line: "1. e4 c5 2. Nf3", board, games: 51, game_id: 3, ply: 3 },
+      { line: "1. e4 e5 2. Nf3", board, games: 83, wins: 37, draws: 5, losses: 41, unfinished: 0, review_game_ids: [1, 2, 3], game_id: 1, ply: 3 },
+      { line: "1. d4 Nf6 2. c4", board, games: 64, wins: 31, draws: 4, losses: 29, unfinished: 0, review_game_ids: [2, 3], game_id: 2, ply: 3 },
+      { line: "1. e4 c5 2. Nf3", board, games: 51, wins: 27, draws: 2, losses: 22, unfinished: 0, review_game_ids: [3], game_id: 3, ply: 3 },
     ],
   };
 }

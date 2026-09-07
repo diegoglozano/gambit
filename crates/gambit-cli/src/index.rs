@@ -172,6 +172,11 @@ pub struct ExplorePosition {
     pub line: String,
     pub board: String,
     pub games: u64,
+    pub wins: u64,
+    pub draws: u64,
+    pub losses: u64,
+    pub unfinished: u64,
+    pub review_game_ids: Vec<i64>,
     pub game_id: i64,
     pub ply: u32,
 }
@@ -1834,10 +1839,7 @@ fn explore_positions(
         Value::Integer(i64::from(minimum_ply)),
         Value::Integer(i64::from(maximum_ply)),
     ];
-    let player_predicate = player_key.map_or_else(String::new, |player_key| {
-        let parameter = push_value(&mut values, Value::Blob(player_key.to_vec()));
-        format!(" AND (g.white_key = {parameter} OR g.black_key = {parameter})")
-    });
+    let (player_predicate, outcome_columns) = explore_position_scope(player_key, &mut values);
     let limit_parameter = push_value(&mut values, Value::Integer(i64::from(limit)));
     let having = if repeated_only {
         " HAVING COUNT(DISTINCT p.game_id) > 1"
@@ -1845,7 +1847,8 @@ fn explore_positions(
         ""
     };
     let sql = format!(
-        "SELECT p.position_key, COUNT(DISTINCT p.game_id) AS game_count
+        "SELECT p.position_key, COUNT(DISTINCT p.game_id) AS game_count,
+                {outcome_columns}
          FROM positions p JOIN games g ON g.id = p.game_id
          WHERE p.ply BETWEEN ?1 AND ?2{player_predicate}
          GROUP BY p.position_key{having}
@@ -1855,48 +1858,35 @@ fn explore_positions(
     let mut statement = connection.prepare(&sql).map_err(library_database_error)?;
     let rows = statement
         .query_map(params_from_iter(values), |row| {
-            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
         })
         .map_err(library_database_error)?;
     let groups = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(library_database_error)?;
     let mut positions = Vec::with_capacity(groups.len());
-    for (position_key, games) in groups {
-        let sample = if let Some(player_key) = player_key {
-            connection.query_row(
-                "SELECT p.game_id, MIN(p.ply)
-                 FROM positions p JOIN games g ON g.id = p.game_id
-                 WHERE p.position_key = ?1 AND p.ply BETWEEN ?2 AND ?3 AND
-                       (g.white_key = ?4 OR g.black_key = ?4)
-                 GROUP BY p.game_id
-                 ORDER BY MIN(p.ply), p.game_id
-                 LIMIT 1",
-                params![
-                    &position_key,
-                    i64::from(minimum_ply),
-                    i64::from(maximum_ply),
-                    player_key
-                ],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-        } else {
-            connection.query_row(
-                "SELECT game_id, MIN(ply)
-                 FROM positions
-                 WHERE position_key = ?1 AND ply BETWEEN ?2 AND ?3
-                 GROUP BY game_id
-                 ORDER BY MIN(ply), game_id
-                 LIMIT 1",
-                params![
-                    &position_key,
-                    i64::from(minimum_ply),
-                    i64::from(maximum_ply)
-                ],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-        }
-        .map_err(library_database_error)?;
+    for (position_key, games, wins, draws, losses, unfinished) in groups {
+        let review_game_ids = explore_position_review_games(
+            connection,
+            player_key,
+            &position_key,
+            minimum_ply,
+            maximum_ply,
+        )?;
+        let sample = explore_position_sample(
+            connection,
+            player_key,
+            &position_key,
+            minimum_ply,
+            maximum_ply,
+        )?;
         let ply = u32::try_from(sample.1).unwrap_or(0);
         let detail = game_from_connection(connection, sample.0)?;
         let board = if ply == 0 {
@@ -1914,11 +1904,136 @@ fn explore_positions(
             line: format_san_line(&detail.moves, ply.min(8)),
             board,
             games: u64::try_from(games).unwrap_or(0),
+            wins: u64::try_from(wins).unwrap_or(0),
+            draws: u64::try_from(draws).unwrap_or(0),
+            losses: u64::try_from(losses).unwrap_or(0),
+            unfinished: u64::try_from(unfinished).unwrap_or(0),
+            review_game_ids,
             game_id: sample.0,
             ply,
         });
     }
     Ok(positions)
+}
+
+fn explore_position_review_games(
+    connection: &Connection,
+    player_key: Option<&[u8]>,
+    position_key: &[u8],
+    minimum_ply: u32,
+    maximum_ply: u32,
+) -> Result<Vec<i64>, LibraryError> {
+    let Some(player_key) = player_key else {
+        return Ok(Vec::new());
+    };
+    let sql = format!(
+        "SELECT p.game_id
+         FROM positions p JOIN games g ON g.id = p.game_id
+         WHERE p.position_key = ?1 AND p.ply BETWEEN ?2 AND ?3 AND
+               ((g.white_key = ?4 AND g.result = {RESULT_BLACK_WINS}) OR
+                (g.black_key = ?4 AND
+                 (g.white_key IS NULL OR g.white_key != ?4) AND
+                 g.result = {RESULT_WHITE_WINS}))
+         GROUP BY p.game_id
+         ORDER BY g.played_on IS NULL, g.played_on DESC, p.game_id DESC
+         LIMIT 6"
+    );
+    let mut statement = connection.prepare(&sql).map_err(library_database_error)?;
+    let rows = statement
+        .query_map(
+            params![
+                position_key,
+                i64::from(minimum_ply),
+                i64::from(maximum_ply),
+                player_key
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(library_database_error)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(library_database_error)
+}
+
+fn explore_position_scope(player_key: Option<&[u8]>, values: &mut Vec<Value>) -> (String, String) {
+    let Some(player_key) = player_key else {
+        return (
+            String::new(),
+            format!(
+                "COUNT(DISTINCT CASE WHEN g.result = {RESULT_WHITE_WINS} THEN g.id END),
+                 COUNT(DISTINCT CASE WHEN g.result = {RESULT_DRAW} THEN g.id END),
+                 COUNT(DISTINCT CASE WHEN g.result = {RESULT_BLACK_WINS} THEN g.id END),
+                 COUNT(DISTINCT CASE WHEN g.result = {RESULT_UNFINISHED} THEN g.id END)"
+            ),
+        );
+    };
+    let parameter = push_value(values, Value::Blob(player_key.to_vec()));
+    let white_player = format!("g.white_key = {parameter}");
+    let black_player = format!(
+        "g.black_key = {parameter} AND
+         (g.white_key IS NULL OR g.white_key != {parameter})"
+    );
+    (
+        format!(" AND ({white_player} OR ({black_player}))"),
+        format!(
+            "COUNT(DISTINCT CASE WHEN
+               ({white_player} AND g.result = {RESULT_WHITE_WINS}) OR
+               (({black_player}) AND g.result = {RESULT_BLACK_WINS})
+             THEN g.id END),
+             COUNT(DISTINCT CASE WHEN g.result = {RESULT_DRAW} THEN g.id END),
+             COUNT(DISTINCT CASE WHEN
+               ({white_player} AND g.result = {RESULT_BLACK_WINS}) OR
+               (({black_player}) AND g.result = {RESULT_WHITE_WINS})
+             THEN g.id END),
+             COUNT(DISTINCT CASE WHEN g.result = {RESULT_UNFINISHED} THEN g.id END)"
+        ),
+    )
+}
+
+fn explore_position_sample(
+    connection: &Connection,
+    player_key: Option<&[u8]>,
+    position_key: &[u8],
+    minimum_ply: u32,
+    maximum_ply: u32,
+) -> Result<(i64, i64), LibraryError> {
+    let sample = if let Some(player_key) = player_key {
+        connection.query_row(
+            "SELECT p.game_id, MIN(p.ply)
+                 FROM positions p JOIN games g ON g.id = p.game_id
+                 WHERE p.position_key = ?1 AND p.ply BETWEEN ?2 AND ?3 AND
+                       (g.white_key = ?4 OR g.black_key = ?4)
+                 GROUP BY p.game_id
+                 ORDER BY
+                   ((g.white_key = ?4 AND g.result = 2) OR
+                    (g.black_key = ?4 AND
+                     (g.white_key IS NULL OR g.white_key != ?4) AND g.result = 1)) DESC,
+                   g.played_on IS NULL, g.played_on DESC, MIN(p.ply), p.game_id
+                 LIMIT 1",
+            params![
+                &position_key,
+                i64::from(minimum_ply),
+                i64::from(maximum_ply),
+                player_key
+            ],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+    } else {
+        connection.query_row(
+            "SELECT game_id, MIN(ply)
+                 FROM positions
+                 WHERE position_key = ?1 AND ply BETWEEN ?2 AND ?3
+                 GROUP BY game_id
+                 ORDER BY MIN(ply), game_id
+                 LIMIT 1",
+            params![
+                &position_key,
+                i64::from(minimum_ply),
+                i64::from(maximum_ply)
+            ],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+    };
+    sample.map_err(library_database_error)
 }
 
 fn format_san_line(moves: &[GameMove], maximum_ply: u32) -> String {
@@ -2476,6 +2591,11 @@ mod tests {
         assert_eq!(report.timeline.len(), 3);
         assert_eq!(report.timeline[0].month, 202_607);
         assert_eq!(report.openings[0].games, 2);
+        assert_eq!(report.openings[0].wins, 1);
+        assert_eq!(report.openings[0].draws, 0);
+        assert_eq!(report.openings[0].losses, 1);
+        assert_eq!(report.openings[0].unfinished, 0);
+        assert_eq!(report.openings[0].review_game_ids.len(), 1);
         assert_eq!(report.openings[0].ply, 4);
         assert!(report.openings[0].line.contains("1. e4 e5"));
         let representative = game(&path, report.openings[0].game_id).unwrap();
@@ -2483,9 +2603,30 @@ mod tests {
             representative.summary.white.as_deref() == Some("Alice")
                 || representative.summary.black.as_deref() == Some("Alice")
         );
+        assert_eq!(representative.summary.result.as_deref(), Some("black_win"));
+        assert_eq!(
+            report.openings[0].review_game_ids[0],
+            representative.summary.id
+        );
         assert_eq!(report.positions[0].games, 2);
         assert_eq!(report.positions[0].ply, 8);
         assert_eq!(report.positions[0].board.len(), 64);
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn library_api_builds_unscoped_explore_outcomes() {
+        let path = explore_test_library("unscoped-report");
+        let report = explore(&path, None).unwrap();
+
+        assert_eq!(report.games, 4);
+        assert_eq!(report.openings[0].games, 3);
+        assert_eq!(report.openings[0].wins, 2);
+        assert_eq!(report.openings[0].draws, 0);
+        assert_eq!(report.openings[0].losses, 1);
+        assert_eq!(report.openings[0].unfinished, 0);
+        assert!(report.openings[0].review_game_ids.is_empty());
 
         fs::remove_file(path).unwrap();
     }

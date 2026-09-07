@@ -45,7 +45,45 @@ pub struct IngestSummary {
     pub created: u64,
     pub updated: u64,
     pub unchanged: u64,
+    pub created_results: PlayerResultCounts,
     pub statuses: Vec<GameStatus>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PlayerResultCounts {
+    pub wins: u64,
+    pub draws: u64,
+    pub losses: u64,
+    pub unfinished: u64,
+    pub unclassified: u64,
+}
+
+impl PlayerResultCounts {
+    fn observe(&mut self, result: Option<PlayerResult>) {
+        match result {
+            Some(PlayerResult::Win) => self.wins += 1,
+            Some(PlayerResult::Draw) => self.draws += 1,
+            Some(PlayerResult::Loss) => self.losses += 1,
+            Some(PlayerResult::Unfinished) => self.unfinished += 1,
+            None => self.unclassified += 1,
+        }
+    }
+
+    fn add(&mut self, other: &Self) {
+        self.wins += other.wins;
+        self.draws += other.draws;
+        self.losses += other.losses;
+        self.unfinished += other.unfinished;
+        self.unclassified += other.unclassified;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlayerResult {
+    Win,
+    Draw,
+    Loss,
+    Unfinished,
 }
 
 impl IngestSummary {
@@ -54,6 +92,7 @@ impl IngestSummary {
         self.created += other.created;
         self.updated += other.updated;
         self.unchanged += other.unchanged;
+        self.created_results.add(&other.created_results);
         self.statuses.append(&mut other.statuses);
     }
 }
@@ -233,25 +272,28 @@ pub fn ingest_with_progress<R: Read, F: FnMut(u64, Option<&str>)>(
     let mut summary = IngestSummary::default();
     while let Some(game) = reader.read_game().map_err(SyncError::Frame)? {
         summary.received += 1;
-        let (game_id, unfinished, date) = inspect_game(game, summary.received)?;
+        let inspected = inspect_game(game, summary.received, plan.username.as_bytes())?;
         if let Some(expected) = expected_game_id {
-            if game_id != expected {
+            if inspected.game_id != expected {
                 return Err(SyncError::UnexpectedGameId {
                     expected: expected.to_owned(),
-                    actual: game_id,
+                    actual: inspected.game_id,
                 });
             }
         }
-        match store_game(plan.destination(), &game_id, game)? {
-            StoreResult::Created => summary.created += 1,
+        match store_game(plan.destination(), &inspected.game_id, game)? {
+            StoreResult::Created => {
+                summary.created += 1;
+                summary.created_results.observe(inspected.player_result);
+            }
             StoreResult::Updated => summary.updated += 1,
             StoreResult::Unchanged => summary.unchanged += 1,
         }
         summary.statuses.push(GameStatus {
-            game_id,
-            unfinished,
+            game_id: inspected.game_id,
+            unfinished: inspected.unfinished,
         });
-        on_progress(summary.received, date.as_deref());
+        on_progress(summary.received, inspected.date.as_deref());
     }
     if expected_game_id.is_some() && summary.received != 1 {
         return Err(SyncError::UnexpectedGameCount {
@@ -360,10 +402,19 @@ fn write_state(path: &Path, state: &SyncState) -> Result<(), SyncError> {
     result
 }
 
-fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool, Option<String>), SyncError> {
+struct InspectedGame {
+    game_id: String,
+    unfinished: bool,
+    date: Option<String>,
+    player_result: Option<PlayerResult>,
+}
+
+fn inspect_game(game: &[u8], number: u64, username: &[u8]) -> Result<InspectedGame, SyncError> {
     let mut game_id = None;
     let mut date = None;
     let mut utc_date = None;
+    let mut white = None;
+    let mut black = None;
     let mut outcome = None;
     let mut variation_depth = 0_u32;
     for event in Parser::with_options(game, ParserOptions::STRICT) {
@@ -380,6 +431,12 @@ fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool, Option<String
             Event::Tag(tag) if tag.name() == b"Date" && date.is_none() => {
                 date = Some(String::from_utf8_lossy(tag.value().as_ref()).into_owned());
             }
+            Event::Tag(tag) if tag.name() == b"White" && white.is_none() => {
+                white = Some(tag.value().as_ref().to_vec());
+            }
+            Event::Tag(tag) if tag.name() == b"Black" && black.is_none() => {
+                black = Some(tag.value().as_ref().to_vec());
+            }
             Event::VariationStart(_) => variation_depth += 1,
             Event::VariationEnd(_) => variation_depth -= 1,
             Event::Outcome { outcome: value, .. } if variation_depth == 0 => outcome = Some(value),
@@ -387,11 +444,36 @@ fn inspect_game(game: &[u8], number: u64) -> Result<(String, bool, Option<String
         }
     }
     let game_id = game_id.ok_or(SyncError::MissingGameId { game: number })?;
-    Ok((
+    Ok(InspectedGame {
         game_id,
-        outcome == Some(Outcome::Unknown),
-        utc_date.or(date),
-    ))
+        unfinished: outcome == Some(Outcome::Unknown),
+        date: utc_date.or(date),
+        player_result: player_result(username, white.as_deref(), black.as_deref(), outcome),
+    })
+}
+
+fn player_result(
+    username: &[u8],
+    white: Option<&[u8]>,
+    black: Option<&[u8]>,
+    outcome: Option<Outcome>,
+) -> Option<PlayerResult> {
+    let player_is_white = white.is_some_and(|player| player.eq_ignore_ascii_case(username));
+    let player_is_black =
+        !player_is_white && black.is_some_and(|player| player.eq_ignore_ascii_case(username));
+    match (player_is_white, player_is_black, outcome?) {
+        (true, false, Outcome::WhiteWins) | (false, true, Outcome::BlackWins) => {
+            Some(PlayerResult::Win)
+        }
+        (true, false, Outcome::BlackWins) | (false, true, Outcome::WhiteWins) => {
+            Some(PlayerResult::Loss)
+        }
+        (true, false, Outcome::Draw) | (false, true, Outcome::Draw) => Some(PlayerResult::Draw),
+        (true, false, Outcome::Unknown) | (false, true, Outcome::Unknown) => {
+            Some(PlayerResult::Unfinished)
+        }
+        _ => None,
+    }
 }
 
 fn game_id_from_site(site: &[u8]) -> Option<String> {
@@ -569,6 +651,23 @@ mod tests {
                 (2, Some(String::from("2026.09.03")))
             ]
         );
+    }
+
+    #[test]
+    fn counts_created_results_from_the_synced_players_perspective() {
+        let directory = TestDirectory::new();
+        let plan = prepare(&directory.0, "DiegoGlozano", 1, None).unwrap();
+        start(&plan).unwrap();
+        let pgn = b"[Site \"https://lichess.org/Win00001\"]\n[White \"diegoglozano\"]\n[Black \"Other\"]\n\n1. e4 1-0\n\n[Site \"https://lichess.org/Win00002\"]\n[White \"Other\"]\n[Black \"DIEGOGLOZANO\"]\n\n1. e4 0-1\n\n[Site \"https://lichess.org/Draw0001\"]\n[White \"diegoglozano\"]\n[Black \"Other\"]\n\n1. e4 1/2-1/2\n\n[Site \"https://lichess.org/Loss0001\"]\n[White \"Other\"]\n[Black \"diegoglozano\"]\n\n1. e4 1-0\n\n[Site \"https://lichess.org/Open0001\"]\n[White \"diegoglozano\"]\n[Black \"Other\"]\n\n1. e4 *\n";
+
+        let summary = ingest(&pgn[..], &plan, None).unwrap();
+
+        assert_eq!(summary.created, 5);
+        assert_eq!(summary.created_results.wins, 2);
+        assert_eq!(summary.created_results.draws, 1);
+        assert_eq!(summary.created_results.losses, 1);
+        assert_eq!(summary.created_results.unfinished, 1);
+        assert_eq!(summary.created_results.unclassified, 0);
     }
 
     #[test]

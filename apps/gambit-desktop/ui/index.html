@@ -19,6 +19,9 @@
         </div>
 
         <nav aria-label="Primary navigation">
+          <button class="nav-item" id="nav-today" type="button" disabled>
+            <span aria-hidden="true">◉</span> Today
+          </button>
           <button class="nav-item active" id="nav-library" type="button">
             <span aria-hidden="true">◫</span> Library
           </button>
@@ -104,6 +107,45 @@
           </div>
         </section>
 
+        <section class="today-view" id="today-view" hidden>
+          <header class="workspace-header today-header">
+            <div>
+              <span class="eyebrow">Today</span>
+              <h1 id="today-title">Welcome back</h1>
+              <p id="today-subtitle">A quick look at your local chess history.</p>
+            </div>
+            <button class="sync-button" id="today-sync" type="button">↻ Sync now</button>
+          </header>
+
+          <article class="today-sync-card" aria-live="polite">
+            <div>
+              <span class="eyebrow">Latest check</span>
+              <h2 id="today-sync-heading">Your library is ready</h2>
+              <p id="today-sync-copy">Checking Lichess happens in the background.</p>
+            </div>
+            <div class="today-sync-stats" aria-label="Latest sync summary">
+              <div><strong id="today-new-games">—</strong><span>new</span></div>
+              <div><strong id="today-new-record">—</strong><span>new record</span></div>
+              <div><strong id="today-updated-games">—</strong><span>updated</span></div>
+              <div><strong id="today-total-games">—</strong><span>total games</span></div>
+            </div>
+          </article>
+
+          <article class="today-focus-card" id="today-focus" hidden>
+            <div class="today-focus-board" id="today-focus-board" aria-hidden="true"></div>
+            <div class="today-focus-copy">
+              <span class="eyebrow">Work on this</span>
+              <h2 id="today-focus-title">—</h2>
+              <p id="today-focus-description">—</p>
+              <button id="today-review-focus" type="button">Review a loss →</button>
+            </div>
+            <div class="today-focus-score">
+              <strong id="today-focus-score">—</strong>
+              <span>player score</span>
+            </div>
+          </article>
+        </section>
+
         <section class="workspace" id="workspace" hidden>
           <header class="workspace-header">
             <div>
@@ -116,6 +158,19 @@
               <button class="sync-button" id="sync-again" type="button" hidden>↻ Sync now</button>
             </div>
           </header>
+
+          <div class="review-bar" id="review-bar" hidden>
+            <div>
+              <span class="eyebrow">Review set</span>
+              <strong id="review-title">Recurring opening losses</strong>
+              <small id="review-progress">1 of 1</small>
+            </div>
+            <div class="review-controls">
+              <button id="previous-review" type="button" aria-label="Previous review game">← Previous</button>
+              <button id="next-review" type="button" aria-label="Next review game">Next →</button>
+              <button id="finish-review" type="button">Finish</button>
+            </div>
+          </div>
 
           <details class="query-panel" open>
             <summary>Search and filter games</summary>
@@ -226,6 +281,19 @@
             </div>
             <span class="explore-game-count" id="explore-game-count">—</span>
           </header>
+
+          <article class="focus-card" id="explore-focus" hidden>
+            <div class="focus-copy">
+              <span class="eyebrow">A pattern worth reviewing</span>
+              <h2 id="focus-title">—</h2>
+              <p id="focus-description">—</p>
+            </div>
+            <div class="focus-action">
+              <strong id="focus-score">—</strong>
+              <span>player score</span>
+              <button id="review-focus" type="button">Review a loss →</button>
+            </div>
+          </article>
 
           <div class="explore-grid" id="explore-content">
             <article class="explore-card openings-card">

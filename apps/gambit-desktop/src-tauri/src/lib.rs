@@ -2,12 +2,14 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use gambit::collection::{self, SyncRequest};
+use gambit::collection::{self, SyncReport, SyncRequest};
 use gambit::index::{
     self, DatabaseInfo, ExploreReport, GameDetail, GameOrder, GamePage, GameSort, SortDirection,
 };
 use gambit::query::{self, PlayerColor, QueryFormat, QueryOptions, ResultFilter};
+use gambit::sync::PlayerResultCounts;
 use gambit_chess::Position;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -23,8 +25,15 @@ struct AppState {
 struct DatabaseSession {
     path: String,
     managed_user: Option<String>,
+    last_sync: Option<SavedSyncSummary>,
     info: DatabaseInfo,
     page: GamePage,
+}
+
+#[derive(Serialize)]
+struct SyncResult {
+    session: DatabaseSession,
+    report: SyncReport,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -40,6 +49,17 @@ struct SavedSession {
 struct SavedLibrary {
     database: PathBuf,
     managed_user: Option<String>,
+    #[serde(default)]
+    last_sync: Option<SavedSyncSummary>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedSyncSummary {
+    created: u64,
+    updated: u64,
+    results: PlayerResultCounts,
+    cursor_milliseconds: i64,
+    checked_at_milliseconds: i64,
 }
 
 #[derive(Serialize)]
@@ -103,8 +123,12 @@ async fn choose_database(
     if !extension_is(&path, "gambit") {
         return Err(String::from("choose a .gambit database"));
     }
-    let managed_user = known_managed_user(&app, &path)?;
-    let session = load_session(&path, managed_user.as_deref())?;
+    let library = known_library(&app, &path)?;
+    let managed_user = library
+        .as_ref()
+        .and_then(|library| library.managed_user.clone());
+    let last_sync = library.and_then(|library| library.last_sync);
+    let session = load_session(&path, managed_user.as_deref(), last_sync)?;
     remember_session(&app, &path, managed_user.as_deref())?;
     set_database(&state, path)?;
     Ok(Some(session))
@@ -117,8 +141,12 @@ async fn open_database(
     path: String,
 ) -> Result<DatabaseSession, String> {
     let path = PathBuf::from(path);
-    let managed_user = known_managed_user(&app, &path)?;
-    let session = load_session(&path, managed_user.as_deref())?;
+    let library = known_library(&app, &path)?;
+    let managed_user = library
+        .as_ref()
+        .and_then(|library| library.managed_user.clone());
+    let last_sync = library.and_then(|library| library.last_sync);
+    let session = load_session(&path, managed_user.as_deref(), last_sync)?;
     remember_session(&app, &path, managed_user.as_deref())?;
     set_database(&state, path)?;
     Ok(session)
@@ -201,7 +229,7 @@ async fn import_pgn(
     .await
     .map_err(|error| format!("index task failed: {error}"))?
     .map_err(|error| error.to_string())?;
-    let session = load_session(&database, None)?;
+    let session = load_session(&database, None, None)?;
     remember_session(&app, &database, None)?;
     set_database(&state, database)?;
     Ok(Some(session))
@@ -232,7 +260,11 @@ async fn update_database(
         return Err(String::from("choose only .pgn or .pgn.zst files"));
     }
     let database = database(&state)?;
-    let managed_user = known_managed_user(&app, &database)?;
+    let library = known_library(&app, &database)?;
+    let managed_user = library
+        .as_ref()
+        .and_then(|library| library.managed_user.clone());
+    let last_sync = library.and_then(|library| library.last_sync);
     let update_database = database.clone();
     tauri::async_runtime::spawn_blocking(move || {
         index::update_database_from_files(inputs, &update_database)
@@ -240,7 +272,7 @@ async fn update_database(
     .await
     .map_err(|error| format!("index update task failed: {error}"))?
     .map_err(|error| error.to_string())?;
-    let session = load_session(&database, managed_user.as_deref())?;
+    let session = load_session(&database, managed_user.as_deref(), last_sync)?;
     remember_session(&app, &database, managed_user.as_deref())?;
     Ok(Some(session))
 }
@@ -254,7 +286,12 @@ fn restore_session(
     let Some(saved) = read_saved_session(&app)? else {
         return Ok(None);
     };
-    let session = load_session(&saved.database, saved.managed_user.as_deref())?;
+    let last_sync = saved
+        .libraries
+        .iter()
+        .find(|library| library.database == saved.database)
+        .and_then(|library| library.last_sync.clone());
+    let session = load_session(&saved.database, saved.managed_user.as_deref(), last_sync)?;
     set_database(&state, saved.database)?;
     Ok(Some(session))
 }
@@ -264,7 +301,7 @@ async fn sync_user(
     app: AppHandle,
     state: State<'_, AppState>,
     input: SyncInput,
-) -> Result<DatabaseSession, String> {
+) -> Result<SyncResult, String> {
     let username = validated_username(&input.username)?;
     let root = app
         .path()
@@ -281,6 +318,60 @@ async fn sync_user(
     .map_err(|error| error.to_string())?;
     request.token = normalized_token(input.token);
     let database = request.database.clone();
+    let report = perform_sync(&app, request).await?;
+    remember_session(&app, &database, Some(&username))?;
+    let last_sync = remember_sync(&app, &database, &report)?;
+    let session = load_session(&database, Some(&username), Some(last_sync))?;
+    set_database(&state, database)?;
+    Ok(SyncResult { session, report })
+}
+
+#[tauri::command]
+async fn sync_active_user(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SyncResult, String> {
+    let database = database(&state)?;
+    let username = known_library(&app, &database)?
+        .and_then(|library| library.managed_user)
+        .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
+    sync_managed_database(&app, database, username).await
+}
+
+#[tauri::command]
+async fn auto_sync_active_user(app: AppHandle, path: String) -> Result<Option<SyncResult>, String> {
+    let database = PathBuf::from(path);
+    let library = known_library(&app, &database)?
+        .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
+    let username = library
+        .managed_user
+        .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
+    if !auto_sync_due(library.last_sync.as_ref(), current_time_milliseconds()?) {
+        return Ok(None);
+    }
+    sync_managed_database(&app, database, username)
+        .await
+        .map(Some)
+}
+
+async fn sync_managed_database(
+    app: &AppHandle,
+    database: PathBuf,
+    username: String,
+) -> Result<SyncResult, String> {
+    let destination = database
+        .parent()
+        .ok_or_else(|| String::from("managed database has no parent directory"))?
+        .join("lichess");
+    let request = SyncRequest::with_since(&username, destination, &database, None)
+        .map_err(|error| error.to_string())?;
+    let report = perform_sync(app, request).await?;
+    let last_sync = remember_sync(app, &database, &report)?;
+    let session = load_session(&database, Some(&username), Some(last_sync))?;
+    Ok(SyncResult { session, report })
+}
+
+async fn perform_sync(app: &AppHandle, request: SyncRequest) -> Result<SyncReport, String> {
     let progress_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         collection::sync_lichess_with_progress(&request, |progress| {
@@ -289,11 +380,7 @@ async fn sync_user(
     })
     .await
     .map_err(|error| format!("sync task failed: {error}"))?
-    .map_err(|error| error.to_string())?;
-    let session = load_session(&database, Some(&username))?;
-    remember_session(&app, &database, Some(&username))?;
-    set_database(&state, database)?;
-    Ok(session)
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -456,7 +543,11 @@ fn restart_app(app: AppHandle) {
     app.restart();
 }
 
-fn load_session(path: &Path, player: Option<&str>) -> Result<DatabaseSession, String> {
+fn load_session(
+    path: &Path,
+    player: Option<&str>,
+    last_sync: Option<SavedSyncSummary>,
+) -> Result<DatabaseSession, String> {
     let info = index::info(path, false).map_err(|error| error.to_string())?;
     let options = QueryOptions {
         player: player.map(str::to_owned),
@@ -466,6 +557,7 @@ fn load_session(path: &Path, player: Option<&str>) -> Result<DatabaseSession, St
     Ok(DatabaseSession {
         path: path.to_string_lossy().into_owned(),
         managed_user: player.map(str::to_owned),
+        last_sync,
         info,
         page,
     })
@@ -483,19 +575,37 @@ fn remember_session(
     write_saved_session(&app_data, database, managed_user)
 }
 
-fn known_managed_user(app: &AppHandle, database: &Path) -> Result<Option<String>, String> {
+fn known_library(app: &AppHandle, database: &Path) -> Result<Option<SavedLibrary>, String> {
     let app_data = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("failed to locate application data: {error}"))?;
-    Ok(read_saved_session_from(&app_data)?
-        .and_then(|saved| {
-            saved
-                .libraries
-                .into_iter()
-                .find(|library| library.database == database)
-        })
-        .and_then(|library| library.managed_user))
+    Ok(read_saved_session_from(&app_data)?.and_then(|saved| {
+        saved
+            .libraries
+            .into_iter()
+            .find(|library| library.database == database)
+    }))
+}
+
+fn remember_sync(
+    app: &AppHandle,
+    database: &Path,
+    report: &SyncReport,
+) -> Result<SavedSyncSummary, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to locate application data: {error}"))?;
+    let summary = SavedSyncSummary {
+        created: report.created,
+        updated: report.updated,
+        results: report.results.clone(),
+        cursor_milliseconds: report.cursor_milliseconds,
+        checked_at_milliseconds: current_time_milliseconds()?,
+    };
+    write_saved_sync(&app_data, database, &summary)?;
+    Ok(summary)
 }
 
 fn read_saved_session(app: &AppHandle) -> Result<Option<SavedSession>, String> {
@@ -531,6 +641,7 @@ fn read_saved_session_from(app_data: &Path) -> Result<Option<SavedSession>, Stri
             SavedLibrary {
                 database: saved.database.clone(),
                 managed_user: saved.managed_user.clone(),
+                last_sync: None,
             },
         );
     }
@@ -543,18 +654,20 @@ fn write_saved_session(
     managed_user: Option<&str>,
 ) -> Result<(), String> {
     const MAXIMUM_RECENT_LIBRARIES: usize = 12;
-    fs::create_dir_all(app_data)
-        .map_err(|error| format!("failed to create {}: {error}", app_data.display()))?;
-    let path = app_data.join("session.json");
     let mut libraries = read_saved_session_from(app_data)?
         .map(|saved| saved.libraries)
         .unwrap_or_default();
+    let last_sync = libraries
+        .iter()
+        .find(|library| library.database == database)
+        .and_then(|library| library.last_sync.clone());
     libraries.retain(|library| library.database != database);
     libraries.insert(
         0,
         SavedLibrary {
             database: database.to_owned(),
             managed_user: managed_user.map(str::to_owned),
+            last_sync,
         },
     );
     libraries.truncate(MAXIMUM_RECENT_LIBRARIES);
@@ -564,6 +677,29 @@ fn write_saved_session(
         managed_user: managed_user.map(str::to_owned),
         libraries,
     };
+    write_saved_session_data(app_data, &saved)
+}
+
+fn write_saved_sync(
+    app_data: &Path,
+    database: &Path,
+    summary: &SavedSyncSummary,
+) -> Result<(), String> {
+    let mut saved = read_saved_session_from(app_data)?
+        .ok_or_else(|| String::from("cannot save sync status before the library is registered"))?;
+    let library = saved
+        .libraries
+        .iter_mut()
+        .find(|library| library.database == database)
+        .ok_or_else(|| String::from("cannot save sync status for an unknown library"))?;
+    library.last_sync = Some(summary.clone());
+    write_saved_session_data(app_data, &saved)
+}
+
+fn write_saved_session_data(app_data: &Path, saved: &SavedSession) -> Result<(), String> {
+    fs::create_dir_all(app_data)
+        .map_err(|error| format!("failed to create {}: {error}", app_data.display()))?;
+    let path = app_data.join("session.json");
     let contents = serde_json::to_vec_pretty(&saved)
         .map_err(|error| format!("failed to encode {}: {error}", path.display()))?;
     let temporary = temporary_sibling(&path);
@@ -584,6 +720,23 @@ fn write_saved_session(
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn auto_sync_due(last_sync: Option<&SavedSyncSummary>, now_milliseconds: i64) -> bool {
+    const AUTO_SYNC_INTERVAL_MILLISECONDS: i64 = 15 * 60 * 1_000;
+    last_sync.is_none_or(|last_sync| {
+        now_milliseconds < last_sync.checked_at_milliseconds
+            || now_milliseconds.saturating_sub(last_sync.checked_at_milliseconds)
+                >= AUTO_SYNC_INTERVAL_MILLISECONDS
+    })
+}
+
+fn current_time_milliseconds() -> Result<i64, String> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock is before Unix epoch: {error}"))?;
+    i64::try_from(duration.as_millis())
+        .map_err(|_| String::from("current time does not fit in milliseconds"))
 }
 
 fn query_options(filters: &GameFilters) -> Result<QueryOptions, String> {
@@ -792,6 +945,8 @@ pub fn run() {
             update_database,
             restore_session,
             sync_user,
+            sync_active_user,
+            auto_sync_active_user,
             list_games,
             explore_database,
             check_database,
@@ -862,6 +1017,22 @@ mod tests {
     }
 
     #[test]
+    fn saved_libraries_without_sync_summaries_still_load() {
+        let saved: SavedSession = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "database": "/tmp/older.gambit",
+            "managed_user": "older-player",
+            "libraries": [{
+                "database": "/tmp/older.gambit",
+                "managed_user": "older-player"
+            }]
+        }))
+        .unwrap();
+
+        assert!(saved.libraries[0].last_sync.is_none());
+    }
+
+    #[test]
     fn recent_libraries_are_deduplicated_and_most_recent_first() {
         let root = std::env::temp_dir().join(format!(
             "gambit-desktop-recent-libraries-{}",
@@ -885,6 +1056,61 @@ mod tests {
         );
         assert_eq!(saved.libraries[1].database, second);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sync_summary_is_scoped_to_its_library_without_changing_the_active_library() {
+        let root = std::env::temp_dir().join(format!(
+            "gambit-desktop-background-sync-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let first = root.join("first.gambit");
+        let second = root.join("second.gambit");
+        write_saved_session(&root, &first, Some("first-player")).unwrap();
+        write_saved_session(&root, &second, Some("second-player")).unwrap();
+        let summary = SavedSyncSummary {
+            created: 3,
+            updated: 1,
+            results: PlayerResultCounts {
+                wins: 2,
+                draws: 0,
+                losses: 1,
+                unfinished: 0,
+                unclassified: 0,
+            },
+            cursor_milliseconds: 1_000,
+            checked_at_milliseconds: 2_000,
+        };
+
+        write_saved_sync(&root, &first, &summary).unwrap();
+
+        let saved = read_saved_session_from(&root).unwrap().unwrap();
+        assert_eq!(saved.database, second);
+        assert_eq!(saved.managed_user.as_deref(), Some("second-player"));
+        let first_library = saved
+            .libraries
+            .iter()
+            .find(|library| library.database == first)
+            .unwrap();
+        assert_eq!(first_library.last_sync.as_ref().unwrap().created, 3);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn automatic_sync_waits_fifteen_minutes_after_a_successful_check() {
+        let summary = SavedSyncSummary {
+            created: 0,
+            updated: 0,
+            results: PlayerResultCounts::default(),
+            cursor_milliseconds: 1_000,
+            checked_at_milliseconds: 1_000,
+        };
+
+        assert!(auto_sync_due(None, 1_000));
+        assert!(!auto_sync_due(Some(&summary), 900_999));
+        assert!(auto_sync_due(Some(&summary), 901_000));
+        assert!(auto_sync_due(Some(&summary), 999));
     }
 
     #[test]
