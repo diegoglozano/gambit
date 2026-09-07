@@ -146,7 +146,9 @@ async fn choose_database(
     let managed_user = library
         .as_ref()
         .and_then(|library| library.managed_user.clone());
-    let last_sync = library.as_ref().and_then(|library| library.last_sync.clone());
+    let last_sync = library
+        .as_ref()
+        .and_then(|library| library.last_sync.clone());
     let review_progress = library.and_then(|library| library.review_progress);
     let session = load_session(&path, managed_user.as_deref(), last_sync, review_progress)?;
     remember_session(&app, &path, managed_user.as_deref())?;
@@ -165,7 +167,9 @@ async fn open_database(
     let managed_user = library
         .as_ref()
         .and_then(|library| library.managed_user.clone());
-    let last_sync = library.as_ref().and_then(|library| library.last_sync.clone());
+    let last_sync = library
+        .as_ref()
+        .and_then(|library| library.last_sync.clone());
     let review_progress = library.and_then(|library| library.review_progress);
     let session = load_session(&path, managed_user.as_deref(), last_sync, review_progress)?;
     remember_session(&app, &path, managed_user.as_deref())?;
@@ -285,7 +289,9 @@ async fn update_database(
     let managed_user = library
         .as_ref()
         .and_then(|library| library.managed_user.clone());
-    let last_sync = library.as_ref().and_then(|library| library.last_sync.clone());
+    let last_sync = library
+        .as_ref()
+        .and_then(|library| library.last_sync.clone());
     let review_progress = library.and_then(|library| library.review_progress);
     let update_database = database.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -358,13 +364,9 @@ async fn sync_user(
     let report = perform_sync(&app, request).await?;
     remember_session(&app, &database, Some(&username))?;
     let last_sync = remember_sync(&app, &database, &report)?;
-    let review_progress = known_library(&app, &database)?.and_then(|library| library.review_progress);
-    let session = load_session(
-        &database,
-        Some(&username),
-        Some(last_sync),
-        review_progress,
-    )?;
+    let review_progress =
+        known_library(&app, &database)?.and_then(|library| library.review_progress);
+    let session = load_session(&database, Some(&username), Some(last_sync), review_progress)?;
     set_database(&state, database)?;
     Ok(SyncResult { session, report })
 }
@@ -410,13 +412,9 @@ async fn sync_managed_database(
         .map_err(|error| error.to_string())?;
     let report = perform_sync(app, request).await?;
     let last_sync = remember_sync(app, &database, &report)?;
-    let review_progress = known_library(app, &database)?.and_then(|library| library.review_progress);
-    let session = load_session(
-        &database,
-        Some(&username),
-        Some(last_sync),
-        review_progress,
-    )?;
+    let review_progress =
+        known_library(app, &database)?.and_then(|library| library.review_progress);
+    let session = load_session(&database, Some(&username), Some(last_sync), review_progress)?;
     Ok(SyncResult { session, report })
 }
 
@@ -546,7 +544,9 @@ fn save_review_progress(
     validate_review_progress(&progress)?;
     let database = database(&state)?;
     if database != Path::new(&expected_path) {
-        return Err(String::from("the active library changed before review progress was saved"));
+        return Err(String::from(
+            "the active library changed before review progress was saved",
+        ));
     }
     let app_data = app
         .path()
@@ -787,8 +787,9 @@ fn write_saved_review(
     let _write_guard = SAVED_SESSION_WRITE_LOCK
         .lock()
         .map_err(|_| String::from("saved session write lock is unavailable"))?;
-    let mut saved = read_saved_session_from(app_data)?
-        .ok_or_else(|| String::from("cannot save review progress before the library is registered"))?;
+    let mut saved = read_saved_session_from(app_data)?.ok_or_else(|| {
+        String::from("cannot save review progress before the library is registered")
+    })?;
     let library = saved
         .libraries
         .iter_mut()
