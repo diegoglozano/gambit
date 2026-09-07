@@ -120,11 +120,13 @@ bounded recent-first initial sync remains before this slice is complete.
 Status: in progress. Opening recommendations now create a focused, bounded
 queue of matching losses. The game list shows exactly that set, explains its
 scope, stays aligned to the relevant position, and restores the previous
-Library state on exit. Durable reviewed and deferred state remains.
+Library state on exit. Players can mark games reviewed, defer them, or open
+them on Lichess; progress is stored per library, resumes across launches, and
+is summarized on Today. The period comparison remains.
 
 - generate a short queue from the selected pattern;
 - preserve progress locally across launches;
-- add reviewed, defer, and open-on-Lichess actions;
+- add mark-reviewed, defer, and open-on-Lichess actions;
 - compare the recent result for that pattern with the preceding period.
 
 ### Slice 4: one player across sources

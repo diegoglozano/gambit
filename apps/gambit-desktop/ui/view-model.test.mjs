@@ -9,6 +9,11 @@ import {
   formatPlayerRecord,
   parseSyncDate,
   perspectivePlayerIsBlack,
+  nextReviewGameId,
+  prepareReviewProgress,
+  reconcileReviewProgress,
+  reviewPatternKey,
+  reviewProgressMatches,
   reviewSummaries,
   selectFocusOpening,
   timelineProgress,
@@ -100,4 +105,52 @@ test("review summaries contain only queued games in queue order", () => {
   ];
 
   assert.deepEqual(reviewSummaries([9, 3], details).map((game) => game.id), [9, 3]);
+});
+
+test("review progress is reconciled with the current recommendation", () => {
+  const opening = { line: "1. d4 d5 2. Bf4 Nf6", ply: 4, losses: 58, review_game_ids: [9, 7, 5] };
+  const saved = {
+    pattern: reviewPatternKey(opening, "Diego"),
+    reviewed_game_ids: [9, 100, 9],
+    deferred_game_ids: [7, 9],
+    current_game_id: 7,
+  };
+
+  const progress = reconcileReviewProgress(opening, saved, "diego");
+  assert.equal(reviewProgressMatches(opening, saved, "DIEGO"), true);
+  assert.equal(reviewProgressMatches(opening, saved, "another-player"), false);
+  assert.deepEqual(progress.game_ids, [9, 7, 5]);
+  assert.deepEqual(progress.reviewed_game_ids, [9]);
+  assert.deepEqual(progress.deferred_game_ids, [7]);
+  assert.equal(progress.current_game_id, 7);
+  assert.equal(progress.matching_losses, 58);
+});
+
+test("starting again resets completed work and reopens a fully deferred queue", () => {
+  const opening = { line: "Line", ply: 4, losses: 2, review_game_ids: [1, 2] };
+  const completed = reconcileReviewProgress(opening, null);
+  completed.reviewed_game_ids = [1, 2];
+  assert.deepEqual(prepareReviewProgress(opening, completed).reviewed_game_ids, []);
+
+  const deferred = reconcileReviewProgress(opening, null);
+  deferred.deferred_game_ids = [1, 2];
+  assert.deepEqual(prepareReviewProgress(opening, deferred).deferred_game_ids, []);
+
+  const partiallyDeferred = reconcileReviewProgress(opening, null);
+  partiallyDeferred.deferred_game_ids = [1];
+  partiallyDeferred.current_game_id = 1;
+  assert.equal(prepareReviewProgress(opening, partiallyDeferred).current_game_id, 2);
+});
+
+test("review advancement skips reviewed and deferred games", () => {
+  const progress = {
+    game_ids: [1, 2, 3, 4],
+    reviewed_game_ids: [2],
+    deferred_game_ids: [3],
+  };
+  assert.equal(nextReviewGameId(progress, 1), 4);
+  progress.reviewed_game_ids.push(4);
+  assert.equal(nextReviewGameId(progress, 1), 1);
+  progress.reviewed_game_ids.push(1);
+  assert.equal(nextReviewGameId(progress, 1), null);
 });

@@ -4,8 +4,12 @@ import {
   createRequestGate,
   formatExploreMonth,
   formatPlayerRecord,
+  nextReviewGameId,
   parseSyncDate,
   perspectivePlayerIsBlack,
+  prepareReviewProgress,
+  reconcileReviewProgress,
+  reviewProgressMatches,
   reviewSummaries,
   selectFocusOpening,
   timelineProgress,
@@ -40,6 +44,7 @@ const state = {
   syncRunning: false,
   syncReport: null,
   review: null,
+  reviewProgress: null,
 };
 
 const element = (id) => document.getElementById(id);
@@ -50,6 +55,7 @@ const exploreRequests = createRequestGate();
 const reviewRequests = createRequestGate();
 const FILTER_DEBOUNCE_MS = 250;
 let filterTimer = null;
+let reviewSaveQueue = Promise.resolve();
 
 element("sync-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -112,7 +118,11 @@ element("previous-page").addEventListener("click", () => loadPage(Math.max(0, st
 element("next-page").addEventListener("click", () => loadPage(state.session.page.offset + state.session.page.limit));
 element("previous-review").addEventListener("click", () => moveReview(-1));
 element("next-review").addEventListener("click", () => moveReview(1));
+element("mark-reviewed").addEventListener("click", markReviewGame);
+element("defer-review").addEventListener("click", deferReviewGame);
+element("review-on-lichess").addEventListener("click", openCurrentGameOnLichess);
 element("finish-review").addEventListener("click", () => finishReview());
+element("complete-review").addEventListener("click", completeReview);
 element("first-move").addEventListener("click", () => setPly(0));
 element("previous-move").addEventListener("click", () => setPly(state.ply - 1));
 element("next-move").addEventListener("click", () => setPly(state.ply + 1));
@@ -123,8 +133,7 @@ element("flip-board").addEventListener("click", () => {
 });
 element("lichess-link").addEventListener("click", async (event) => {
   event.preventDefault();
-  const url = element("lichess-link").href;
-  if (url) await invoke("open_game_url", { url });
+  await openCurrentGameOnLichess();
 });
 
 window.addEventListener("keydown", (event) => {
@@ -339,6 +348,7 @@ async function showSession(session, options = {}) {
   state.explorePlayer = null;
   state.syncReport = options.syncReport ?? session.last_sync ?? null;
   state.review = null;
+  state.reviewProgress = session.review_progress ?? null;
   state.detail = null;
   state.ply = 0;
   element("welcome-screen").hidden = true;
@@ -412,6 +422,8 @@ function renderPage(page) {
     button.type = "button";
     button.className = "game-row";
     button.dataset.gameId = game.id;
+    const reviewState = reviewGameState(game.id);
+    if (reviewState) button.classList.add(reviewState);
     button.addEventListener("click", () => {
       const reviewIndex = state.review?.gameIds.indexOf(game.id) ?? -1;
       if (reviewIndex >= 0) {
@@ -422,13 +434,22 @@ function renderPage(page) {
       finishReview(false);
       selectGame(game.id);
     });
+    const indicators = row("game-row-indicators", text(resultLabel(game.result), "game-row-result"));
+    if (reviewState) indicators.append(text(reviewState === "reviewed" ? "REVIEWED ✓" : "DEFERRED", "review-state"));
     button.append(
-      row("game-row-top", text(game.date ?? "Unknown date"), text(resultLabel(game.result), "game-row-result")),
+      row("game-row-top", text(game.date ?? "Unknown date"), indicators),
       playerRow(game.white, game.white_elo, "White"),
       playerRow(game.black, game.black_elo, "Black"),
     );
     list.append(button);
   }
+}
+
+function reviewGameState(id) {
+  if (!state.review) return null;
+  if (state.review.reviewedGameIds.has(id)) return "reviewed";
+  if (state.review.deferredGameIds.has(id)) return "deferred";
+  return null;
 }
 
 async function selectGame(id) {
@@ -466,6 +487,7 @@ function clearGame() {
   element("game-date").textContent = "—";
   element("raw-pgn").textContent = "";
   element("lichess-link").hidden = true;
+  element("review-on-lichess").disabled = true;
   element("move-list").replaceChildren(text("Adjust the filters to find a game.", "empty-message"));
   renderBoard(null, null);
   for (const id of ["first-move", "previous-move", "next-move", "last-move"]) element(id).disabled = true;
@@ -485,11 +507,23 @@ function renderGame(detail) {
   if (game.site?.startsWith("https://lichess.org/")) {
     link.href = game.site;
     link.hidden = false;
+    element("review-on-lichess").disabled = false;
   } else {
     link.hidden = true;
+    element("review-on-lichess").disabled = true;
   }
   renderMoves(detail.moves);
   setPly(0, false);
+}
+
+async function openCurrentGameOnLichess() {
+  const url = state.detail?.summary.site;
+  if (!url?.startsWith("https://lichess.org/")) return;
+  try {
+    await invoke("open_game_url", { url });
+  } catch (error) {
+    showToast(`Could not open this game on Lichess: ${error}`, true);
+  }
 }
 
 function renderMoves(moves) {
@@ -795,8 +829,17 @@ function renderTodayFocus(opening) {
   element("today-focus-title").textContent = opening.line || "A recurring opening position";
   element("today-focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. Review the evidence before deciding what to change.`;
   element("today-focus-score").textContent = `${opening.score}%`;
-  element("today-review-focus").textContent = reviewButtonLabel(opening);
-  element("today-review-focus").onclick = () => startReview(opening);
+  const progress = reconcileReviewProgress(opening, state.reviewProgress, state.managedUser);
+  const progressCopy = element("today-review-progress");
+  const hasProgress = reviewProgressMatches(opening, state.reviewProgress, state.managedUser)
+    && (progress.reviewed_game_ids.length || progress.deferred_game_ids.length);
+  progressCopy.hidden = !hasProgress;
+  if (hasProgress) {
+    const deferred = progress.deferred_game_ids.length;
+    progressCopy.textContent = `${progress.reviewed_game_ids.length} of ${progress.game_ids.length} reviewed${deferred ? ` · ${deferred} deferred` : ""}`;
+  }
+  element("today-review-focus").textContent = reviewButtonLabel(opening, progress, hasProgress);
+  element("today-review-focus").onclick = () => startReview(opening, state.managedUser);
 }
 
 async function loadExplore() {
@@ -847,12 +890,20 @@ function renderFocusOpening(opening) {
   element("focus-title").textContent = opening.line || "A recurring opening position";
   element("focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. This is your lowest-scoring common line; review the games before deciding what to change.`;
   element("focus-score").textContent = `${opening.score}%`;
-  element("review-focus").textContent = reviewButtonLabel(opening);
-  element("review-focus").onclick = () => startReview(opening);
+  const progress = reconcileReviewProgress(opening, state.reviewProgress, state.explorePlayer);
+  element("review-focus").textContent = reviewButtonLabel(
+    opening,
+    progress,
+    reviewProgressMatches(opening, state.reviewProgress, state.explorePlayer),
+  );
+  element("review-focus").onclick = () => startReview(opening, state.explorePlayer);
 }
 
-function reviewButtonLabel(opening) {
+function reviewButtonLabel(opening, progress = reconcileReviewProgress(opening, null), hasProgress = false) {
   const count = opening.review_game_ids?.length || 1;
+  if (hasProgress && progress.reviewed_game_ids.length === progress.game_ids.length) return "Review again →";
+  const remaining = count - progress.reviewed_game_ids.length;
+  if (hasProgress && remaining > 0) return `Continue ${remaining} ${remaining === 1 ? "game" : "games"} →`;
   return `Review ${count} ${count === 1 ? "loss" : "losses"} →`;
 }
 
@@ -971,8 +1022,9 @@ async function openExplorePosition(position) {
   setPly(position.ply);
 }
 
-async function startReview(opening) {
-  const gameIds = opening.review_game_ids?.length ? opening.review_game_ids : [opening.game_id];
+async function startReview(opening, player = state.player ?? state.managedUser) {
+  const progress = prepareReviewProgress(opening, state.reviewProgress, player);
+  const gameIds = progress.game_ids;
   window.clearTimeout(filterTimer);
   filterTimer = null;
   pageRequests.invalidate();
@@ -980,11 +1032,15 @@ async function startReview(opening) {
   const request = reviewRequests.next();
   const review = {
     gameIds,
-    index: 0,
-    ply: opening.ply,
-    title: opening.line || "Recurring opening losses",
-    matchingLosses: Number(opening.losses ?? gameIds.length),
+    index: Math.max(0, gameIds.indexOf(progress.current_game_id)),
+    ply: progress.ply,
+    pattern: progress.pattern,
+    title: progress.title,
+    matchingLosses: progress.matching_losses,
+    reviewedGameIds: new Set(progress.reviewed_game_ids),
+    deferredGameIds: new Set(progress.deferred_game_ids),
     details: new Map(),
+    complete: false,
     previous: {
       filters: { ...state.filters },
       player: state.player,
@@ -999,9 +1055,11 @@ async function startReview(opening) {
     },
   };
   state.review = review;
+  state.reviewProgress = progress;
   showView("library");
   renderReviewMode();
   renderReviewLoading(gameIds.length);
+  void persistReviewProgress();
   try {
     const details = await Promise.all(gameIds.map((id) => invoke("get_game", { id })));
     if (!reviewRequests.isCurrent(request) || state.review !== review) return;
@@ -1016,7 +1074,7 @@ async function startReview(opening) {
 }
 
 async function moveReview(delta) {
-  if (!state.review) return;
+  if (!state.review || state.review.complete) return;
   const next = state.review.index + delta;
   if (next < 0 || next >= state.review.gameIds.length) return;
   state.review.index = next;
@@ -1024,13 +1082,15 @@ async function moveReview(delta) {
 }
 
 function openReviewGame() {
-  if (!state.review) return;
+  if (!state.review || state.review.complete) return;
+  state.reviewProgress = reviewProgressSnapshot();
   renderReviewBar();
   const id = state.review.gameIds[state.review.index];
   const detail = state.review.details.get(id);
   if (!detail) return;
   displayGameDetail(detail);
   setPly(state.review.ply);
+  void persistReviewProgress();
 }
 
 function renderReviewLoading(total) {
@@ -1046,20 +1106,132 @@ function renderReviewPage(games) {
 
 function renderReviewBar() {
   const bar = element("review-bar");
-  bar.hidden = !state.review;
-  if (!state.review) return;
+  bar.hidden = !state.review || state.review.complete;
+  if (!state.review || state.review.complete) return;
   const current = state.review.index + 1;
   const total = state.review.gameIds.length;
+  const currentId = state.review.gameIds[state.review.index];
+  const reviewed = state.review.reviewedGameIds.size;
   element("review-title").textContent = state.review.title;
   element("review-position").textContent = `Position: ${state.review.title}`;
   element("review-size").textContent = `Latest ${total.toLocaleString()} of ${state.review.matchingLosses.toLocaleString()} matching`;
-  element("review-progress").textContent = `${current} of ${total}`;
+  element("review-progress").textContent = `${reviewed} of ${total} reviewed · game ${current}`;
   element("previous-review").disabled = current === 1;
   element("next-review").disabled = current === total;
+  element("mark-reviewed").disabled = state.review.reviewedGameIds.has(currentId);
+  element("mark-reviewed").textContent = state.review.reviewedGameIds.has(currentId) ? "Reviewed ✓" : "Mark reviewed ✓";
+  element("defer-review").disabled = state.review.reviewedGameIds.has(currentId) || state.review.deferredGameIds.has(currentId);
+  element("defer-review").textContent = state.review.deferredGameIds.has(currentId) ? "Deferred" : "Defer";
+  element("review-on-lichess").disabled = !state.review.details.get(currentId)?.summary.site?.startsWith("https://lichess.org/");
 }
 
-function finishReview(notify = true) {
+async function markReviewGame() {
+  if (!state.review || state.review.complete) return;
+  const id = state.review.gameIds[state.review.index];
+  const wasDeferred = state.review.deferredGameIds.has(id);
+  state.review.deferredGameIds.delete(id);
+  state.review.reviewedGameIds.add(id);
+  await completeReviewAction(id, "reviewed", () => {
+    state.review?.reviewedGameIds.delete(id);
+    if (wasDeferred) state.review?.deferredGameIds.add(id);
+  });
+}
+
+async function deferReviewGame() {
+  if (!state.review || state.review.complete) return;
+  const id = state.review.gameIds[state.review.index];
+  state.review.deferredGameIds.add(id);
+  await completeReviewAction(id, "deferred", () => state.review?.deferredGameIds.delete(id));
+}
+
+async function completeReviewAction(id, action, rollback) {
+  const review = state.review;
+  if (!review) return;
+  setReviewActionsDisabled(true);
+  if (!await persistReviewProgress()) {
+    if (state.review === review) {
+      rollback();
+      state.reviewProgress = reviewProgressSnapshot();
+      renderReviewPage(reviewSummaries(review.gameIds, [...review.details.values()]));
+      markSelectedGame(id);
+      renderReviewBar();
+    }
+    return;
+  }
+  if (state.review !== review) return;
+  renderReviewPage(reviewSummaries(review.gameIds, [...review.details.values()]));
+  const nextId = nextReviewGameId(reviewProgressSnapshot(), id);
+  if (nextId === null) {
+    showReviewCompletion();
+    return;
+  }
+  review.index = review.gameIds.indexOf(nextId);
+  openReviewGame();
+  showToast(action === "reviewed" ? "Marked reviewed. Progress saved." : "Deferred for later. Progress saved.");
+}
+
+function setReviewActionsDisabled(disabled) {
+  for (const id of ["mark-reviewed", "defer-review", "previous-review", "next-review"]) element(id).disabled = disabled;
+}
+
+function reviewProgressSnapshot() {
+  if (!state.review) return state.reviewProgress;
+  const currentGameId = state.review.gameIds[state.review.index] ?? null;
+  return {
+    pattern: state.review.pattern,
+    title: state.review.title,
+    game_ids: [...state.review.gameIds],
+    reviewed_game_ids: [...state.review.reviewedGameIds],
+    deferred_game_ids: [...state.review.deferredGameIds],
+    current_game_id: currentGameId,
+    ply: state.review.ply,
+    matching_losses: state.review.matchingLosses,
+  };
+}
+
+function persistReviewProgress() {
+  const progress = reviewProgressSnapshot();
+  const expectedPath = state.session?.path;
+  if (!progress || !expectedPath) return Promise.resolve(false);
+  state.reviewProgress = progress;
+  const save = reviewSaveQueue.then(async () => {
+    if (state.session?.path !== expectedPath) return false;
+    try {
+      await invoke("save_review_progress", { expectedPath, progress });
+      return true;
+    } catch (error) {
+      if (state.session?.path === expectedPath) showToast(`Review progress could not be saved: ${error}`, true);
+      return false;
+    }
+  });
+  reviewSaveQueue = save.then(() => undefined);
+  return save;
+}
+
+function showReviewCompletion() {
   if (!state.review) return;
+  state.review.complete = true;
+  const reviewed = state.review.reviewedGameIds.size;
+  const deferred = state.review.deferredGameIds.size;
+  element("review-complete-title").textContent = reviewed === state.review.gameIds.length
+    ? "Review complete"
+    : "Session complete";
+  element("review-complete-copy").textContent = deferred
+    ? `${reviewed} reviewed · ${deferred} deferred for later. Your progress is saved on this Mac.`
+    : `You reviewed all ${reviewed} ${reviewed === 1 ? "game" : "games"}. Your progress is saved on this Mac.`;
+  element("complete-review").textContent = state.managedUser ? "Back to Today →" : "Back to Explore →";
+  renderReviewMode();
+}
+
+function completeReview() {
+  if (!state.review) return;
+  const destination = state.managedUser ? "today" : "explore";
+  finishReview(false, destination);
+}
+
+function finishReview(notify = true, destination = null) {
+  if (!state.review) return;
+  void persistReviewProgress();
   const { previous } = state.review;
   state.review = null;
   reviewRequests.invalidate();
@@ -1085,16 +1257,19 @@ function finishReview(notify = true) {
   } else {
     clearGame();
   }
-  showView(previous.view);
+  showView(destination ?? previous.view);
   if (notify) showToast("Review closed. Your library view was restored.");
 }
 
 function renderReviewMode() {
   const reviewing = Boolean(state.review);
-  element("review-bar").hidden = !reviewing;
+  const complete = Boolean(state.review?.complete);
+  element("review-bar").hidden = !reviewing || complete;
+  element("review-complete").hidden = !complete;
+  element("library-layout").hidden = complete;
   element("workspace-eyebrow").textContent = reviewing ? "Review" : "Library";
   element("library-title").textContent = reviewing
-    ? "Review opening losses"
+    ? complete ? "Review session" : "Review opening losses"
     : state.managedUser ? `${state.managedUser}'s games` : "Your games";
   element("workspace-actions").hidden = reviewing;
   element("query-panel").hidden = reviewing;
@@ -1226,7 +1401,7 @@ async function mockInvoke(command, args = {}) {
   if (command === "check_for_update") {
     return { current_version: "0.14.0", version: "0.15.0", notes: "A faster, friendlier Gambit is ready." };
   }
-  if (command === "install_update" || command === "restart_app") return null;
+  if (command === "install_update" || command === "restart_app" || command === "save_review_progress") return null;
   if (command === "get_game") return mockDetail(args.id);
   if (command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user") {
     return { session: mockSession(), report: mockSyncReport() };
@@ -1276,6 +1451,7 @@ function mockSession() {
     path: "/Users/diego/Library/Application Support/Gambit/collections/diegoglozano/diegoglozano.gambit",
     managed_user: "diegoglozano",
     last_sync: mockSyncReport(),
+    review_progress: null,
     info: {
       games: 1729,
       positions: 110859,

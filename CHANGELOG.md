@@ -9,6 +9,9 @@ All notable changes to Gambit are documented in this file.
 - Opening reviews now focus the Library on exactly the queued losses, explain
   the active result, position, and queue scope, and restore the previous
   filters, sort, page, selection, and view on exit.
+- Review games can now be marked reviewed, deferred, or opened on Lichess;
+  progress is saved per library, resumes across launches, appears on Today,
+  and ends in a clear session summary.
 
 ## [0.14.0] - 2026-09-07
 

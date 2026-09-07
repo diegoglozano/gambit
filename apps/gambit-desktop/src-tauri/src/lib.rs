@@ -21,11 +21,14 @@ struct AppState {
     database: Mutex<Option<PathBuf>>,
 }
 
+static SAVED_SESSION_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
 #[derive(Serialize)]
 struct DatabaseSession {
     path: String,
     managed_user: Option<String>,
     last_sync: Option<SavedSyncSummary>,
+    review_progress: Option<SavedReviewProgress>,
     info: DatabaseInfo,
     page: GamePage,
 }
@@ -51,6 +54,8 @@ struct SavedLibrary {
     managed_user: Option<String>,
     #[serde(default)]
     last_sync: Option<SavedSyncSummary>,
+    #[serde(default)]
+    review_progress: Option<SavedReviewProgress>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -60,6 +65,20 @@ struct SavedSyncSummary {
     results: PlayerResultCounts,
     cursor_milliseconds: i64,
     checked_at_milliseconds: i64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedReviewProgress {
+    pattern: String,
+    title: String,
+    game_ids: Vec<i64>,
+    #[serde(default)]
+    reviewed_game_ids: Vec<i64>,
+    #[serde(default)]
+    deferred_game_ids: Vec<i64>,
+    current_game_id: Option<i64>,
+    ply: u32,
+    matching_losses: u64,
 }
 
 #[derive(Serialize)]
@@ -127,8 +146,11 @@ async fn choose_database(
     let managed_user = library
         .as_ref()
         .and_then(|library| library.managed_user.clone());
-    let last_sync = library.and_then(|library| library.last_sync);
-    let session = load_session(&path, managed_user.as_deref(), last_sync)?;
+    let last_sync = library
+        .as_ref()
+        .and_then(|library| library.last_sync.clone());
+    let review_progress = library.and_then(|library| library.review_progress);
+    let session = load_session(&path, managed_user.as_deref(), last_sync, review_progress)?;
     remember_session(&app, &path, managed_user.as_deref())?;
     set_database(&state, path)?;
     Ok(Some(session))
@@ -145,8 +167,11 @@ async fn open_database(
     let managed_user = library
         .as_ref()
         .and_then(|library| library.managed_user.clone());
-    let last_sync = library.and_then(|library| library.last_sync);
-    let session = load_session(&path, managed_user.as_deref(), last_sync)?;
+    let last_sync = library
+        .as_ref()
+        .and_then(|library| library.last_sync.clone());
+    let review_progress = library.and_then(|library| library.review_progress);
+    let session = load_session(&path, managed_user.as_deref(), last_sync, review_progress)?;
     remember_session(&app, &path, managed_user.as_deref())?;
     set_database(&state, path)?;
     Ok(session)
@@ -229,7 +254,7 @@ async fn import_pgn(
     .await
     .map_err(|error| format!("index task failed: {error}"))?
     .map_err(|error| error.to_string())?;
-    let session = load_session(&database, None, None)?;
+    let session = load_session(&database, None, None, None)?;
     remember_session(&app, &database, None)?;
     set_database(&state, database)?;
     Ok(Some(session))
@@ -264,7 +289,10 @@ async fn update_database(
     let managed_user = library
         .as_ref()
         .and_then(|library| library.managed_user.clone());
-    let last_sync = library.and_then(|library| library.last_sync);
+    let last_sync = library
+        .as_ref()
+        .and_then(|library| library.last_sync.clone());
+    let review_progress = library.and_then(|library| library.review_progress);
     let update_database = database.clone();
     tauri::async_runtime::spawn_blocking(move || {
         index::update_database_from_files(inputs, &update_database)
@@ -272,7 +300,12 @@ async fn update_database(
     .await
     .map_err(|error| format!("index update task failed: {error}"))?
     .map_err(|error| error.to_string())?;
-    let session = load_session(&database, managed_user.as_deref(), last_sync)?;
+    let session = load_session(
+        &database,
+        managed_user.as_deref(),
+        last_sync,
+        review_progress,
+    )?;
     remember_session(&app, &database, managed_user.as_deref())?;
     Ok(Some(session))
 }
@@ -291,7 +324,17 @@ fn restore_session(
         .iter()
         .find(|library| library.database == saved.database)
         .and_then(|library| library.last_sync.clone());
-    let session = load_session(&saved.database, saved.managed_user.as_deref(), last_sync)?;
+    let review_progress = saved
+        .libraries
+        .iter()
+        .find(|library| library.database == saved.database)
+        .and_then(|library| library.review_progress.clone());
+    let session = load_session(
+        &saved.database,
+        saved.managed_user.as_deref(),
+        last_sync,
+        review_progress,
+    )?;
     set_database(&state, saved.database)?;
     Ok(Some(session))
 }
@@ -321,7 +364,9 @@ async fn sync_user(
     let report = perform_sync(&app, request).await?;
     remember_session(&app, &database, Some(&username))?;
     let last_sync = remember_sync(&app, &database, &report)?;
-    let session = load_session(&database, Some(&username), Some(last_sync))?;
+    let review_progress =
+        known_library(&app, &database)?.and_then(|library| library.review_progress);
+    let session = load_session(&database, Some(&username), Some(last_sync), review_progress)?;
     set_database(&state, database)?;
     Ok(SyncResult { session, report })
 }
@@ -367,7 +412,9 @@ async fn sync_managed_database(
         .map_err(|error| error.to_string())?;
     let report = perform_sync(app, request).await?;
     let last_sync = remember_sync(app, &database, &report)?;
-    let session = load_session(&database, Some(&username), Some(last_sync))?;
+    let review_progress =
+        known_library(app, &database)?.and_then(|library| library.review_progress);
+    let session = load_session(&database, Some(&username), Some(last_sync), review_progress)?;
     Ok(SyncResult { session, report })
 }
 
@@ -487,6 +534,28 @@ fn get_game(state: State<'_, AppState>, id: i64) -> Result<GameDetail, String> {
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn save_review_progress(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    expected_path: String,
+    progress: SavedReviewProgress,
+) -> Result<(), String> {
+    validate_review_progress(&progress)?;
+    let database = database(&state)?;
+    if database != Path::new(&expected_path) {
+        return Err(String::from(
+            "the active library changed before review progress was saved",
+        ));
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to locate application data: {error}"))?;
+    write_saved_review(&app_data, &database, &progress)
+}
+
+#[tauri::command]
 fn open_game_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://lichess.org/") {
         return Err(String::from("only Lichess game links can be opened"));
@@ -547,6 +616,7 @@ fn load_session(
     path: &Path,
     player: Option<&str>,
     last_sync: Option<SavedSyncSummary>,
+    review_progress: Option<SavedReviewProgress>,
 ) -> Result<DatabaseSession, String> {
     let info = index::info(path, false).map_err(|error| error.to_string())?;
     let options = QueryOptions {
@@ -558,6 +628,7 @@ fn load_session(
         path: path.to_string_lossy().into_owned(),
         managed_user: player.map(str::to_owned),
         last_sync,
+        review_progress,
         info,
         page,
     })
@@ -642,6 +713,7 @@ fn read_saved_session_from(app_data: &Path) -> Result<Option<SavedSession>, Stri
                 database: saved.database.clone(),
                 managed_user: saved.managed_user.clone(),
                 last_sync: None,
+                review_progress: None,
             },
         );
     }
@@ -654,6 +726,9 @@ fn write_saved_session(
     managed_user: Option<&str>,
 ) -> Result<(), String> {
     const MAXIMUM_RECENT_LIBRARIES: usize = 12;
+    let _write_guard = SAVED_SESSION_WRITE_LOCK
+        .lock()
+        .map_err(|_| String::from("saved session write lock is unavailable"))?;
     let mut libraries = read_saved_session_from(app_data)?
         .map(|saved| saved.libraries)
         .unwrap_or_default();
@@ -661,6 +736,10 @@ fn write_saved_session(
         .iter()
         .find(|library| library.database == database)
         .and_then(|library| library.last_sync.clone());
+    let review_progress = libraries
+        .iter()
+        .find(|library| library.database == database)
+        .and_then(|library| library.review_progress.clone());
     libraries.retain(|library| library.database != database);
     libraries.insert(
         0,
@@ -668,6 +747,7 @@ fn write_saved_session(
             database: database.to_owned(),
             managed_user: managed_user.map(str::to_owned),
             last_sync,
+            review_progress,
         },
     );
     libraries.truncate(MAXIMUM_RECENT_LIBRARIES);
@@ -685,6 +765,9 @@ fn write_saved_sync(
     database: &Path,
     summary: &SavedSyncSummary,
 ) -> Result<(), String> {
+    let _write_guard = SAVED_SESSION_WRITE_LOCK
+        .lock()
+        .map_err(|_| String::from("saved session write lock is unavailable"))?;
     let mut saved = read_saved_session_from(app_data)?
         .ok_or_else(|| String::from("cannot save sync status before the library is registered"))?;
     let library = saved
@@ -694,6 +777,49 @@ fn write_saved_sync(
         .ok_or_else(|| String::from("cannot save sync status for an unknown library"))?;
     library.last_sync = Some(summary.clone());
     write_saved_session_data(app_data, &saved)
+}
+
+fn write_saved_review(
+    app_data: &Path,
+    database: &Path,
+    progress: &SavedReviewProgress,
+) -> Result<(), String> {
+    let _write_guard = SAVED_SESSION_WRITE_LOCK
+        .lock()
+        .map_err(|_| String::from("saved session write lock is unavailable"))?;
+    let mut saved = read_saved_session_from(app_data)?.ok_or_else(|| {
+        String::from("cannot save review progress before the library is registered")
+    })?;
+    let library = saved
+        .libraries
+        .iter_mut()
+        .find(|library| library.database == database)
+        .ok_or_else(|| String::from("cannot save review progress for an unknown library"))?;
+    library.review_progress = Some(progress.clone());
+    write_saved_session_data(app_data, &saved)
+}
+
+fn validate_review_progress(progress: &SavedReviewProgress) -> Result<(), String> {
+    const MAXIMUM_REVIEW_GAMES: usize = 100;
+    if progress.pattern.trim().is_empty()
+        || progress.pattern.len() > 1_000
+        || progress.title.trim().is_empty()
+        || progress.title.len() > 1_000
+        || progress.game_ids.is_empty()
+        || progress.game_ids.len() > MAXIMUM_REVIEW_GAMES
+        || progress.game_ids.iter().any(|id| *id <= 0)
+        || progress
+            .reviewed_game_ids
+            .iter()
+            .chain(&progress.deferred_game_ids)
+            .any(|id| !progress.game_ids.contains(id))
+        || progress
+            .current_game_id
+            .is_some_and(|id| !progress.game_ids.contains(&id))
+    {
+        return Err(String::from("review progress is invalid"));
+    }
+    Ok(())
 }
 
 fn write_saved_session_data(app_data: &Path, saved: &SavedSession) -> Result<(), String> {
@@ -952,6 +1078,7 @@ pub fn run() {
             check_database,
             export_games,
             get_game,
+            save_review_progress,
             open_game_url,
             app_version,
             check_for_update,
@@ -1030,6 +1157,72 @@ mod tests {
         .unwrap();
 
         assert!(saved.libraries[0].last_sync.is_none());
+        assert!(saved.libraries[0].review_progress.is_none());
+    }
+
+    #[test]
+    fn review_progress_is_scoped_to_its_library_and_survives_reopening() {
+        let root = std::env::temp_dir().join(format!(
+            "gambit-desktop-review-progress-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let first = root.join("first.gambit");
+        let second = root.join("second.gambit");
+        write_saved_session(&root, &first, Some("first-player")).unwrap();
+        write_saved_session(&root, &second, Some("second-player")).unwrap();
+        let progress = SavedReviewProgress {
+            pattern: String::from("4:1. d4 d5 2. Bf4 Nf6"),
+            title: String::from("1. d4 d5 2. Bf4 Nf6"),
+            game_ids: vec![9, 7, 5],
+            reviewed_game_ids: vec![9],
+            deferred_game_ids: vec![7],
+            current_game_id: Some(5),
+            ply: 4,
+            matching_losses: 58,
+        };
+
+        validate_review_progress(&progress).unwrap();
+        write_saved_review(&root, &first, &progress).unwrap();
+        write_saved_session(&root, &first, Some("first-player")).unwrap();
+
+        let saved = read_saved_session_from(&root).unwrap().unwrap();
+        let first_library = saved
+            .libraries
+            .iter()
+            .find(|library| library.database == first)
+            .unwrap();
+        assert_eq!(
+            first_library
+                .review_progress
+                .as_ref()
+                .unwrap()
+                .reviewed_game_ids,
+            vec![9]
+        );
+        let second_library = saved
+            .libraries
+            .iter()
+            .find(|library| library.database == second)
+            .unwrap();
+        assert!(second_library.review_progress.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_review_progress_for_games_outside_the_queue() {
+        let progress = SavedReviewProgress {
+            pattern: String::from("pattern"),
+            title: String::from("line"),
+            game_ids: vec![1],
+            reviewed_game_ids: vec![2],
+            deferred_game_ids: Vec::new(),
+            current_game_id: Some(1),
+            ply: 4,
+            matching_losses: 1,
+        };
+
+        assert!(validate_review_progress(&progress).is_err());
     }
 
     #[test]
