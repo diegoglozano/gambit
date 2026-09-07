@@ -339,20 +339,14 @@ async fn sync_active_user(
 }
 
 #[tauri::command]
-async fn auto_sync_active_user(
-    app: AppHandle,
-    path: String,
-) -> Result<Option<SyncResult>, String> {
+async fn auto_sync_active_user(app: AppHandle, path: String) -> Result<Option<SyncResult>, String> {
     let database = PathBuf::from(path);
     let library = known_library(&app, &database)?
         .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
     let username = library
         .managed_user
         .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
-    if !auto_sync_due(
-        library.last_sync.as_ref(),
-        current_time_milliseconds()?,
-    ) {
+    if !auto_sync_due(library.last_sync.as_ref(), current_time_milliseconds()?) {
         return Ok(None);
     }
     sync_managed_database(&app, database, username)
@@ -586,13 +580,12 @@ fn known_library(app: &AppHandle, database: &Path) -> Result<Option<SavedLibrary
         .path()
         .app_data_dir()
         .map_err(|error| format!("failed to locate application data: {error}"))?;
-    Ok(read_saved_session_from(&app_data)?
-        .and_then(|saved| {
-            saved
-                .libraries
-                .into_iter()
-                .find(|library| library.database == database)
-        }))
+    Ok(read_saved_session_from(&app_data)?.and_then(|saved| {
+        saved
+            .libraries
+            .into_iter()
+            .find(|library| library.database == database)
+    }))
 }
 
 fn remember_sync(
