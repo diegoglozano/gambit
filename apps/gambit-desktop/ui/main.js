@@ -6,6 +6,7 @@ import {
   formatPlayerRecord,
   parseSyncDate,
   perspectivePlayerIsBlack,
+  reviewSummaries,
   selectFocusOpening,
   timelineProgress,
   validateLiveFilters,
@@ -46,6 +47,7 @@ const invoke = nativeInvoke ?? mockInvoke;
 const pageRequests = createRequestGate();
 const detailRequests = createRequestGate();
 const exploreRequests = createRequestGate();
+const reviewRequests = createRequestGate();
 const FILTER_DEBOUNCE_MS = 250;
 let filterTimer = null;
 
@@ -79,9 +81,9 @@ element("open-another-database").addEventListener("click", async () => {
 element("check-updates").addEventListener("click", () => checkForUpdates(false));
 element("dismiss-update").addEventListener("click", () => element("update-dialog").close());
 element("install-update").addEventListener("click", installAvailableUpdate);
-element("nav-today").addEventListener("click", () => showView("today"));
-element("nav-library").addEventListener("click", () => showView("library"));
-element("nav-explore").addEventListener("click", () => showView("explore"));
+element("nav-today").addEventListener("click", () => navigateToView("today"));
+element("nav-library").addEventListener("click", () => navigateToView("library"));
+element("nav-explore").addEventListener("click", () => navigateToView("explore"));
 element("game-filters").addEventListener("submit", (event) => {
   event.preventDefault();
   queueLiveFilters(0);
@@ -233,9 +235,11 @@ async function autoSyncManagedLibrary() {
     state.explorePlayer = null;
     renderDatabaseInfo(result.session.info);
     renderTodaySync(result.report);
-    if (state.currentView === "today") await loadToday();
-    else if (state.currentView === "explore") await loadExplore();
-    else await loadPage(0);
+    if (!state.review) {
+      if (state.currentView === "today") await loadToday();
+      else if (state.currentView === "explore") await loadExplore();
+      else await loadPage(0);
+    }
     if (result.report.created || result.report.updated) showToast(syncToast(result.report));
   } catch (error) {
     if (state.session?.path === expectedPath) {
@@ -324,6 +328,7 @@ async function showSession(session, options = {}) {
   pageRequests.invalidate();
   detailRequests.invalidate();
   exploreRequests.invalidate();
+  reviewRequests.invalidate();
   state.session = session;
   state.player = player;
   state.filters = player ? { player } : {};
@@ -350,7 +355,7 @@ async function showSession(session, options = {}) {
   element("library-title").textContent = player ? `${player}'s games` : "Your games";
   renderDatabaseInfo(session.info);
   renderPage(session.page);
-  renderReviewBar();
+  renderReviewMode();
   renderTodaySync(state.syncReport);
   showView(options.view ?? (player ? "today" : "library"));
   if (session.page.games.length) await selectGame(session.page.games[0].id);
@@ -408,6 +413,12 @@ function renderPage(page) {
     button.className = "game-row";
     button.dataset.gameId = game.id;
     button.addEventListener("click", () => {
+      const reviewIndex = state.review?.gameIds.indexOf(game.id) ?? -1;
+      if (reviewIndex >= 0) {
+        state.review.index = reviewIndex;
+        openReviewGame();
+        return;
+      }
       finishReview(false);
       selectGame(game.id);
     });
@@ -425,14 +436,18 @@ async function selectGame(id) {
   try {
     const detail = await invoke("get_game", { id });
     if (!detailRequests.isCurrent(request)) return;
-    state.detail = detail;
-    state.ply = 0;
-    state.boardFlipped = perspectivePlayerIsBlack(state.player, state.managedUser, detail.summary.black);
-    markSelectedGame(id);
-    renderGame(detail);
+    displayGameDetail(detail);
   } catch (error) {
     if (detailRequests.isCurrent(request)) showToast(String(error), true);
   }
+}
+
+function displayGameDetail(detail) {
+  state.detail = detail;
+  state.ply = 0;
+  state.boardFlipped = perspectivePlayerIsBlack(state.player, state.managedUser, detail.summary.black);
+  markSelectedGame(detail.summary.id);
+  renderGame(detail);
 }
 
 function markSelectedGame(id) {
@@ -725,6 +740,11 @@ function setFilterStatus(message, tone = "") {
   element("export-games").disabled = tone === "pending" || tone === "error";
 }
 
+function navigateToView(view) {
+  if (state.review && view !== "library") finishReview(false);
+  showView(view);
+}
+
 function showView(view) {
   if (!state.session) return;
   if (view === "today" && !state.managedUser) view = "library";
@@ -953,14 +973,46 @@ async function openExplorePosition(position) {
 
 async function startReview(opening) {
   const gameIds = opening.review_game_ids?.length ? opening.review_game_ids : [opening.game_id];
-  state.review = {
+  window.clearTimeout(filterTimer);
+  filterTimer = null;
+  pageRequests.invalidate();
+  detailRequests.invalidate();
+  const request = reviewRequests.next();
+  const review = {
     gameIds,
     index: 0,
     ply: opening.ply,
     title: opening.line || "Recurring opening losses",
+    matchingLosses: Number(opening.losses ?? gameIds.length),
+    details: new Map(),
+    previous: {
+      filters: { ...state.filters },
+      player: state.player,
+      sort: state.sort,
+      sortDirection: state.sortDirection,
+      page: state.session.page,
+      detail: state.detail,
+      ply: state.ply,
+      boardFlipped: state.boardFlipped,
+      view: state.currentView,
+      queryOpen: element("query-panel").open,
+    },
   };
+  state.review = review;
   showView("library");
-  await openReviewGame();
+  renderReviewMode();
+  renderReviewLoading(gameIds.length);
+  try {
+    const details = await Promise.all(gameIds.map((id) => invoke("get_game", { id })));
+    if (!reviewRequests.isCurrent(request) || state.review !== review) return;
+    review.details = new Map(details.map((detail) => [detail.summary.id, detail]));
+    renderReviewPage(reviewSummaries(gameIds, details));
+    openReviewGame();
+  } catch (error) {
+    if (!reviewRequests.isCurrent(request) || state.review !== review) return;
+    finishReview(false);
+    showToast(`Could not prepare this review set: ${error}`, true);
+  }
 }
 
 async function moveReview(delta) {
@@ -968,14 +1020,28 @@ async function moveReview(delta) {
   const next = state.review.index + delta;
   if (next < 0 || next >= state.review.gameIds.length) return;
   state.review.index = next;
-  await openReviewGame();
+  openReviewGame();
 }
 
-async function openReviewGame() {
+function openReviewGame() {
   if (!state.review) return;
   renderReviewBar();
-  await selectGame(state.review.gameIds[state.review.index]);
+  const id = state.review.gameIds[state.review.index];
+  const detail = state.review.details.get(id);
+  if (!detail) return;
+  displayGameDetail(detail);
   setPly(state.review.ply);
+}
+
+function renderReviewLoading(total) {
+  element("game-count").textContent = gameCount(total);
+  element("previous-page").disabled = true;
+  element("next-page").disabled = true;
+  element("game-list").replaceChildren(text("Preparing your review set…", "empty-message"));
+}
+
+function renderReviewPage(games) {
+  renderPage({ total: games.length, offset: 0, limit: games.length, games });
 }
 
 function renderReviewBar() {
@@ -985,6 +1051,8 @@ function renderReviewBar() {
   const current = state.review.index + 1;
   const total = state.review.gameIds.length;
   element("review-title").textContent = state.review.title;
+  element("review-position").textContent = `Position: ${state.review.title}`;
+  element("review-size").textContent = `Latest ${total.toLocaleString()} of ${state.review.matchingLosses.toLocaleString()} matching`;
   element("review-progress").textContent = `${current} of ${total}`;
   element("previous-review").disabled = current === 1;
   element("next-review").disabled = current === total;
@@ -992,9 +1060,48 @@ function renderReviewBar() {
 
 function finishReview(notify = true) {
   if (!state.review) return;
+  const { previous } = state.review;
   state.review = null;
+  reviewRequests.invalidate();
+  state.filters = previous.filters;
+  state.player = previous.player;
+  state.sort = previous.sort;
+  state.sortDirection = previous.sortDirection;
+  state.session.page = previous.page;
+  state.detail = previous.detail;
+  state.ply = previous.ply;
+  state.boardFlipped = previous.boardFlipped;
+  setFilterForm(state.filters);
+  element("sort-games").value = state.sort;
+  element("sort-direction").value = state.sortDirection;
+  element("query-panel").open = previous.queryOpen;
+  setFilterStatus(`${gameCount(previous.page.total)} matching`);
+  renderReviewMode();
+  renderPage(previous.page);
+  if (previous.detail) {
+    displayGameDetail(previous.detail);
+    state.boardFlipped = previous.boardFlipped;
+    setPly(previous.ply, false);
+  } else {
+    clearGame();
+  }
+  showView(previous.view);
+  if (notify) showToast("Review closed. Your library view was restored.");
+}
+
+function renderReviewMode() {
+  const reviewing = Boolean(state.review);
+  element("review-bar").hidden = !reviewing;
+  element("workspace-eyebrow").textContent = reviewing ? "Review" : "Library";
+  element("library-title").textContent = reviewing
+    ? "Review opening losses"
+    : state.managedUser ? `${state.managedUser}'s games` : "Your games";
+  element("workspace-actions").hidden = reviewing;
+  element("query-panel").hidden = reviewing;
+  element("database-stats").hidden = reviewing;
+  element("game-list-controls").hidden = reviewing;
+  element("game-list-title").textContent = reviewing ? "Review games" : "Games";
   renderReviewBar();
-  if (notify) showToast("Review complete.");
 }
 
 function text(value, className) {
@@ -1120,7 +1227,7 @@ async function mockInvoke(command, args = {}) {
     return { current_version: "0.14.0", version: "0.15.0", notes: "A faster, friendlier Gambit is ready." };
   }
   if (command === "install_update" || command === "restart_app") return null;
-  if (command === "get_game") return mockDetail();
+  if (command === "get_game") return mockDetail(args.id);
   if (command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user") {
     return { session: mockSession(), report: mockSyncReport() };
   }
@@ -1183,13 +1290,14 @@ function mockSession() {
   };
 }
 
-function mockDetail() {
+function mockDetail(id = 1) {
+  const summary = mockSession().page.games.find((game) => game.id === id) ?? mockSession().page.games[0];
   const initial = "RNBQKBNRPPPPPPPP................................pppppppprnbqkbnr";
   const e4 = movePiece(initial, 12, 28);
   const e5 = movePiece(e4, 52, 36);
   const nf3 = movePiece(e5, 6, 21);
   return {
-    summary: mockSession().page.games[0],
+    summary,
     pgn: `[Event "Rated rapid game"]\n[Site "https://lichess.org/abcdefgh"]\n[White "diegoglozano"]\n[Black "QuietKnight"]\n[Result "1-0"]\n\n1. e4 e5 2. Nf3 1-0`,
     initial_board: initial,
     moves: [

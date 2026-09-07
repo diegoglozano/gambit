@@ -65,9 +65,11 @@ does not prevent the local library or its previous successful summary from
 being used.
 
 Starting the recommendation opens a review set containing up to six recent
-losses that reached the highlighted opening position. The library keeps the
-position aligned across games and provides previous, next, progress, and
-finish controls. Choosing an unrelated game exits the review set without
+losses that reached the highlighted opening position. Review mode shows only
+those queued games and makes its result, opening position, and “latest six of
+the matching losses” scope visible. It keeps the position aligned across games
+and provides previous, next, progress, and exit controls. Exiting restores the
+player's previous filters, sort, page, selection, and originating view without
 changing the database.
 
 The app replays a selected standard-chess mainline. The board automatically

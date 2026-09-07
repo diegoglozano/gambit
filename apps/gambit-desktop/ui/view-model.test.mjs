@@ -9,6 +9,7 @@ import {
   formatPlayerRecord,
   parseSyncDate,
   perspectivePlayerIsBlack,
+  reviewSummaries,
   selectFocusOpening,
   timelineProgress,
   validateLiveFilters,
@@ -89,4 +90,14 @@ test("focus opening requires enough completed evidence and a loss", () => {
 test("player record stays compact and hides an empty result set", () => {
   assert.equal(formatPlayerRecord({ wins: 12, draws: 3, losses: 9 }), "12W · 3D · 9L");
   assert.equal(formatPlayerRecord({ unfinished: 2 }), null);
+});
+
+test("review summaries contain only queued games in queue order", () => {
+  const details = [
+    { summary: { id: 3, date: "2026.09.03" } },
+    { summary: { id: 9, date: "2026.09.09" } },
+    { summary: { id: 5, date: "2026.09.05" } },
+  ];
+
+  assert.deepEqual(reviewSummaries([9, 3], details).map((game) => game.id), [9, 3]);
 });
