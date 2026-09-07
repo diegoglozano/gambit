@@ -4,6 +4,21 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Explore now identifies a sufficiently repeated, low-scoring opening line for
+  the selected player and opens a representative loss for review.
+- Managed Lichess libraries now open on a Today view, check for new games in
+  the background, summarize the latest sync, and keep the existing library
+  usable while downloading and indexing.
+- Today preserves each library's latest successful check across launches,
+  limits automatic checks to once per 15 minutes, and retains local results
+  when Lichess is unavailable or the player switches libraries.
+- Opening recommendations now start a bounded review set of matching losses
+  with previous, next, progress, and finish controls in the game viewer.
+- Documented the player-centered desktop direction from weekly changes through
+  review queues, unified identities, and optional local analysis.
+
 ## [0.13.0] - 2026-09-06
 
 ### Added

@@ -81,3 +81,40 @@ export function formatExploreMonth(value) {
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return month >= 1 && month <= 12 ? `${names[month - 1]} ’${String(year).padStart(2, "0")}` : String(value);
 }
+
+export function selectFocusOpening(openings, minimumCompletedGames = 4) {
+  const candidates = openings
+    .map((opening) => {
+      const wins = Number(opening.wins ?? 0);
+      const draws = Number(opening.draws ?? 0);
+      const losses = Number(opening.losses ?? 0);
+      const completed = wins + draws + losses;
+      return {
+        ...opening,
+        wins,
+        draws,
+        losses,
+        completed,
+        score: completed ? Math.round(((wins + draws / 2) / completed) * 100) : 0,
+      };
+    })
+    .filter((opening) => opening.completed >= minimumCompletedGames && opening.losses > 0);
+
+  candidates.sort((left, right) => {
+    const leftPoints = left.wins * 2 + left.draws;
+    const rightPoints = right.wins * 2 + right.draws;
+    const scoreOrder = leftPoints * right.completed - rightPoints * left.completed;
+    if (scoreOrder) return scoreOrder;
+    if (left.losses !== right.losses) return right.losses - left.losses;
+    if (left.completed !== right.completed) return right.completed - left.completed;
+    return String(left.line ?? "").localeCompare(String(right.line ?? ""));
+  });
+  return candidates[0] ?? null;
+}
+
+export function formatPlayerRecord(results) {
+  const wins = Number(results?.wins ?? 0);
+  const draws = Number(results?.draws ?? 0);
+  const losses = Number(results?.losses ?? 0);
+  return wins + draws + losses ? `${wins.toLocaleString()}W · ${draws.toLocaleString()}D · ${losses.toLocaleString()}L` : null;
+}

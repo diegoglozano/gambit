@@ -1335,6 +1335,7 @@ fn finish_sync(
         created: summary.created,
         updated: summary.updated,
         unchanged: summary.unchanged,
+        results: summary.created_results.clone(),
         refreshed_unfinished,
         unfinished,
         cursor_milliseconds: plan.until_timestamp,
@@ -1428,6 +1429,7 @@ struct SyncReport {
     created: u64,
     updated: u64,
     unchanged: u64,
+    results: sync::PlayerResultCounts,
     refreshed_unfinished: usize,
     unfinished: usize,
     cursor_milliseconds: i64,
@@ -1447,6 +1449,15 @@ fn render_sync_report(report: &SyncReport, format: SyncOutputFormat) -> io::Resu
             writeln!(output, "created: {}", report.created)?;
             writeln!(output, "updated: {}", report.updated)?;
             writeln!(output, "unchanged: {}", report.unchanged)?;
+            writeln!(
+                output,
+                "new results: {} wins, {} draws, {} losses, {} unfinished, {} unclassified",
+                report.results.wins,
+                report.results.draws,
+                report.results.losses,
+                report.results.unfinished,
+                report.results.unclassified
+            )?;
             writeln!(
                 output,
                 "unfinished: {} ({} refreshed)",

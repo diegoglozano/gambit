@@ -133,8 +133,11 @@ gambit sync \
 ```
 
 The report includes `received`, `created`, `updated`, and `unchanged` counts;
-the number of unfinished games refreshed and still tracked; and the committed
-cursor. `received` counts PGN records received over the network, so an
+the new games' wins, draws, losses, and unfinished results from the synchronized
+player's perspective; the number of unfinished games refreshed and still
+tracked; and the committed cursor. A separate `unclassified` result count keeps
+games whose player headers cannot be matched from silently affecting the
+record. `received` counts PGN records received over the network, so an
 overlapped or individually refreshed game may be included even when no local
 file changes. With `--database`, JSON adds a nested `database` object containing
 the same build/update report as `gambit index --format json`; human output adds

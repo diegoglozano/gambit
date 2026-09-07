@@ -6,8 +6,10 @@ import {
   containedScrollDelta,
   createRequestGate,
   formatExploreMonth,
+  formatPlayerRecord,
   parseSyncDate,
   perspectivePlayerIsBlack,
+  selectFocusOpening,
   timelineProgress,
   validateLiveFilters,
 } from "./view-model.mjs";
@@ -66,4 +68,25 @@ test("live filters wait for complete dependent and range values", () => {
 test("explore months use compact labels", () => {
   assert.equal(formatExploreMonth(202609), "Sep ’26");
   assert.equal(formatExploreMonth(0), "0");
+});
+
+test("focus opening selects the lowest supported player score", () => {
+  const focus = selectFocusOpening([
+    { line: "A", wins: 3, draws: 0, losses: 1 },
+    { line: "B", wins: 1, draws: 1, losses: 4 },
+    { line: "C", wins: 0, draws: 0, losses: 3 },
+  ]);
+  assert.equal(focus.line, "B");
+  assert.equal(focus.completed, 6);
+  assert.equal(focus.score, 25);
+});
+
+test("focus opening requires enough completed evidence and a loss", () => {
+  assert.equal(selectFocusOpening([{ line: "Too small", wins: 0, draws: 0, losses: 3 }]), null);
+  assert.equal(selectFocusOpening([{ line: "Unbeaten", wins: 4, draws: 1, losses: 0 }]), null);
+});
+
+test("player record stays compact and hides an empty result set", () => {
+  assert.equal(formatPlayerRecord({ wins: 12, draws: 3, losses: 9 }), "12W · 3D · 9L");
+  assert.equal(formatPlayerRecord({ unfinished: 2 }), null);
 });

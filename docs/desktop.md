@@ -45,8 +45,30 @@ can be exported as PGN.
 
 **Explore** summarizes common opening lines, results over the latest 12 active
 months, frequent opponents, and recurring positions for the Player filter (or
-the managed Lichess user by default). Opening and position cards open a
-representative game at the relevant ply.
+the managed Lichess user by default). When a player has at least four completed
+games in one of the common opening lines, Explore highlights the lowest-scoring
+line that includes a loss as a review candidate. It shows the supporting sample
+and opens a representative loss at the relevant ply. Other opening and position
+cards open a representative game at the relevant ply.
+
+The longer-term player workflow and the evidence rules for recommendations are
+described in [Player experience direction](player-experience.md).
+
+Managed Lichess libraries open on **Today**. The existing local database is
+available immediately while Gambit checks Lichess in the background. Automatic
+checks run no more than once every 15 minutes; **Sync now** always checks
+explicitly with full progress. Today shows how many games were added or
+refreshed by the latest successful check, when it ran, the new games'
+player-relative record, the current library size, and the player-scoped opening
+review candidate. That summary survives relaunches. A failed background check
+does not prevent the local library or its previous successful summary from
+being used.
+
+Starting the recommendation opens a review set containing up to six recent
+losses that reached the highlighted opening position. The library keeps the
+position aligned across games and provides previous, next, progress, and
+finish controls. Choosing an unrelated game exits the review set without
+changing the database.
 
 The app replays a selected standard-chess mainline. The board automatically
 faces the selected player and can be flipped manually. Arrow keys and board
@@ -75,7 +97,8 @@ communicates directly with the Lichess API. An optional personal access token is
 kept only for the duration of one sync; Gambit does not write it to disk or to
 the saved session. To resume and switch libraries, Gambit stores recent local
 database paths and, when applicable, public Lichess usernames in the
-application-data directory.
+application-data directory. Managed-library entries also store the counts and
+timestamp from their latest successful check so Today remains useful offline.
 
 ## Architecture
 
