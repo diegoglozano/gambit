@@ -118,3 +118,8 @@ export function formatPlayerRecord(results) {
   const losses = Number(results?.losses ?? 0);
   return wins + draws + losses ? `${wins.toLocaleString()}W · ${draws.toLocaleString()}D · ${losses.toLocaleString()}L` : null;
 }
+
+export function reviewSummaries(gameIds, details) {
+  const byId = new Map(details.map((detail) => [detail.summary.id, detail.summary]));
+  return gameIds.map((id) => byId.get(id)).filter(Boolean);
+}

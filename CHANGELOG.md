@@ -4,6 +4,12 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Opening reviews now focus the Library on exactly the queued losses, explain
+  the active result, position, and queue scope, and restore the previous
+  filters, sort, page, selection, and view on exit.
+
 ## [0.14.0] - 2026-09-07
 
 ### Added

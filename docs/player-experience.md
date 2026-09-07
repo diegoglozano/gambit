@@ -117,9 +117,10 @@ bounded recent-first initial sync remains before this slice is complete.
 
 ### Slice 3: a real review queue
 
-Status: in progress. Opening recommendations now create a bounded queue of
-matching losses with navigation and completion controls. Durable reviewed and
-deferred state remains.
+Status: in progress. Opening recommendations now create a focused, bounded
+queue of matching losses. The game list shows exactly that set, explains its
+scope, stays aligned to the relevant position, and restores the previous
+Library state on exit. Durable reviewed and deferred state remains.
 
 - generate a short queue from the selected pattern;
 - preserve progress locally across launches;

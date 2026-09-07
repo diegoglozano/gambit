@@ -149,10 +149,10 @@
         <section class="workspace" id="workspace" hidden>
           <header class="workspace-header">
             <div>
-              <span class="eyebrow">Library</span>
+              <span class="eyebrow" id="workspace-eyebrow">Library</span>
               <h1 id="library-title">Your games</h1>
             </div>
-            <div class="workspace-actions">
+            <div class="workspace-actions" id="workspace-actions">
               <button class="sync-button" id="import-pgn-workspace" type="button">＋ New database</button>
               <button class="sync-button" id="update-database" type="button">＋ Add / update PGN</button>
               <button class="sync-button" id="sync-again" type="button" hidden>↻ Sync now</button>
@@ -160,19 +160,24 @@
           </header>
 
           <div class="review-bar" id="review-bar" hidden>
-            <div>
+            <div class="review-copy">
               <span class="eyebrow">Review set</span>
               <strong id="review-title">Recurring opening losses</strong>
-              <small id="review-progress">1 of 1</small>
+              <div class="review-scope" aria-label="Review scope">
+                <span>Losses</span>
+                <span id="review-position">Opening position</span>
+                <span id="review-size">Latest 1 of 1</span>
+              </div>
             </div>
             <div class="review-controls">
+              <small id="review-progress">1 of 1</small>
               <button id="previous-review" type="button" aria-label="Previous review game">← Previous</button>
               <button id="next-review" type="button" aria-label="Next review game">Next →</button>
-              <button id="finish-review" type="button">Finish</button>
+              <button id="finish-review" type="button">Exit review</button>
             </div>
           </div>
 
-          <details class="query-panel" open>
+          <details class="query-panel" id="query-panel" open>
             <summary>Search and filter games</summary>
             <form id="game-filters">
               <label>Player<input id="player" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Any player" /></label>
@@ -192,7 +197,7 @@
             </form>
           </details>
 
-          <div class="stats-row" aria-label="Database summary">
+          <div class="stats-row" id="database-stats" aria-label="Database summary">
             <article><span>Games</span><strong id="stat-games">—</strong></article>
             <article><span>Positions</span><strong id="stat-positions">—</strong></article>
             <article><span>Results W / D / B</span><strong id="stat-results">—</strong></article>
@@ -205,10 +210,10 @@
             <section class="games-panel" aria-label="Games">
               <div class="panel-heading">
                 <div>
-                  <h2>Games</h2>
+                  <h2 id="game-list-title">Games</h2>
                   <span id="game-count">—</span>
                 </div>
-                <div class="game-list-controls">
+                <div class="game-list-controls" id="game-list-controls">
                   <label>Sort
                     <select id="sort-games" aria-label="Sort games">
                       <option value="date">Date</option>
