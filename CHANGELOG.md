@@ -4,6 +4,8 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-07
+
 ### Added
 
 - Explore now identifies a sufficiently repeated, low-scoring opening line for
@@ -212,7 +214,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/diegoglozano/gambit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/diegoglozano/gambit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/diegoglozano/gambit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/diegoglozano/gambit/compare/v0.10.0...v0.11.0
