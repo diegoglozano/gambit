@@ -16,7 +16,9 @@ app="$mount_directory/Gambit.app"
 bash "$repository_root/scripts/smoke-desktop-engine.sh" "$app" | tee "$report_directory/smoke.txt"
 export GAMBIT_ENGINE_PATH="$app/Contents/MacOS/gambit-stockfish"
 cargo test -p gambit-engine --test process packaged_stockfish -- --ignored
-bash "$repository_root/scripts/profile-review-engine.sh" 100000 "$report_directory"
+for nodes in 100000 300000; do
+  bash "$repository_root/scripts/profile-review-engine.sh" "$nodes" "$report_directory/nodes-$nodes"
+done
 tar -xzf "$app/Contents/Resources/engine/stockfish-17.1-source.tar.gz" -C "$source_directory"
 case "$(uname -m)" in
   arm64) build_arch=apple-silicon ;;

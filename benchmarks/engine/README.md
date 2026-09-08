@@ -60,7 +60,7 @@ the PGN start, including games with a setup FEN; variation moves are ignored.
 
 `scripts/validate-desktop-engine.sh DMG REPORT_DIRECTORY` mounts a release DMG,
 checks its engine and source contents, runs the real-engine tests and six-game
-profile against the packaged executable, and rebuilds/tests its corresponding
+profiles at 100,000 and 300,000 nodes against the packaged executable, and rebuilds/tests its corresponding
 source. The desktop-release workflow runs it on native Apple Silicon and Intel
 runners against the same DMG. Both jobs must pass before desktop assets can be
 published. CI completion proves executable compatibility and records timings;
@@ -72,13 +72,13 @@ thresholds.
 Apple M3, macOS 26.0.1, native arm64, one thread, 16 MiB hash, 100,000 nodes
 per search, fresh engine process per search, including startup:
 
-| Workload | Decisions | Searches | Total | Failed games |
-| --- | ---: | ---: | ---: | ---: |
-| Public historical six-game fixture, shared ply 8 | 235 | 470 | 177.027 s | 0 |
-| Local saved six-loss queue, shared ply 4 | 209 | 418 | 145.708 s | 0 |
+| Workload | Nodes/search | Decisions | Searches | Total | Failed games |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Public historical six-game fixture, shared ply 8 | 100,000 | 235 | 470 | 177.027 s | 0 |
+| Local saved six-loss queue, shared ply 4 | 100,000 | 209 | 418 | 145.708 s | 0 |
+| Local saved six-loss queue, shared ply 4 | 300,000 | 209 | 418 | 204.334 s | 0 |
 
-The historical run retained 331 bounded scores and 139 exact scores; the local
-review queue retained 141 bounded scores and 277 exact scores. This distinction
+The historical run retained 331 bounded scores and 139 exact scores. This distinction
 must survive future diagnosis and practice logic: a bound is not an exact
 centipawn estimate. Raw game/position evidence for the local queue is not
 committed or uploaded. These development timings are not a finalized production
