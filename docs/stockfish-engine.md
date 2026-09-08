@@ -141,7 +141,7 @@ archives' `src` directories were also compared and are identical.
 
 ## Six-game validation
 
-The [six-game workload](../benchmarks/engine/README.md) now profiles 235 player
+The [six-game workload](https://github.com/diegoglozano/gambit/tree/main/benchmarks/engine) now profiles 235 player
 decisions (470 fixed-node searches), reports progress and incomplete failures,
 and retains bounded/exact score provenance. It uses public historical games;
 representative online review sets still need separate quality testing.
