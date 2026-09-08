@@ -69,8 +69,8 @@ thresholds.
 
 ## Development measurements
 
-Apple M3, macOS 26.0.1, native arm64, one thread, 16 MiB hash, 100,000 nodes
-per search, fresh engine process per search, including startup:
+Apple M3, macOS 26.0.1, native arm64, one thread, 16 MiB hash, fresh engine
+process per search, including startup; node budgets are listed per run:
 
 | Workload | Nodes/search | Decisions | Searches | Total | Failed games |
 | --- | ---: | ---: | ---: | ---: | ---: |
