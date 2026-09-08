@@ -1,0 +1,6 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/gambit-stockfish"],
+    "resources": {"engine-resources/": "engine/"}
+  }
+}

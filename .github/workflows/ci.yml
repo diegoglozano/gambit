@@ -28,7 +28,7 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace --all-targets
 
   minimum-rust:
     name: Minimum Rust 1.85

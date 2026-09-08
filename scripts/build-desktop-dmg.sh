@@ -22,6 +22,7 @@ rm -f \
   "$asset_directory/latest.json"
 
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
+bash "$repository_root/scripts/prepare-desktop-engine.sh"
 
 cd "$desktop_root"
 build_config="{\"version\":\"$version\"}"
@@ -31,6 +32,8 @@ if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
 else
   bundle_targets="dmg,app"
 fi
+build_config=$(jq -cn --argjson overrides "$build_config" \
+  --slurpfile engine src-tauri/tauri.engine.conf.json '$engine[0] * $overrides')
 npx --yes @tauri-apps/cli@2.11.4 build \
   --bundles "$bundle_targets" \
   --target universal-apple-darwin \
@@ -44,6 +47,14 @@ if [[ -z "$dmg_path" ]]; then
 fi
 
 cp "$dmg_path" "$asset_directory/$asset_name"
+# Test the shipped disk image, not only the pre-bundle executable.
+mount_directory=$(mktemp -d "$asset_directory/engine-smoke.XXXXXX")
+trap 'hdiutil detach "$mount_directory" >/dev/null 2>&1 || true; rmdir "$mount_directory" 2>/dev/null || true' EXIT
+hdiutil attach "$asset_directory/$asset_name" -readonly -nobrowse -mountpoint "$mount_directory"
+bash "$repository_root/scripts/smoke-desktop-engine.sh" "$mount_directory/Gambit.app"
+hdiutil detach "$mount_directory"
+rmdir "$mount_directory"
+trap - EXIT
 (
   cd "$asset_directory"
   shasum -a 256 "$asset_name" > "$asset_name.sha256"

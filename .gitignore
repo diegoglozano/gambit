@@ -2,6 +2,8 @@
 # will have compiled files and executables
 debug
 target
+apps/gambit-desktop/src-tauri/binaries/
+apps/gambit-desktop/src-tauri/engine-resources/
 
 # Generated documentation site
 public

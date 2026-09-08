@@ -1213,6 +1213,7 @@ version = "0.15.0"
 dependencies = [
  "gambit",
  "gambit-chess",
+ "gambit-engine",
  "serde",
  "serde_json",
  "tauri",
@@ -1220,6 +1221,13 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+]
+
+[[package]]
+name = "gambit-engine"
+version = "0.1.0"
+dependencies = [
+ "gambit-chess",
 ]
 
 [[package]]

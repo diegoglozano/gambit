@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gambit-chess", "crates/gambit-cli", "crates/gambit-pgn"]
+members = ["crates/gambit-chess", "crates/gambit-cli", "crates/gambit-pgn", "crates/gambit-engine"]
 exclude = ["apps/gambit-desktop/src-tauri"]
 resolver = "3"
 

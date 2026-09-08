@@ -5,6 +5,12 @@ on:
     paths:
       - ".github/workflows/desktop-release.yml"
       - "scripts/build-desktop-dmg.sh"
+      - "scripts/prepare-desktop-engine.sh"
+      - "scripts/smoke-desktop-engine.sh"
+      - "scripts/profile-review-engine.sh"
+      - "scripts/validate-desktop-engine.sh"
+      - "benchmarks/engine/**"
+      - "docs/stockfish-engine.md"
       - "apps/gambit-desktop/**"
       - "crates/**"
       - "Cargo.toml"
@@ -128,10 +134,52 @@ jobs:
           path: target/desktop-release/*
           if-no-files-found: error
 
+  validate-engine:
+    name: Validate packaged engine (${{ matrix.runner }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (github.event_name == 'workflow_dispatch' && inputs.tag || github.sha) }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: gambit-desktop-release
+          path: target/desktop-release
+      - name: Verify native hardware and install Rust
+        run: |
+          test "$(uname -m)" = '${{ matrix.architecture }}'
+          test "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 0
+          rustup toolchain install 1.93.1 --profile minimal
+          rustup default 1.93.1
+      - name: Test the DMG, profile six games, and rebuild corresponding source
+        run: >-
+          bash scripts/validate-desktop-engine.sh
+          target/desktop-release/gambit-desktop-universal-apple-darwin.dmg
+          target/engine-validation
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: engine-validation-${{ matrix.architecture }}
+          path: target/engine-validation/
+          if-no-files-found: warn
+
   publish:
     name: Attach desktop DMG to GitHub Release
-    if: github.event_name != 'pull_request' && needs.build.result == 'success'
-    needs: build
+    if: github.event_name != 'pull_request' && needs.build.result == 'success' && needs.validate-engine.result == 'success'
+    needs: [build, validate-engine]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
