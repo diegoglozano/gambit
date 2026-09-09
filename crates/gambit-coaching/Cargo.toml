@@ -11,9 +11,9 @@ gambit-chess = { path = "../gambit-chess" }
 gambit-engine = { path = "../gambit-engine" }
 gambit-pgn = { path = "../gambit-pgn" }
 serde = { version = "1.0", features = ["derive"] }
-
-[dev-dependencies]
 serde_json = "1.0"
+blake3 = "1.8.7"
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

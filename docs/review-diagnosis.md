@@ -2,8 +2,32 @@
 
 The backend can replay one standard game for an explicitly selected player and
 find the earliest supported deterioration after a review's shared ply. It is
-not yet wired into the desktop UI or durable storage, and is not a complete
+not yet wired into the desktop UI, and is not a complete
 coaching release.
+
+## Durable local records
+
+The cache lives under the app-data `coaching` directory, in a namespace derived
+from the canonical library path. It never edits indexed PGN, session/sync
+metadata, or legacy review progress. Each key includes stable game identity,
+canonical initial FEN/mainline hash, selected player **and color**, shared ply,
+the actual engine binary hash and name, architecture, fixed settings, and
+cache/selection/evidence-policy versions. Changing any of these inputs cannot
+reuse the old result; comments and variations do not invalidate an unchanged
+mainline. Old-key files are retained rather than deleted during invalidation.
+
+Records are limited to 1 MiB, parsed strictly, checked against the complete key,
+and legally replayed before reuse. Truncated, oversized, inconsistent or corrupt
+data is an error, not a successful diagnosis. Corrupt existing practice is not
+silently overwritten. Completed/again-later/revealed/solution state is stored
+separately from the diagnosis within each record; attempt handling follows in
+the practice service.
+
+Saves use a private same-directory temporary file, sync its contents, atomically
+replace the one record, and sync the directory on Unix. Read/modify/write
+operations are serialized within the desktop process. An identical diagnosis
+retry preserves practice; a different result under the same key is rejected.
+Cache reads do not create directories or alter library files.
 
 ## Input and evidence
 

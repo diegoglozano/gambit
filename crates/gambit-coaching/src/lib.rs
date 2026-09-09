@@ -10,3 +10,9 @@ mod diagnosis;
 pub use diagnosis::{
     DEFAULT_NODES, Diagnosis, DiagnosisError, DiagnosisOutcome, TurningPoint, diagnose,
 };
+
+mod cache;
+pub use cache::{
+    CacheEntry, CacheError, CacheKey, CacheStore, EngineIdentity, PracticeDisposition,
+    PracticeProgress, SolutionStatus,
+};
