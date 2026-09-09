@@ -1,5 +1,8 @@
 //! Local review evidence. No network access or implicit whole-library analysis.
 
+mod worker;
+pub use worker::{EngineSession, EngineWorker};
+
 mod replay;
 pub use replay::{Decision, InputError, ReviewGame};
 

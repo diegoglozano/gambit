@@ -1208,11 +1208,25 @@ name = "gambit-chess"
 version = "0.15.0"
 
 [[package]]
+name = "gambit-coaching"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "gambit-chess",
+ "gambit-engine",
+ "gambit-pgn",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "gambit-desktop"
 version = "0.15.0"
 dependencies = [
  "gambit",
  "gambit-chess",
+ "gambit-coaching",
  "gambit-engine",
  "serde",
  "serde_json",
@@ -1221,6 +1235,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "tempfile",
 ]
 
 [[package]]

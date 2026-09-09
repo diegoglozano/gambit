@@ -5,6 +5,28 @@ find the earliest supported deterioration after a review's shared ply. It is
 not yet wired into the desktop UI, and is not a complete
 coaching release.
 
+## Desktop background service
+
+The desktop now exposes `start_coaching`, `coaching_status`, and
+`cancel_coaching`. Requests require the current library path, one to six distinct
+game IDs, an explicit player and shared ply. A read-only request loads cached
+results without launching Stockfish; analysis requires `analyze: true`.
+All cached games are loaded before missing games are searched. Game-level
+events carry a job generation and library path so the UI can reject stale
+updates. Cancellation likewise requires the matching generation and path.
+
+A shared engine gate serializes searches across cancellable worker sessions.
+The queue runs on an owned background thread, preserves completed records,
+isolates unsupported/failed games and resolves the packaged adjacent engine.
+Library switching cancels old work without blocking navigation; normal game
+navigation does not cancel it. App exit cancels and joins workers so active
+engine children are reaped. No queue command writes indexed evidence or legacy
+session metadata. A new request waits for a cancelling worker to finish.
+
+UI controls, practice command integration, sleep notifications, explicit corrupt
+cache recovery and a durable marker for an interrupted job with zero completed
+games remain follow-up work. This service alone does not satisfy release gates.
+
 ## Durable local records
 
 The cache lives under the app-data `coaching` directory, in a namespace derived
@@ -67,7 +89,7 @@ number. Each player decision preserves the full known history.
 supplies a serialized local engine, cancellation and a fixed node budget. It
 checks cancellation between searches and never returns partial-game success
 after a crash or changed engine identity/settings. Completed earlier games
-remain the responsibility of the future queue/cache layer.
+are saved individually by the desktop queue/cache layer.
 
 ## Provisional selection policy (version 1)
 
