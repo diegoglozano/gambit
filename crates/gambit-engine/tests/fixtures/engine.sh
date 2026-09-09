@@ -18,6 +18,9 @@ while IFS= read -r command; do
         hang) continue ;;
         malformed) printf '%s\n' 'info score cp invalid' ;;
         mismatch) printf '%s\n' 'info score cp 25 pv d2d4' 'bestmove e2e4' ;;
+        illegal-best) printf '%s\n' 'info score cp 25 pv e2e5' 'bestmove e2e5' ;;
+        illegal-pv) printf '%s\n' 'info score cp 25 pv d2d4 d7d4' 'bestmove d2d4' ;;
+        false-terminal) printf '%s\n' 'info score mate 0' 'bestmove (none)' ;;
         flood)
           while :; do printf '%s\n' 'info string ignored'; done
           ;;

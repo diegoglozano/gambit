@@ -52,6 +52,79 @@ struct ParsedSan {
 }
 
 impl Position {
+    /// Format a legal move as standard algebraic notation, including only the
+    /// required disambiguation and the correct check or mate suffix.
+    ///
+    /// # Errors
+    /// Returns [`SanError`] if the move is not legal in this exact position.
+    pub fn to_san(self, chess_move: Move) -> Result<String, SanError> {
+        let mut legal = MoveList::default();
+        self.generate_legal_moves(&mut legal);
+        if !legal.as_slice().contains(&chess_move) {
+            return Err(SanError {
+                kind: SanErrorKind::IllegalMove,
+            });
+        }
+        let (_, piece) = self.piece_at(chess_move.from()).ok_or(SanError {
+            kind: SanErrorKind::IllegalMove,
+        })?;
+        let mut san = String::new();
+        if chess_move.is_castle() {
+            san.push_str(if chess_move.to().file() == 6 {
+                "O-O"
+            } else {
+                "O-O-O"
+            });
+        } else {
+            if piece == Piece::Pawn {
+                if chess_move.is_capture() {
+                    san.push(char::from(b'a' + chess_move.from().file()));
+                }
+            } else {
+                san.push(piece_letter(piece));
+                let alternatives: Vec<_> = legal
+                    .as_slice()
+                    .iter()
+                    .filter(|other| {
+                        **other != chess_move
+                            && other.to() == chess_move.to()
+                            && self.piece_at(other.from()).is_some_and(|(_, p)| p == piece)
+                    })
+                    .collect();
+                if !alternatives.is_empty() {
+                    let same_file = alternatives
+                        .iter()
+                        .any(|m| m.from().file() == chess_move.from().file());
+                    let same_rank = alternatives
+                        .iter()
+                        .any(|m| m.from().rank() == chess_move.from().rank());
+                    if !same_file || same_rank {
+                        san.push(char::from(b'a' + chess_move.from().file()));
+                    }
+                    if same_file {
+                        san.push(char::from(b'1' + chess_move.from().rank()));
+                    }
+                }
+            }
+            if chess_move.is_capture() {
+                san.push('x');
+            }
+            san.push_str(&chess_move.to().to_string());
+            if let Some(promotion) = chess_move.promotion() {
+                san.push('=');
+                san.push(piece_letter(promotion));
+            }
+        }
+        let mut next = self;
+        next.play_unchecked(chess_move);
+        if next.in_check(next.side_to_move()) {
+            let mut replies = MoveList::default();
+            next.generate_legal_moves(&mut replies);
+            san.push(if replies.is_empty() { '#' } else { '+' });
+        }
+        Ok(san)
+    }
+
     /// Resolves a SAN token against this position and applies the unique legal move.
     ///
     /// # Errors
@@ -72,6 +145,17 @@ impl Position {
         validate_check_suffix(next, parsed.check)?;
         *self = next;
         Ok(chess_move)
+    }
+}
+
+fn piece_letter(piece: Piece) -> char {
+    match piece {
+        Piece::Pawn => 'P',
+        Piece::Knight => 'N',
+        Piece::Bishop => 'B',
+        Piece::Rook => 'R',
+        Piece::Queen => 'Q',
+        Piece::King => 'K',
     }
 }
 

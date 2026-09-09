@@ -65,6 +65,8 @@ pub struct Analysis {
     pub depth: Option<u32>,
     pub best_move: Option<String>,
     pub pv: Vec<String>,
+    /// Legally replayed standard notation, in the same order as `pv`.
+    pub pv_san: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -394,6 +396,7 @@ pub fn analyze_game(
                 .rev()
                 .find(|info| best_move.as_ref() == info.pv.first())
                 .ok_or(Error::Protocol("missing score for bestmove"))?;
+            let pv_san = legal_variation(position.position(), &info.pv)?;
             return Ok(Analysis {
                 engine,
                 nodes_budget: nodes,
@@ -402,6 +405,7 @@ pub fn analyze_game(
                 depth: info.depth,
                 best_move,
                 pv: info.pv,
+                pv_san,
             });
         }
         if let Some(info) = parse_info(&line)? {
@@ -411,6 +415,36 @@ pub fn analyze_game(
             evidence.push_back(info);
         }
     }
+}
+
+fn legal_variation(
+    mut position: gambit_chess::Position,
+    pv: &[String],
+) -> Result<Vec<String>, Error> {
+    let mut san = Vec::with_capacity(pv.len());
+    let mut legal = gambit_chess::MoveList::default();
+    if pv.is_empty() {
+        position.generate_legal_moves(&mut legal);
+        if !legal.is_empty() {
+            return Err(Error::Protocol("missing move in nonterminal position"));
+        }
+    }
+    for notation in pv {
+        position.generate_legal_moves(&mut legal);
+        let chess_move = legal
+            .as_slice()
+            .iter()
+            .find(|m| m.to_uci() == *notation)
+            .copied()
+            .ok_or(Error::Protocol("illegal variation"))?;
+        san.push(
+            position
+                .to_san(chess_move)
+                .map_err(|_| Error::Protocol("illegal variation"))?,
+        );
+        position.play_unchecked(chess_move);
+    }
+    Ok(san)
 }
 
 #[cfg(test)]

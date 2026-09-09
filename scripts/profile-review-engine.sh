@@ -23,7 +23,7 @@ jq -n --arg cpu "$(sysctl -n machdep.cpu.brand_string)" \
   --arg translated "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" \
   --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg commit "$(git rev-parse HEAD)" \
   --argjson dirty "$(if [[ -n "$(git status --porcelain)" ]]; then echo true; else echo false; fi)" \
-  --arg harness_sha256 "$(shasum -a 256 crates/gambit-engine/examples/review_profile.rs crates/gambit-engine/examples/support/mod.rs crates/gambit-engine/src/lib.rs crates/gambit-engine/src/position.rs crates/gambit-chess/src/position.rs | shasum -a 256 | awk '{print $1}')" \
+  --arg harness_sha256 "$(shasum -a 256 crates/gambit-engine/examples/review_profile.rs crates/gambit-engine/examples/support/mod.rs crates/gambit-engine/src/lib.rs crates/gambit-engine/src/position.rs crates/gambit-chess/src/position.rs crates/gambit-chess/src/san.rs | shasum -a 256 | awk '{print $1}')" \
   --arg engine_sha256 "$(shasum -a 256 "$engine" | awk '{print $1}')" \
   --arg fixture_sha256 "$(shasum -a 256 "$fixture" | awk '{print $1}')" \
   --argjson nodes "$nodes" --argjson shared_ply "$shared_ply" \

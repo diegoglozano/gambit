@@ -72,6 +72,7 @@ fn handshake_fixed_nodes_and_exact_result() {
     assert_eq!(result.score_bound, ScoreBound::Exact);
     assert_eq!(result.best_move.as_deref(), Some("d2d4"));
     assert_eq!(result.pv, ["d2d4", "d7d5"]);
+    assert_eq!(result.pv_san, ["d4", "d5"]);
 }
 
 #[test]
@@ -121,7 +122,15 @@ fn sends_starting_position_and_history_instead_of_only_the_final_board() {
 
 #[test]
 fn crash_and_malformed_output_fail_only_this_request() {
-    for scenario in ["startup-crash", "crash", "malformed", "mismatch"] {
+    for scenario in [
+        "startup-crash",
+        "crash",
+        "malformed",
+        "mismatch",
+        "illegal-best",
+        "illegal-pv",
+        "false-terminal",
+    ] {
         let fixture = Fixture::new(scenario);
         assert!(matches!(
             analyze(
