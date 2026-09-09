@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use gambit_coaching::{
     CacheEntry, CacheKey, CacheStore, DEFAULT_NODES, EngineIdentity, EngineSession, EngineWorker,
-    ReviewGame, diagnose,
+    PracticeDisposition, ReviewGame, ReviewSummary, diagnose, summarize, verify_attempt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -59,17 +59,33 @@ pub(super) struct Game {
 #[derive(Clone, Serialize)]
 pub(super) struct Snapshot {
     generation: u64,
+    revision: u64,
     path: PathBuf,
     player: String,
     shared_ply: usize,
     running: bool,
     cancelled: bool,
+    practice_busy: bool,
     games: Vec<Game>,
     message: Option<String>,
+    summary: Option<ReviewSummary>,
 }
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", content = "uci", rename_all = "snake_case")]
+pub(super) enum PracticeAction {
+    Attempt(String),
+    Reveal,
+    Done,
+    Later,
+    Replay,
+}
+
+type PracticeReply = std::sync::mpsc::Receiver<Result<Snapshot, String>>;
 
 struct Job {
     session: EngineSession,
+    practice: bool,
     thread: JoinHandle<()>,
 }
 
@@ -99,11 +115,13 @@ impl Service {
         self.generation = self.generation.wrapping_add(1);
         let initial = Snapshot {
             generation: self.generation,
+            revision: 0,
             path: request.expected_path.clone(),
             player: request.player.clone(),
             shared_ply: request.shared_ply,
             running: true,
             cancelled: false,
+            practice_busy: false,
             games: request
                 .game_ids
                 .iter()
@@ -115,6 +133,7 @@ impl Service {
                 })
                 .collect(),
             message: None,
+            summary: None,
         };
         let snapshot = Arc::new(Mutex::new(initial.clone()));
         let background = Arc::clone(&snapshot);
@@ -148,9 +167,84 @@ impl Service {
         self.current = Some(Arc::clone(&snapshot));
         self.jobs.push(Job {
             session,
+            practice: false,
             thread: handle,
         });
         Ok(initial)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn practice(
+        &mut self,
+        path: &std::path::Path,
+        generation: u64,
+        game_id: i64,
+        action: PracticeAction,
+        app_data: PathBuf,
+        executable: PathBuf,
+        publish: impl Fn(Snapshot) + Send + 'static,
+    ) -> Result<PracticeReply, String> {
+        let snapshot = self.snapshot()?.ok_or("open a diagnosis first")?;
+        if snapshot.path != path || snapshot.generation != generation {
+            return Err("the active diagnosis has changed".into());
+        }
+        if self
+            .jobs
+            .iter()
+            .any(|job| job.practice && !job.thread.is_finished())
+        {
+            return Err("wait for the current practice action".into());
+        }
+        let index = snapshot
+            .games
+            .iter()
+            .position(|game| game.id == game_id)
+            .ok_or("this game is not in the active set")?;
+        let record = snapshot.games[index]
+            .record
+            .clone()
+            .ok_or("diagnose this game first")?;
+        let background = Arc::clone(self.current.as_ref().ok_or("open a diagnosis first")?);
+        let session = self.engine.session();
+        let search = session.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let handle = thread::Builder::new()
+            .name("review-practice".into())
+            .spawn(move || {
+                update(&background, &publish, |s| s.practice_busy = true);
+                let result =
+                    practice_action(&snapshot, &app_data, &executable, &search, &record, action);
+                update(&background, &publish, |s| {
+                    s.practice_busy = false;
+                    if let Ok(record) = &result {
+                        s.games[index].record = Some(record.clone());
+                    }
+                });
+                let reply = result.and_then(|_| {
+                    background
+                        .lock()
+                        .map(|s| s.clone())
+                        .map_err(|_| "analysis state is unavailable".into())
+                });
+                let _ = sender.send(reply);
+            })
+            .map_err(|_| "could not start the practice worker")?;
+        // Reap completed jobs so repeated practice cannot grow thread metadata.
+        let mut retained = Vec::new();
+        for job in self.jobs.drain(..) {
+            if job.thread.is_finished() {
+                let _ = job.thread.join();
+            } else {
+                retained.push(job);
+            }
+        }
+        self.jobs = retained;
+        self.jobs.push(Job {
+            session,
+            practice: true,
+            thread: handle,
+        });
+        Ok(receiver)
     }
 
     pub fn snapshot(&self) -> Result<Option<Snapshot>, String> {
@@ -213,9 +307,79 @@ fn update(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         change(&mut state);
+        state.revision = state.revision.saturating_add(1);
+        let records = state
+            .games
+            .iter()
+            .filter_map(|game| game.record.clone())
+            .collect::<Vec<_>>();
+        state.summary = summarize(&records).ok();
         state.clone()
     };
     publish(snapshot);
+}
+
+fn practice_action(
+    snapshot: &Snapshot,
+    app_data: &std::path::Path,
+    executable: &std::path::Path,
+    session: &EngineSession,
+    record: &CacheEntry,
+    action: PracticeAction,
+) -> Result<CacheEntry, String> {
+    let store = CacheStore::for_library(app_data, &snapshot.path)
+        .map_err(|_| "practice storage is unavailable")?;
+    let id = record
+        .key
+        .game_id()
+        .parse::<i64>()
+        .map_err(|_| "invalid game identity")?;
+    let detail =
+        gambit::index::game(&snapshot.path, id).map_err(|_| "the source game is unavailable")?;
+    let game = ReviewGame::parse(detail.pgn.as_bytes(), &snapshot.player)
+        .map_err(|_| "the source game has changed")?;
+    let identity = EngineIdentity::from_file("Stockfish 17.1", executable)
+        .map_err(|_| "the local engine is unavailable")?;
+    let key = CacheKey::new(
+        record.key.game_id(),
+        &game,
+        snapshot.shared_ply,
+        &identity,
+        DEFAULT_NODES,
+    )
+    .map_err(|_| "invalid practice inputs")?;
+    if key != record.key {
+        return Err("the game or engine has changed; reload the diagnosis".into());
+    }
+    if session.cancellation().is_cancelled() {
+        return Err("practice cancelled".into());
+    }
+    if let PracticeAction::Attempt(uci) = action {
+        let attempt = verify_attempt(
+            &record.diagnosis,
+            &uci,
+            session.cancellation(),
+            |position| {
+                session.analyze(executable, position, DEFAULT_NODES, Duration::from_secs(30))
+            },
+        )
+        .map_err(|_| "the move could not be verified; please retry")?;
+        if session.cancellation().is_cancelled() {
+            return Err("practice cancelled".into());
+        }
+        return store
+            .record_attempt(&record.key, attempt)
+            .map_err(|_| "practice could not be saved".into());
+    }
+    store
+        .update_practice(&record.key, |progress| match action {
+            PracticeAction::Reveal => progress.revealed = true,
+            PracticeAction::Done => progress.disposition = PracticeDisposition::Completed,
+            PracticeAction::Later => progress.disposition = PracticeDisposition::AgainLater,
+            PracticeAction::Replay => progress.disposition = PracticeDisposition::Active,
+            PracticeAction::Attempt(_) => unreachable!(),
+        })
+        .map_err(|_| "this practice action cannot be saved yet".into())
 }
 
 fn run_queue(
@@ -355,6 +519,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // End-to-end cache/practice/reopen lifecycle.
     fn queue_resumes_cached_results_and_isolates_failed_games() {
         let root = tempfile::tempdir().unwrap();
         let library = root.path().join("library.gambit");
@@ -411,13 +576,50 @@ mod tests {
                 .iter()
                 .any(|s| s.running && s.games[0].status == Status::Ready)
         );
-        let record = analyzed.games[0].record.as_ref().unwrap();
-        let store = CacheStore::for_library(root.path(), &library).unwrap();
-        store
-            .update_practice(&record.key, |p| {
-                p.disposition = gambit_coaching::PracticeDisposition::Completed;
-            })
+        assert!(
+            service
+                .practice(
+                    &library,
+                    analyzed.generation + 1,
+                    1,
+                    PracticeAction::Done,
+                    root.path().into(),
+                    executable.clone(),
+                    |_| {}
+                )
+                .is_err()
+        );
+        let reply = service
+            .practice(
+                &library,
+                analyzed.generation,
+                1,
+                PracticeAction::Done,
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
             .unwrap();
+        let completed = reply.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+        assert!(!completed.practice_busy);
+        assert!(completed.revision > analyzed.revision);
+        finish(&mut service);
+        // Engine replacement invalidates even a non-search practice action.
+        std::fs::write(&executable, b"changed engine").unwrap();
+        let reply = service
+            .practice(
+                &library,
+                analyzed.generation,
+                1,
+                PracticeAction::Replay,
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
+            .unwrap();
+        assert!(reply.recv_timeout(Duration::from_secs(5)).unwrap().is_err());
+        finish(&mut service);
+        std::fs::write(&executable, b"synthetic engine identity").unwrap();
         service.shutdown();
         let mut reopened = Service::default();
         reopened

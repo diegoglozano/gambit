@@ -1,0 +1,70 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { coachingUI } from "./coaching-ui.mjs";
+
+// A deliberately small DOM test double: this tests controller state and event
+// contracts, not browser layout, native accessibility, or rendering quality.
+class Element {
+  children = []; listeners = {}; dataset = {}; attributes = {}; hidden = false; textContent = ""; value = "";
+  classList = { toggle() {} };
+  setAttribute(name, value) { this.attributes[name] = value; }
+  addEventListener(name, listener) { this.listeners[name] = listener; }
+  append(child) { this.children.push(child); }
+  replaceChildren() { this.children = []; }
+  contains(child) { return this.children.includes(child); }
+  querySelectorAll() { return this.children; }
+  querySelector(selector) { return this.children.find((child) => selector.includes(child.dataset.square)); }
+  focus() { document.activeElement = this; }
+}
+
+test("practice controller hides the answer, supports square entry and reveals only on acceptance", async () => {
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  const elements = new Map();
+  const element = (id) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
+  globalThis.document = { activeElement: null, getElementById: element, createElement: () => new Element() };
+  globalThis.window = { setTimeout: () => 1 };
+  try {
+    let ctx = { path: "library", player: "A", ply: 4, gameIds: [1], gameId: 1 };
+    const record = { diagnosis: { outcome: { kind: "turning_point", evidence: {
+      position_fen: "7k/5K2/6Q1/8/8/8/8/8 w - - 0 1", played_san: "Qh7+", best_san: "Qg8#", pv_san: ["Qg8#"],
+      before: { bound: "exact", score: { kind: "mate_for", value: 1 } },
+      after: { bound: "exact", score: { kind: "centipawns", value: 0 } }, loss: { kind: "lost_forced_mate" },
+    } } }, practice: { solution: "unsolved", revealed: false, attempts: [] } };
+    const snapshot = { path: "library", player: "A", shared_ply: 4, generation: 1, revision: 1,
+      running: false, games: [{ id: 1, status: "ready", record }] };
+    const calls = [];
+    const ui = coachingUI({ context: () => ctx, onDone() {}, onLater() {}, invoke: async (command, args) => {
+      calls.push({ command, args });
+      if (command === "coaching_practice") {
+        assert.deepEqual(args.action, { kind: "attempt", uci: "g6h6" });
+        record.practice.solution = "without_reveal";
+        record.practice.attempts.push({ verdict: "strong" });
+        snapshot.revision++;
+      }
+      return structuredClone(snapshot);
+    } });
+    await ui.load();
+    assert.equal(element("coaching-answer").hidden, true);
+    assert.equal(element("coaching-answer").textContent, "");
+    assert.equal(element("coaching-pv").textContent, "");
+    assert.equal(element("coaching-done").disabled, true);
+    const board = element("coaching-board");
+    assert.equal(board.children.length, 64);
+    assert.equal(board.children.filter((b) => b.tabIndex === 0).length, 1);
+    board.children.find((b) => b.dataset.square === "g6").listeners.click();
+    board.children.find((b) => b.dataset.square === "h6").listeners.click();
+    assert.equal(element("coaching-move").value, "g6h6");
+    assert.equal(calls.filter((c) => c.command === "coaching_practice").length, 0);
+    element("coaching-form").listeners.submit({ preventDefault() {} });
+    await new Promise(setImmediate);
+    assert.equal(element("coaching-answer").hidden, false);
+    assert.match(element("coaching-answer").textContent, /Qg8#/);
+    assert.match(element("coaching-feedback").textContent, /Strong move/);
+    assert.equal(element("coaching-done").disabled, false);
+    ctx = { ...ctx, path: "other-library" };
+    ui.render();
+    assert.equal(element("coaching-exercise").hidden, true);
+    assert.equal(element("coaching-answer").textContent, "");
+  } finally { globalThis.document = previousDocument; globalThis.window = previousWindow; }
+});

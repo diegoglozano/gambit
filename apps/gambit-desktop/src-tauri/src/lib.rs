@@ -78,6 +78,55 @@ fn cancel_coaching(
         .cancel_request(&expected_path, generation)
 }
 
+#[tauri::command]
+async fn coaching_practice(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    expected_path: PathBuf,
+    generation: u64,
+    game_id: i64,
+    action: coaching::PracticeAction,
+) -> Result<coaching::Snapshot, String> {
+    let receiver = {
+        let database = state
+            .database
+            .lock()
+            .map_err(|_| "database state is unavailable")?;
+        if database.as_ref() != Some(&expected_path) {
+            return Err("the active library has changed".into());
+        }
+        let app_data = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| "app storage is unavailable")?;
+        let executable = std::env::current_exe()
+            .map_err(|_| "app location is unavailable")?
+            .with_file_name("gambit-stockfish");
+        state
+            .coaching
+            .lock()
+            .map_err(|_| "analysis state is unavailable")?
+            .practice(
+                &expected_path,
+                generation,
+                game_id,
+                action,
+                app_data,
+                executable,
+                move |snapshot| {
+                    let _ = app.emit("coaching-progress", snapshot);
+                },
+            )?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver
+            .recv()
+            .map_err(|_| "practice worker stopped".to_string())?
+    })
+    .await
+    .map_err(|_| "practice worker stopped")?
+}
+
 static SAVED_SESSION_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize)]
@@ -1147,6 +1196,7 @@ pub fn run() {
             start_coaching,
             coaching_status,
             cancel_coaching,
+            coaching_practice,
             open_game_url,
             app_version,
             check_for_update,
