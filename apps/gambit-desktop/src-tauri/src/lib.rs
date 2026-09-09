@@ -16,9 +16,66 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 
+mod coaching;
+
 #[derive(Default)]
 struct AppState {
     database: Mutex<Option<PathBuf>>,
+    coaching: Mutex<coaching::Service>,
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri command injection owns State.
+fn start_coaching(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: coaching::Request,
+) -> Result<coaching::Snapshot, String> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| "database state is unavailable")?;
+    if database.as_ref() != Some(&request.expected_path) {
+        return Err("the active library has changed".into());
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "app storage is unavailable")?;
+    let executable = std::env::current_exe()
+        .map_err(|_| "app location is unavailable")?
+        .with_file_name("gambit-stockfish");
+    state
+        .coaching
+        .lock()
+        .map_err(|_| "analysis state is unavailable")?
+        .start(request, app_data, executable, move |snapshot| {
+            let _ = app.emit("coaching-progress", snapshot);
+        })
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri command injection owns State.
+fn coaching_status(state: State<'_, AppState>) -> Result<Option<coaching::Snapshot>, String> {
+    state
+        .coaching
+        .lock()
+        .map_err(|_| "analysis state is unavailable")?
+        .snapshot()
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri command injection owns State.
+fn cancel_coaching(
+    state: State<'_, AppState>,
+    expected_path: PathBuf,
+    generation: u64,
+) -> Result<(), String> {
+    state
+        .coaching
+        .lock()
+        .map_err(|_| "analysis state is unavailable")?
+        .cancel_request(&expected_path, generation)
 }
 
 static SAVED_SESSION_WRITE_LOCK: Mutex<()> = Mutex::new(());
@@ -1012,10 +1069,18 @@ fn database(state: &State<'_, AppState>) -> Result<PathBuf, String> {
 }
 
 fn set_database(state: &State<'_, AppState>, path: PathBuf) -> Result<(), String> {
-    *state
+    let mut database = state
         .database
         .lock()
-        .map_err(|_| String::from("database state is unavailable"))? = Some(path);
+        .map_err(|_| String::from("database state is unavailable"))?;
+    if database.as_ref() != Some(&path) {
+        state
+            .coaching
+            .lock()
+            .map_err(|_| "analysis state is unavailable")?
+            .cancel(true);
+    }
+    *database = Some(path);
     Ok(())
 }
 
@@ -1079,14 +1144,28 @@ pub fn run() {
             export_games,
             get_game,
             save_review_progress,
+            start_coaching,
+            coaching_status,
+            cancel_coaching,
             open_game_url,
             app_version,
             check_for_update,
             install_update,
             restart_app
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Gambit Desktop");
+        .build(tauri::generate_context!())
+        .expect("failed to build Gambit Desktop")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                let state = app.state::<AppState>();
+                if let Ok(mut service) = state.coaching.lock() {
+                    service.shutdown();
+                }
+            }
+        });
 }
 
 #[cfg(test)]
