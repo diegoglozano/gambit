@@ -16,6 +16,7 @@ app="$mount_directory/Gambit.app"
 bash "$repository_root/scripts/smoke-desktop-engine.sh" "$app" | tee "$report_directory/smoke.txt"
 export GAMBIT_ENGINE_PATH="$app/Contents/MacOS/gambit-stockfish"
 cargo test -p gambit-engine --test process packaged_stockfish -- --ignored
+cargo test -p gambit-coaching --test real_engine packaged_practice -- --ignored
 for nodes in 100000 300000; do
   bash "$repository_root/scripts/profile-review-engine.sh" "$nodes" "$report_directory/nodes-$nodes"
 done

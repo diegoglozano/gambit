@@ -20,14 +20,39 @@ Records are limited to 1 MiB, parsed strictly, checked against the complete key,
 and legally replayed before reuse. Truncated, oversized, inconsistent or corrupt
 data is an error, not a successful diagnosis. Corrupt existing practice is not
 silently overwritten. Completed/again-later/revealed/solution state is stored
-separately from the diagnosis within each record; attempt handling follows in
-the practice service.
+separately from the diagnosis within each record. Practice-policy version is
+also part of the key so a changed tolerance cannot silently retain old outcomes.
 
 Saves use a private same-directory temporary file, sync its contents, atomically
 replace the one record, and sync the directory on Unix. Read/modify/write
 operations are serialized within the desktop process. An identical diagnosis
 retry preserves practice; a different result under the same key is rejected.
 Cache reads do not create directories or alter library files.
+
+## Practice and factual summaries
+
+The backend verifies a submitted legal move against the stored preferred move,
+searching both continuations with the same complete root history and node
+budget. This avoids comparing an old root estimate to only one newly searched
+child. A different move can be strong if it is within 30 centipawns; a submitted
+preferred move is still searched, sharing its reference search. Illegal moves
+do not launch an engine. Unsupported score inequalities are **inconclusive**,
+not “try again.” Forced mates retain their type; preserving a forced mate is
+accepted without translating mate distances into centipawns.
+
+Attempt feedback contains only the submitted move and its evaluations/verdict,
+not the preferred move or PV. Reveal is an explicit separate action. The cache
+retains the latest 100 attempts, total attempt count, first solve outcome
+(without reveal or after hint), reveal state, and active/completed/practice-later
+disposition. Engine failure and cancellation return no completed attempt.
+
+Summary calculations accept at most six distinct game records. They count
+analyzed/no-result games and practice outcomes, report the actual FEN move-number
+range, and group identical playable positions and identical played choices.
+Move counters are excluded from repeated-position identity; castling, side to
+move and effective en passant remain relevant. Centipawn mean/median exclude
+mate transitions, and remain labeled as minimum estimates when any contributing
+loss was bounded. No theme classifier or opening-quality claim is introduced.
 
 ## Input and evidence
 
