@@ -1,9 +1,9 @@
 # Local engine spike (Phase 0)
 
 This implements the first deliverable from `review-coaching-requirements.md`:
-a backend-only UCI boundary and a packaged fixed-position diagnostic. It does
-not implement diagnosis, cache schema, training, or coaching UI. Those remain
-gated on the profiling and distribution checks below.
+a backend-only UCI boundary and a packaged fixed-position diagnostic. The
+[diagnosis backend](review-diagnosis.md) builds on it; durable storage, training
+and coaching UI remain separate work.
 
 ## Engine and provenance
 
@@ -77,8 +77,9 @@ explicit diagnostic is the only desktop integration in Phase 0.
 moves are sent together, preserving repetition rather than resetting history
 at each decision. Histories are bounded to 1,024 plies. Illegal moves and
 malformed input leave the position unchanged; setup FENs cannot supply unknown
-earlier history. The six-game profiler records this input as schema 2; its
-schema 1 timings remain a separate, FEN-only historical baseline.
+earlier history. Profiler schema 2 introduced this history; schema 3 additionally
+records the completed-iteration evidence policy. Schema 1 timings remain a
+separate, FEN-only historical baseline.
 
 The library is synchronous and must be called on a background worker when
 integrating the review UI. Each request starts a fresh process with Threads=1,
@@ -97,7 +98,11 @@ inferred here. Upper/lower score bounds are preserved explicitly, along with
 reported search depth, and are never relabeled as exact evidence. Reversing
 perspective reverses the bound too. Secondary PVs are ignored. When a node
 limit interrupts an aspiration search, the final best move is matched to its
-most recent retained report; another move's score is never substituted.
+most recent retained report. If that report is bounded, the immediately previous
+exact iteration may be used only if it selected the same root move, with the
+earlier depth and `previous_completed_iteration` source retained explicitly.
+A different completed root move, a missing depth, or a gap of more than one
+depth keeps the latest bound. Another move's score is never substituted.
 If no matching report exists, the analysis fails. The six-game workload exposed
 this case at Kasparov–Deep Blue game 1 after 16.Nh2; its recorded transcript is
 covered by a process-level regression test.

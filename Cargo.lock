@@ -121,11 +121,23 @@ name = "gambit-chess"
 version = "0.15.0"
 
 [[package]]
+name = "gambit-coaching"
+version = "0.1.0"
+dependencies = [
+ "gambit-chess",
+ "gambit-engine",
+ "gambit-pgn",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gambit-engine"
 version = "0.1.0"
 dependencies = [
  "gambit-chess",
  "gambit-pgn",
+ "serde",
  "serde_json",
 ]
 

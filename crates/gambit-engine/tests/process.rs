@@ -1,5 +1,7 @@
 #![cfg(unix)]
-use gambit_engine::{Cancellation, Error, GamePosition, Score, ScoreBound, analyze, analyze_game};
+use gambit_engine::{
+    Cancellation, Error, GamePosition, Score, ScoreBound, ScoreSource, analyze, analyze_game,
+};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -90,7 +92,42 @@ fn node_limit_preserves_the_chosen_moves_bound_instead_of_a_different_moves_scor
     assert_eq!(result.score, Score::Centipawns(22));
     assert_eq!(result.score_bound, ScoreBound::Lower);
     assert_eq!(result.depth, Some(15));
+    assert_eq!(result.score_source, ScoreSource::LatestReport);
     assert_eq!(result.pv, ["a5c5"]);
+}
+
+#[test]
+fn previous_completed_iteration_is_explicit_and_cannot_be_stale() {
+    for (scenario, bound, source, depth, cp) in [
+        (
+            "incomplete-iteration",
+            ScoreBound::Exact,
+            ScoreSource::PreviousCompletedIteration,
+            12,
+            25,
+        ),
+        (
+            "stale-iteration",
+            ScoreBound::Lower,
+            ScoreSource::LatestReport,
+            13,
+            50,
+        ),
+    ] {
+        let fixture = Fixture::new(scenario);
+        let result = analyze(
+            &fixture.path(),
+            FEN,
+            100,
+            &Cancellation::default(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(result.score_bound, bound);
+        assert_eq!(result.score_source, source);
+        assert_eq!(result.depth, Some(depth));
+        assert_eq!(result.score, Score::Centipawns(cp));
+    }
 }
 
 const NODE_LIMIT_FEN: &str = "r3r1k1/ppbn1p2/2p2n1p/q2pp1pb/4P3/PP1P2PP/1BPN1PBN/R3QRK1 b - - 2 16";

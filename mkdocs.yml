@@ -20,6 +20,7 @@ nav:
   - Getting started: getting-started.md
   - Desktop: desktop.md
   - Local engine development: stockfish-engine.md
+  - Review diagnosis development: review-diagnosis.md
   - Player experience: player-experience.md
   - Corpus statistics: statistics.md
   - Gambit databases: databases.md

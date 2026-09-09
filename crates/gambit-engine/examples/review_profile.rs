@@ -28,6 +28,7 @@ fn evidence(result: &Analysis, root_is_player: bool) -> Value {
         "engine": result.engine, "root_is_player": root_is_player,
         "score": score_json(result.score),
         "score_bound": bound(result.score_bound), "depth": result.depth,
+        "score_source": result.score_source,
         "player_score_bound": bound(result.score_bound.for_player(root_is_player)),
         "player_score": score_json(result.score.for_player(root_is_player)),
         "best_move": result.best_move, "pv": result.pv, "pv_san": result.pv_san,
@@ -55,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let games = support::workload(File::open(&args[1])?, player, shared_ply)?;
     emit(
-        &json!({"type": "start", "schema": 2, "history_preserved": true, "architecture": std::env::consts::ARCH,
+        &json!({"type": "start", "schema": 3, "evidence_version": gambit_engine::EVIDENCE_VERSION, "history_preserved": true, "architecture": std::env::consts::ARCH,
         "games": games.len(), "shared_ply": shared_ply, "nodes_per_search": nodes,
         "threads": 1, "hash_mib": 16, "fresh_process_per_search": true}),
     )?;

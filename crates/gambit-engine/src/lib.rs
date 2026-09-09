@@ -21,6 +21,8 @@ const MAX_LINE: usize = 8192;
 const MAX_PV: usize = 32;
 const MAX_EVIDENCE: usize = 64;
 const POLL: Duration = Duration::from_millis(20);
+/// Version the interpretation of UCI evidence independently of Stockfish's build.
+pub const EVIDENCE_VERSION: u32 = 2;
 
 #[derive(Clone, Default)]
 pub struct Cancellation(Arc<AtomicBool>);
@@ -35,7 +37,8 @@ impl Cancellation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Score {
     Centipawns(i32),
     Mate(i32),
@@ -55,13 +58,14 @@ impl Score {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Analysis {
     pub engine: String,
     pub nodes_budget: u64,
     pub score: Score,
     /// Bounds must not be treated as exact evaluations in diagnosis.
     pub score_bound: ScoreBound,
+    pub score_source: ScoreSource,
     pub depth: Option<u32>,
     pub best_move: Option<String>,
     pub pv: Vec<String>,
@@ -69,11 +73,19 @@ pub struct Analysis {
     pub pv_san: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScoreBound {
     Exact,
     Lower,
     Upper,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScoreSource {
+    LatestReport,
+    PreviousCompletedIteration,
 }
 
 impl ScoreBound {
@@ -391,20 +403,41 @@ pub fn analyze_game(
             };
             // A node limit can interrupt aspiration-window search. Match the
             // chosen move to its most recent evidence, preserving bound/depth.
-            let info = evidence
-                .into_iter()
+            let latest = evidence
+                .iter()
                 .rev()
                 .find(|info| best_move.as_ref() == info.pv.first())
                 .ok_or(Error::Protocol("missing score for bestmove"))?;
+            // Prefer the immediately previous exact iteration only when its
+            // chosen root move is unchanged. Never search backwards for an old
+            // score of a move that just replaced a different completed PV.
+            let completed = evidence
+                .iter()
+                .rev()
+                .find(|info| info.bound == ScoreBound::Exact);
+            let (info, score_source) =
+                match completed {
+                    Some(info)
+                        if latest.bound != ScoreBound::Exact
+                            && info.pv.first() == best_move.as_ref()
+                            && info.depth.zip(latest.depth).is_some_and(
+                                |(previous, current)| previous.checked_add(1) == Some(current),
+                            ) =>
+                    {
+                        (info, ScoreSource::PreviousCompletedIteration)
+                    }
+                    _ => (latest, ScoreSource::LatestReport),
+                };
             let pv_san = legal_variation(position.position(), &info.pv)?;
             return Ok(Analysis {
                 engine,
                 nodes_budget: nodes,
                 score: info.score,
                 score_bound: info.bound,
+                score_source,
                 depth: info.depth,
                 best_move,
-                pv: info.pv,
+                pv: info.pv.clone(),
                 pv_san,
             });
         }
