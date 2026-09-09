@@ -30,7 +30,7 @@ fn evidence(result: &Analysis, root_is_player: bool) -> Value {
         "score_bound": bound(result.score_bound), "depth": result.depth,
         "player_score_bound": bound(result.score_bound.for_player(root_is_player)),
         "player_score": score_json(result.score.for_player(root_is_player)),
-        "best_move": result.best_move, "pv": result.pv,
+        "best_move": result.best_move, "pv": result.pv, "pv_san": result.pv_san,
     })
 }
 

@@ -101,6 +101,11 @@ most recent retained report; another move's score is never substituted.
 If no matching report exists, the analysis fails. The six-game workload exposed
 this case at Kasparov–Deep Blue game 1 after 16.Nh2; its recorded transcript is
 covered by a process-level regression test.
+Before returning evidence, every retained PV move is replayed legally from the
+root and rendered in SAN. Illegal best moves, illegal continuations, and an
+engine claiming no move when legal moves exist fail the request. `pv` and
+`pv_san` retain matching move order; SAN includes legal disambiguation and
+check/mate suffixes. Presentation should hide both until practice allows reveal.
 Cancellation and failure return no partial analysis. The application integration
 must supply queue cancellation on library switch, sleep and exit before it adds
 long-running interactive analysis.
