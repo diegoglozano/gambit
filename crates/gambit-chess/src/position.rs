@@ -223,6 +223,22 @@ impl CastlingRights {
 pub struct Move(u32);
 
 impl Move {
+    /// Coordinate move notation understood by a standard-chess UCI engine.
+    #[must_use]
+    pub fn to_uci(self) -> String {
+        let mut notation = format!("{}{}", self.from(), self.to());
+        if let Some(piece) = self.promotion() {
+            notation.push(match piece {
+                Piece::Knight => 'n',
+                Piece::Bishop => 'b',
+                Piece::Rook => 'r',
+                Piece::Queen => 'q',
+                _ => unreachable!("a legal promotion is to a knight, bishop, rook or queen"),
+            });
+        }
+        notation
+    }
+
     pub(crate) const CAPTURE: u32 = 1 << 15;
     pub(crate) const EN_PASSANT: u32 = 1 << 16;
     pub(crate) const CASTLE: u32 = 1 << 17;
@@ -483,6 +499,74 @@ impl Position {
     #[must_use]
     pub const fn side_to_move(self) -> Color {
         self.side_to_move
+    }
+
+    /// Full six-field FEN, preserving clocks, castling rights and en passant.
+    #[must_use]
+    pub fn to_fen(self) -> String {
+        let mut fen = String::with_capacity(90);
+        for rank in (0..8).rev() {
+            let mut empty = 0_u8;
+            for file in 0..8 {
+                let square = Square(rank * 8 + file);
+                if let Some((color, piece)) = self.piece_at(square) {
+                    if empty != 0 {
+                        fen.push(char::from(b'0' + empty));
+                        empty = 0;
+                    }
+                    let symbol = match piece {
+                        Piece::Pawn => 'p',
+                        Piece::Knight => 'n',
+                        Piece::Bishop => 'b',
+                        Piece::Rook => 'r',
+                        Piece::Queen => 'q',
+                        Piece::King => 'k',
+                    };
+                    fen.push(if color == Color::White {
+                        symbol.to_ascii_uppercase()
+                    } else {
+                        symbol
+                    });
+                } else {
+                    empty += 1;
+                }
+            }
+            if empty != 0 {
+                fen.push(char::from(b'0' + empty));
+            }
+            if rank != 0 {
+                fen.push('/');
+            }
+        }
+        fen.push_str(if self.side_to_move == Color::White {
+            " w "
+        } else {
+            " b "
+        });
+        if self.castling.bits() == 0 {
+            fen.push('-');
+        }
+        for (right, symbol) in [
+            (CastlingRights::WHITE_KINGSIDE, 'K'),
+            (CastlingRights::WHITE_QUEENSIDE, 'Q'),
+            (CastlingRights::BLACK_KINGSIDE, 'k'),
+            (CastlingRights::BLACK_QUEENSIDE, 'q'),
+        ] {
+            if self.castling.contains(right) {
+                fen.push(symbol);
+            }
+        }
+        fen.push(' ');
+        if let Some(square) = self.en_passant() {
+            fen.push_str(&square.to_string());
+        } else {
+            fen.push('-');
+        }
+        fen.push(' ');
+        fen.push_str(&self.halfmove_clock.to_string());
+        fen.push(' ');
+        fen.push_str(&self.fullmove_number.to_string());
+        fen
     }
 
     #[must_use]
