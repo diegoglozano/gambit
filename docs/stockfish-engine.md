@@ -72,6 +72,14 @@ explicit diagnostic is the only desktop integration in Phase 0.
 
 ## Boundary guarantees
 
+`analyze` accepts a standalone FEN for diagnostics. Game analysis must use
+`analyze_game` with a `GamePosition`: its initial FEN and legally replayed UCI
+moves are sent together, preserving repetition rather than resetting history
+at each decision. Histories are bounded to 1,024 plies. Illegal moves and
+malformed input leave the position unchanged; setup FENs cannot supply unknown
+earlier history. The six-game profiler records this input as schema 2; its
+schema 1 timings remain a separate, FEN-only historical baseline.
+
 The library is synchronous and must be called on a background worker when
 integrating the review UI. Each request starts a fresh process with Threads=1,
 Hash=16 MiB and MultiPV=1, avoiding retained transposition-table state. Callers

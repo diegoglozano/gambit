@@ -2,7 +2,7 @@
 mod support;
 
 use gambit_chess::Color;
-use gambit_engine::{Analysis, Cancellation, Score, ScoreBound, analyze};
+use gambit_engine::{Analysis, Cancellation, GamePosition, Score, ScoreBound, analyze_game};
 use serde_json::{Value, json};
 use std::{
     fs::File,
@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let games = support::workload(File::open(&args[1])?, player, shared_ply)?;
     emit(
-        &json!({"type": "start", "schema": 1, "architecture": std::env::consts::ARCH,
+        &json!({"type": "start", "schema": 2, "history_preserved": true, "architecture": std::env::consts::ARCH,
         "games": games.len(), "shared_ply": shared_ply, "nodes_per_search": nodes,
         "threads": 1, "hash_mib": 16, "fresh_process_per_search": true}),
     )?;
@@ -66,20 +66,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (index, game) in games.iter().enumerate() {
         let start = Instant::now();
         let mut samples = Vec::new();
+        let mut history = GamePosition::from_fen(game.history.initial_fen())?;
         for decision in &game.decisions {
-            let before = analyze(
+            while history.moves().len() < decision.ply - 1 {
+                history.play_uci(&game.history.moves()[history.moves().len()])?;
+            }
+            let before = analyze_game(
                 &engine,
-                &decision.before,
+                &history,
                 nodes,
                 &Cancellation::default(),
                 Duration::from_secs(30),
             );
             searches += 1;
             let result = before.map_err(|e| ("before", e)).and_then(|before| {
+                history
+                    .play_uci(&decision.played)
+                    .map_err(|e| ("replay", e))?;
                 searches += 1;
-                analyze(
+                analyze_game(
                     &engine,
-                    &decision.after,
+                    &history,
                     nodes,
                     &Cancellation::default(),
                     Duration::from_secs(30),
@@ -104,6 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         emit(
             &json!({"type": "game", "game": index + 1, "plies": game.plies,
+            "initial_fen": game.history.initial_fen(), "mainline": game.history.moves(),
             "player_color": if game.player == Color::White { "white" } else { "black" },
             "decisions": game.decisions.len(), "elapsed_ms": start.elapsed().as_millis(), "samples": samples}),
         )?;

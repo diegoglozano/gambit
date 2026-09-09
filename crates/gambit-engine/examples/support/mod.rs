@@ -1,4 +1,5 @@
 use gambit_chess::{Color, Position};
+use gambit_engine::GamePosition;
 use gambit_pgn::{Event, GameReader, GameReaderOptions, Parser, ParserOptions};
 use std::io::Read;
 
@@ -12,6 +13,7 @@ pub struct Decision {
 
 #[derive(Debug)]
 pub struct Game {
+    pub history: GamePosition,
     pub plies: usize,
     pub player: Color,
     pub decisions: Vec<Decision>,
@@ -51,6 +53,7 @@ fn replay(bytes: &[u8], player: &str, shared_ply: usize) -> Result<Game, String>
     let mut variant = None;
     let mut selected = None;
     let mut position = Position::initial();
+    let mut history = GamePosition::default();
     let mut plies = 0;
     let mut depth = 0;
     let mut decisions = Vec::new();
@@ -88,6 +91,7 @@ fn replay(bytes: &[u8], player: &str, shared_ply: usize) -> Result<Game, String>
                 });
                 if let Some(fen) = &fen {
                     position = Position::from_fen(fen.as_bytes()).map_err(|e| e.to_string())?;
+                    history = GamePosition::from_fen(fen).map_err(|e| e.to_string())?;
                 }
             }
             Event::VariationStart(_) => depth += 1,
@@ -100,6 +104,9 @@ fn replay(bytes: &[u8], player: &str, shared_ply: usize) -> Result<Game, String>
                 let before = position.to_fen();
                 let chess_move = position
                     .play_san(token.as_bytes())
+                    .map_err(|e| e.to_string())?;
+                history
+                    .play_uci(&chess_move.to_uci())
                     .map_err(|e| e.to_string())?;
                 plies += 1;
                 if include {
@@ -118,6 +125,7 @@ fn replay(bytes: &[u8], player: &str, shared_ply: usize) -> Result<Game, String>
         return Err("no player decisions after the requested shared ply".into());
     }
     Ok(Game {
+        history,
         plies,
         player: selected.ok_or("missing player")?,
         decisions,
@@ -148,6 +156,7 @@ mod tests {
         assert_eq!(games[0].decisions[0].ply, 9);
         assert_eq!(games[1].decisions[0].ply, 10);
         for game in games {
+            assert_eq!(game.history.moves().len(), game.plies);
             for decision in game.decisions {
                 let before = Position::from_fen(decision.before.as_bytes()).unwrap();
                 let after = Position::from_fen(decision.after.as_bytes()).unwrap();
@@ -173,6 +182,7 @@ mod tests {
         let pgn = b"[White \"A\"]\n[Black \"B\"]\n[FEN \"4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 9\"]\n[Result \"*\"]\n9. exd6 (9. Kf2) Kd7 *";
         let game = replay(pgn, "A", 0).unwrap();
         assert_eq!(game.plies, 2);
+        assert_eq!(game.history.moves(), ["e5d6", "e8d7"]);
         assert_eq!(game.decisions[0].played, "e5d6");
         assert_eq!(game.decisions[0].after, "4k3/8/3P4/8/8/8/8/4K3 b - - 0 9");
         assert!(replay(b"[White \"A\"]\n[Black \"A\"]\n1.e4 *", "A", 0).is_err());

@@ -1,6 +1,7 @@
 # Synthetic failure/handshake scenarios, independent of a real engine search.
 printf '%s' "$$" > "$0.pid"
 while IFS= read -r command; do
+  printf '%s\n' "$command" >> "$0.commands"
   case "$command" in
     uci)
       [ "$scenario" = startup-crash ] && exit 7
