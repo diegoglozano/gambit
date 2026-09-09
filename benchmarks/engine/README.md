@@ -16,9 +16,10 @@ two fixed-node searches for each of 235 player decisions: before the move and
 after the played move, 470 searches in total. It searches every decision, without
 stopping at a proposed turning point. Each search uses a fresh process, one
 thread and 16 MiB hash, with a 30-second watchdog. This measures the current
-boundary's full traversal cost, including startup. It does not yet preserve
-pre-position repetition history, so its scores must not become cached game
-diagnoses. It deliberately performs no threshold selection or cache writes.
+boundary's full traversal cost, including startup. Schema 2 preserves the
+starting FEN and every legal mainline move before each search, including
+repetition history. Setup games cannot recover history preceding their FEN.
+It deliberately performs no threshold selection or cache writes.
 
 ```sh
 bash scripts/prepare-desktop-engine.sh
@@ -31,7 +32,9 @@ CPU, OS, architecture, translation status, commit, dirty-tree status, and
 engine/fixture/harness SHA-256.
 `review.jsonl` contains a start record, progressive game records, and a final
 summary. Each completed decision retains its FEN, played UCI move, before/after
-scores, best moves and PVs. Raw root scores and player-normalized scores both
+scores, best moves and PVs; each game also retains its initial FEN and full
+mainline so the search position can be reconstructed by ply. Console progress
+omits this position evidence. Raw root scores and player-normalized scores both
 retain mate type, search depth, and exact/lower/upper-bound provenance. Bounds
 reverse with player perspective. On an engine failure the affected game's remaining moves are
 skipped, later games are attempted, the summary is incomplete, and the process
@@ -68,6 +71,10 @@ it does not automatically approve a production node budget or validate chess
 thresholds.
 
 ## Development measurements
+
+The measurements below used the original FEN-only schema 1 harness. They are
+historical baseline costs, not history-aware diagnosis evidence. Do not compare
+their scores directly with schema 2; repetition changes the engine input.
 
 Apple M3, macOS 26.0.1, native arm64, one thread, 16 MiB hash, fresh engine
 process per search, including startup; node budgets are listed per run:

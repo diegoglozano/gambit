@@ -1,5 +1,5 @@
 #![cfg(unix)]
-use gambit_engine::{Cancellation, Error, Score, ScoreBound, analyze};
+use gambit_engine::{Cancellation, Error, GamePosition, Score, ScoreBound, analyze, analyze_game};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -93,6 +93,31 @@ fn node_limit_preserves_the_chosen_moves_bound_instead_of_a_different_moves_scor
 }
 
 const NODE_LIMIT_FEN: &str = "r3r1k1/ppbn1p2/2p2n1p/q2pp1pb/4P3/PP1P2PP/1BPN1PBN/R3QRK1 b - - 2 16";
+
+#[test]
+fn sends_starting_position_and_history_instead_of_only_the_final_board() {
+    let fixture = Fixture::new("success");
+    let mut position = GamePosition::default();
+    for m in ["g1f3", "g8f6", "f3g1", "f6g8"] {
+        position.play_uci(m).unwrap();
+    }
+    analyze_game(
+        &fixture.path(),
+        &position,
+        100,
+        &Cancellation::default(),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    let commands = fs::read_to_string(fixture.0.join("engine.commands")).unwrap();
+    assert!(
+        commands
+            .lines()
+            .any(|line| line == format!("position fen {FEN} moves g1f3 g8f6 f3g1 f6g8"))
+    );
+    assert!(!commands.contains(&position.position().to_fen()));
+    assert!(commands.contains("go nodes 100\n"));
+}
 
 #[test]
 fn crash_and_malformed_output_fail_only_this_request() {
@@ -196,6 +221,20 @@ fn packaged_stockfish() {
     .unwrap();
     assert_eq!(mate.score, Score::Mate(0));
     assert!(mate.best_move.is_none());
+    let mut history = GamePosition::default();
+    for m in ["f2f3", "e7e5", "g2g4", "d8h4"] {
+        history.play_uci(m).unwrap();
+    }
+    let history_mate = analyze_game(
+        &path,
+        &history,
+        100_000,
+        &Cancellation::default(),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    assert_eq!(history_mate.score, Score::Mate(0));
+    assert!(history_mate.best_move.is_none());
     let limited = analyze(
         &path,
         NODE_LIMIT_FEN,

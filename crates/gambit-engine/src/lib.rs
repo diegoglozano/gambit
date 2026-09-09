@@ -14,6 +14,9 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod position;
+pub use position::GamePosition;
+
 const MAX_LINE: usize = 8192;
 const MAX_PV: usize = 32;
 const MAX_EVIDENCE: usize = 64;
@@ -318,11 +321,24 @@ pub fn analyze(
     cancel: &Cancellation,
     timeout: Duration,
 ) -> Result<Analysis, Error> {
-    if fen.len() > 128
-        || fen.contains(['\n', '\r'])
-        || nodes == 0
-        || gambit_chess::Position::from_fen(fen.as_bytes()).is_err()
-    {
+    let position = GamePosition::from_fen(fen)?;
+    analyze_game(path, &position, nodes, cancel, timeout)
+}
+
+/// Analyze with the complete legal move history from the supplied starting FEN.
+/// This preserves repetition evidence that a final-position FEN alone loses.
+/// Setup games can preserve only the history actually supplied by their PGN.
+///
+/// # Errors
+/// Returns an error on invalid budget, cancellation, timeout, or engine failure.
+pub fn analyze_game(
+    path: &Path,
+    position: &GamePosition,
+    nodes: u64,
+    cancel: &Cancellation,
+    timeout: Duration,
+) -> Result<Analysis, Error> {
+    if nodes == 0 {
         return Err(Error::InvalidPosition);
     }
     if cancel.is_cancelled() {
@@ -354,7 +370,7 @@ pub fn analyze(
         process.send(command)?;
     }
     process.until("readyok", cancel, deadline)?;
-    process.send(&format!("position fen {fen}"))?;
+    process.send(&position.command())?;
     process.send(&format!("go nodes {nodes}"))?;
     let mut evidence: VecDeque<Info> = VecDeque::new();
     loop {
