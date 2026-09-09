@@ -52,6 +52,11 @@ test("practice controller hides the answer, supports square entry and reveals on
     const board = element("coaching-board");
     assert.equal(board.children.length, 64);
     assert.equal(board.children.filter((b) => b.tabIndex === 0).length, 1);
+    let stopped = false;
+    board.children[0].listeners.keydown({ key: "ArrowRight", preventDefault() {}, stopPropagation() { stopped = true; } });
+    assert.equal(stopped, true);
+    assert.equal(document.activeElement, board.children[1]);
+    assert.equal(board.children.filter((b) => b.tabIndex === 0).length, 1);
     board.children.find((b) => b.dataset.square === "g6").listeners.click();
     board.children.find((b) => b.dataset.square === "h6").listeners.click();
     assert.equal(element("coaching-move").value, "g6h6");
@@ -66,5 +71,21 @@ test("practice controller hides the answer, supports square entry and reveals on
     ui.render();
     assert.equal(element("coaching-exercise").hidden, true);
     assert.equal(element("coaching-answer").textContent, "");
+    ctx = { ...ctx, path: "library" };
+    for (const status of ["unseen", "analyzing", "unsupported", "failed"]) {
+      ui.receive({ ...snapshot, revision: ++snapshot.revision, running: status === "analyzing",
+        games: [{ id: 1, status, message: status === "failed" ? "Retry this game" : null }] });
+      assert.equal(element("coaching-exercise").hidden, true);
+      assert.equal(element("coaching-answer").textContent, "");
+      assert.equal(element("coaching-done").hidden, true);
+      if (status === "failed") assert.equal(element("coaching-status").textContent, "Retry this game");
+    }
+    ui.receive({ ...snapshot, revision: ++snapshot.revision, running: false, cancelled: true,
+      games: [{ id: 1, status: "ready", record: { diagnosis: { outcome: { kind: "no_clear_turning_point" }, inconclusive_moves: 1 },
+        practice: { solution: "unsolved", revealed: false } } }] });
+    assert.match(element("coaching-status").textContent, /No clear turning point/);
+    assert.match(element("coaching-status").textContent, /inconclusive/);
+    assert.match(element("coaching-progress").textContent, /paused/);
+    assert.equal(element("coaching-done").disabled, false);
   } finally { globalThis.document = previousDocument; globalThis.window = previousWindow; }
 });
