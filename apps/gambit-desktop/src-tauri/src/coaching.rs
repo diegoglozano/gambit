@@ -754,6 +754,7 @@ mod tests {
 
     #[test]
     #[ignore = "set GAMBIT_ENGINE_PATH to packaged Stockfish"]
+    #[allow(clippy::too_many_lines)] // Full desktop-service lifecycle with a real engine.
     fn packaged_desktop_practice() {
         let executable =
             PathBuf::from(std::env::var_os("GAMBIT_ENGINE_PATH").expect("GAMBIT_ENGINE_PATH"));
