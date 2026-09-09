@@ -751,4 +751,117 @@ mod tests {
         assert_eq!(recovered.games[0].status, Status::Unseen);
         assert!(recovered.message.unwrap().contains("retry"));
     }
+
+    #[test]
+    #[ignore = "set GAMBIT_ENGINE_PATH to packaged Stockfish"]
+    fn packaged_desktop_practice() {
+        let executable =
+            PathBuf::from(std::env::var_os("GAMBIT_ENGINE_PATH").expect("GAMBIT_ENGINE_PATH"));
+        let root = tempfile::tempdir().unwrap();
+        let library = root.path().join("synthetic.gambit");
+        let pgn = b"[White \"A\"]\n[Black \"B\"]\n[SetUp \"1\"]\n[FEN \"7k/5K2/6Q1/8/8/8/8/8 w - - 0 1\"]\n1.Qh7+ *";
+        let mut builder = gambit::index::Builder::create(&library).unwrap();
+        builder.add(&pgn[..], "synthetic.pgn").unwrap();
+        builder.finish().unwrap();
+        let original = std::fs::read(&library).unwrap();
+        let mut service = Service::default();
+        let mut request = Request {
+            expected_path: library.clone(),
+            game_ids: vec![1],
+            player: "A".into(),
+            shared_ply: 0,
+            analyze: true,
+        };
+        service
+            .start(
+                request.clone(),
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
+            .unwrap();
+        let diagnosed = finish(&mut service);
+        assert_eq!(diagnosed.games[0].status, Status::Ready);
+        let record = diagnosed.games[0].record.as_ref().unwrap();
+        let gambit_coaching::DiagnosisOutcome::TurningPoint(point) = &record.diagnosis.outcome
+        else {
+            panic!("expected a turning point");
+        };
+        let alternative = if point.best_uci == "g6g8" {
+            "g6h6"
+        } else {
+            "g6g8"
+        };
+        let premature = service
+            .practice(
+                &library,
+                diagnosed.generation,
+                1,
+                PracticeAction::Done,
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
+            .unwrap();
+        assert!(
+            premature
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .is_err()
+        );
+        finish(&mut service);
+        let reply = service
+            .practice(
+                &library,
+                diagnosed.generation,
+                1,
+                PracticeAction::Attempt(alternative.into()),
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
+            .unwrap();
+        let practiced = reply
+            .recv_timeout(Duration::from_secs(65))
+            .unwrap()
+            .unwrap();
+        finish(&mut service);
+        assert_eq!(
+            practiced.games[0]
+                .record
+                .as_ref()
+                .unwrap()
+                .practice
+                .solution,
+            gambit_coaching::SolutionStatus::WithoutReveal
+        );
+        let done = service
+            .practice(
+                &library,
+                diagnosed.generation,
+                1,
+                PracticeAction::Done,
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
+            .unwrap();
+        done.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+        finish(&mut service);
+        service.shutdown();
+        let mut reopened = Service::default();
+        request.analyze = false;
+        reopened
+            .start(request, root.path().into(), executable, |_| {})
+            .unwrap();
+        let loaded = finish(&mut reopened);
+        let practice = &loaded.games[0].record.as_ref().unwrap().practice;
+        assert_eq!(practice.disposition, PracticeDisposition::Completed);
+        assert_eq!(
+            practice.solution,
+            gambit_coaching::SolutionStatus::WithoutReveal
+        );
+        assert!(!practice.revealed);
+        assert_eq!(std::fs::read(&library).unwrap(), original);
+    }
 }
