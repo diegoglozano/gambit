@@ -253,7 +253,24 @@ impl Service {
             .map(|state| {
                 state
                     .lock()
-                    .map(|s| s.clone())
+                    .map(|mut s| {
+                        if (s.running || s.practice_busy)
+                            && self.jobs.iter().all(|job| job.thread.is_finished())
+                        {
+                            s.running = false;
+                            s.practice_busy = false;
+                            s.revision = s.revision.saturating_add(1);
+                            s.message = Some(
+                                "the local worker stopped unexpectedly; retry is available".into(),
+                            );
+                            for game in &mut s.games {
+                                if game.status == Status::Analyzing {
+                                    game.status = Status::Unseen;
+                                }
+                            }
+                        }
+                        s.clone()
+                    })
                     .map_err(|_| "analysis state is unavailable".into())
             })
             .transpose()
@@ -700,5 +717,38 @@ mod tests {
         assert_eq!(snapshot.games[0].status, Status::Unseen);
         service.cancel(true);
         assert!(service.snapshot().unwrap().is_none());
+    }
+
+    #[test]
+    fn unexpected_worker_exit_does_not_leave_busy_state_stuck() {
+        let mut service = Service::default();
+        let request = Request {
+            expected_path: "missing-library.gambit".into(),
+            game_ids: vec![1],
+            player: "A".into(),
+            shared_ply: 4,
+            analyze: true,
+        };
+        service
+            .start(
+                request,
+                "missing-app-data".into(),
+                "missing-engine".into(),
+                |_| {},
+            )
+            .unwrap();
+        finish(&mut service);
+        let current = service.current.as_ref().unwrap();
+        {
+            let mut snapshot = current.lock().unwrap();
+            snapshot.running = true;
+            snapshot.practice_busy = true;
+            snapshot.games[0].status = Status::Analyzing;
+        }
+        let recovered = service.snapshot().unwrap().unwrap();
+        assert!(!recovered.running);
+        assert!(!recovered.practice_busy);
+        assert_eq!(recovered.games[0].status, Status::Unseen);
+        assert!(recovered.message.unwrap().contains("retry"));
     }
 }
