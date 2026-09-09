@@ -83,3 +83,27 @@ must survive future diagnosis and practice logic: a bound is not an exact
 centipawn estimate. Raw game/position evidence for the local queue is not
 committed or uploaded. These development timings are not a finalized production
 budget and do not substitute for the native Intel measurements.
+
+## Native CI measurements
+
+[Validation run 34269084469](https://github.com/diegoglozano/gambit/actions/runs/34269084469)
+tested the same packaged engine SHA-256 on both native architectures
+(`c3e16f4854502924492857e547185e7f500326bf17e9e085dcb48192681ceaae`).
+The public fixture and fresh-process settings above were unchanged:
+
+| Runner CPU | Nodes/search | Completed games | Total | Status |
+| --- | ---: | ---: | ---: | --- |
+| Apple M1 (Virtual), macOS 14.8.9 | 100,000 | 6 | 253.223 s | Complete, no failures |
+| Apple M1 (Virtual), macOS 14.8.9 | 300,000 | 6 | 371.299 s | Complete, no failures |
+| Intel i7-8700B, macOS 15.7.9 | 100,000 | 6 | 659.657 s | Complete, no failures |
+| Intel i7-8700B, macOS 15.7.9 | 300,000 | 5 | — | Interrupted by job timeout |
+
+Packaged-engine integration tests passed on both architectures. The Apple
+Silicon source rebuild and tests also passed; the Intel job never reached its
+source rebuild. The 30-minute job limit interrupted the second sequential
+workload after five completed games (1,007.843 seconds), not a per-search
+watchdog failure. Validation now allows 60 minutes for both workloads and the
+source rebuild; the 30-second per-search watchdog remains unchanged. The
+interrupted run is not a passing Intel validation or a completed 300,000-node
+measurement. Hosted runner timings are not a user-session latency guarantee;
+the full-traversal cost needs further work before a production budget is fixed.

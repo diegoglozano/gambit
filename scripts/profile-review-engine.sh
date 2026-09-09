@@ -32,5 +32,5 @@ jq -n --arg cpu "$(sysctl -n machdep.cpu.brand_string)" \
     engine_sha256:$engine_sha256, fixture_sha256:$fixture_sha256,
     nodes_per_search:$nodes, shared_ply:$shared_ply}' > "$report_directory/machine.json"
 cargo run --release -p gambit-engine --example review_profile -- \
-  "$engine" "$fixture" "$player" "$shared_ply" "$nodes" > "$report_directory/review.jsonl"
-jq -c 'del(.samples)' "$report_directory/review.jsonl"
+  "$engine" "$fixture" "$player" "$shared_ply" "$nodes" \
+  | tee "$report_directory/review.jsonl" | jq --unbuffered -c 'del(.samples)'
