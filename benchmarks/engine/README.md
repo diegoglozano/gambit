@@ -16,10 +16,16 @@ two fixed-node searches for each of 235 player decisions: before the move and
 after the played move, 470 searches in total. It searches every decision, without
 stopping at a proposed turning point. Each search uses a fresh process, one
 thread and 16 MiB hash, with a 30-second watchdog. This measures the current
-boundary's full traversal cost, including startup. Schema 2 preserves the
+boundary's full traversal cost, including startup. Schema 2 and later preserve the
 starting FEN and every legal mainline move before each search, including
 repetition history. Setup games cannot recover history preceding their FEN.
 It deliberately performs no threshold selection or cache writes.
+
+Schema 3 records evidence-policy version 2 and each score's source. A bounded
+final report can use the immediately previous exact iteration only if its
+preferred root move is unchanged. The earlier depth/source remain explicit.
+When the root move changed, the final bound is retained; a score for a different
+move or a stale older iteration is never substituted.
 
 ```sh
 bash scripts/prepare-desktop-engine.sh

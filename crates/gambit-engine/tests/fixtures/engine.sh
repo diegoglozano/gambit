@@ -21,6 +21,8 @@ while IFS= read -r command; do
         illegal-best) printf '%s\n' 'info score cp 25 pv e2e5' 'bestmove e2e5' ;;
         illegal-pv) printf '%s\n' 'info score cp 25 pv d2d4 d7d4' 'bestmove d2d4' ;;
         false-terminal) printf '%s\n' 'info score mate 0' 'bestmove (none)' ;;
+        incomplete-iteration) printf '%s\n' 'info depth 12 score cp 25 pv d2d4 d7d5' 'info depth 13 score cp 50 lowerbound pv d2d4' 'bestmove d2d4' ;;
+        stale-iteration) printf '%s\n' 'info depth 10 score cp 25 pv d2d4 d7d5' 'info depth 13 score cp 50 lowerbound pv d2d4' 'bestmove d2d4' ;;
         flood)
           while :; do printf '%s\n' 'info string ignored'; done
           ;;
