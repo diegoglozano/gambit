@@ -16,3 +16,11 @@ pub use cache::{
     CacheEntry, CacheError, CacheKey, CacheStore, EngineIdentity, PracticeDisposition,
     PracticeProgress, SolutionStatus,
 };
+
+mod practice;
+pub use practice::{Attempt, AttemptVerdict, PracticeError, assess_attempt, verify_attempt};
+
+mod summary;
+pub use summary::{
+    LossStatistics, RepeatedChoice, RepeatedPosition, ReviewSummary, SummaryError, summarize,
+};

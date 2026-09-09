@@ -79,6 +79,7 @@ pub struct CacheKey {
     schema: u32,
     selection_version: u32,
     evidence_version: u32,
+    practice_version: u32,
     game_id: String,
     mainline_hash: String,
     player: String,
@@ -94,6 +95,11 @@ pub struct CacheKey {
 }
 
 impl CacheKey {
+    #[must_use]
+    pub fn game_id(&self) -> &str {
+        &self.game_id
+    }
+
     /// Identify exactly the analysis inputs. Comments/variations do not change
     /// the canonical mainline; setup FEN, player, shared ply and engine policy do.
     ///
@@ -118,6 +124,7 @@ impl CacheKey {
             schema: CACHE_SCHEMA,
             selection_version: crate::score::SELECTION_VERSION,
             evidence_version: gambit_engine::EVIDENCE_VERSION,
+            practice_version: crate::practice::PRACTICE_VERSION,
             game_id: game_id.into(),
             mainline_hash: hash.finalize().to_hex().to_string(),
             player: game.player_name().into(),
@@ -156,6 +163,11 @@ pub struct PracticeProgress {
     pub revealed: bool,
     pub solution: SolutionStatus,
     pub disposition: PracticeDisposition,
+    #[serde(default)]
+    pub total_attempts: u32,
+    /// Keep the latest 100 attempts; retain the total count across older history.
+    #[serde(default)]
+    pub attempts: Vec<crate::Attempt>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +292,34 @@ impl CacheStore {
         Ok(record)
     }
 
+    /// Record feedback produced by the backend verifier, not a frontend verdict.
+    ///
+    /// # Errors
+    /// Rejects invalid/missing exercise evidence or a failed atomic save.
+    pub fn record_attempt(
+        &self,
+        key: &CacheKey,
+        attempt: crate::Attempt,
+    ) -> Result<CacheEntry, CacheError> {
+        self.update_practice(key, |progress| {
+            if attempt.verdict == crate::AttemptVerdict::Strong
+                && progress.solution == SolutionStatus::Unsolved
+            {
+                progress.solution = if progress.revealed {
+                    SolutionStatus::AfterHint
+                } else {
+                    SolutionStatus::WithoutReveal
+                };
+            }
+            progress.total_attempts = progress.total_attempts.saturating_add(1);
+            if progress.attempts.len() == 100 {
+                progress.attempts.remove(0);
+            }
+            progress.attempts.push(attempt);
+            progress.disposition = PracticeDisposition::Active;
+        })
+    }
+
     fn write(&self, record: &CacheEntry) -> Result<(), CacheError> {
         validate(record)?;
         let bytes = serde_json::to_vec(record).map_err(|_| CacheError::Corrupt)?;
@@ -306,6 +346,7 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
     if key.schema != CACHE_SCHEMA
         || key.selection_version != crate::score::SELECTION_VERSION
         || key.evidence_version != gambit_engine::EVIDENCE_VERSION
+        || key.practice_version != crate::practice::PRACTICE_VERSION
         || key.nodes != diagnosis.nodes
         || diagnosis.selection_version != key.selection_version
         || diagnosis.evidence_version != key.evidence_version
@@ -319,6 +360,11 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
         || (diagnosis.analyzed_moves > 0 && diagnosis.engine.is_none())
     {
         return Err(CacheError::InconsistentEvidence);
+    }
+    if record.practice.attempts.len() > 100
+        || u64::from(record.practice.total_attempts) < record.practice.attempts.len() as u64
+    {
+        return Err(CacheError::Corrupt);
     }
     if let DiagnosisOutcome::TurningPoint(point) = &diagnosis.outcome {
         if point.ply == 0
@@ -343,6 +389,15 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
         if history.position().to_fen() != point.position_fen {
             return Err(CacheError::Corrupt);
         }
+        let color = if history.position().side_to_move() == gambit_chess::Color::White {
+            "white"
+        } else {
+            "black"
+        };
+        if key.player_color != color {
+            return Err(CacheError::Corrupt);
+        }
+        validate_attempts(&history, &point.best_uci, &record.practice.attempts)?;
         let mut played = history.position();
         replay_notation(&mut played, &point.played_uci, &point.played_san)?;
         let mut variation = history.position();
@@ -358,11 +413,45 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
     } else if record.practice.revealed
         || record.practice.solution != SolutionStatus::Unsolved
         || record.practice.disposition == PracticeDisposition::AgainLater
+        || record.practice.total_attempts != 0
+        || !record.practice.attempts.is_empty()
     {
         return Err(CacheError::InconsistentEvidence);
     }
     if record.practice.solution == SolutionStatus::AfterHint && !record.practice.revealed {
         return Err(CacheError::InconsistentEvidence);
+    }
+    Ok(())
+}
+
+fn validate_attempts(
+    history: &gambit_engine::GamePosition,
+    best_uci: &str,
+    attempts: &[crate::Attempt],
+) -> Result<(), CacheError> {
+    for attempt in attempts {
+        if attempt.uci.len() > 5 {
+            return Err(CacheError::Corrupt);
+        }
+        let mut attempted = history.clone();
+        let legal = attempted.play_uci(&attempt.uci).is_ok();
+        match (attempt.reference, attempt.evaluation) {
+            (None, None) if !legal && attempt.verdict == crate::AttemptVerdict::Illegal => {}
+            (Some(reference), Some(evaluation)) if legal => {
+                let verdict = if attempt.uci == best_uci
+                    && reference == evaluation
+                    && !matches!(reference.score, crate::PlayerScore::MateAgainst(_))
+                {
+                    crate::AttemptVerdict::Strong
+                } else {
+                    crate::assess_attempt(reference, evaluation)
+                };
+                if verdict != attempt.verdict {
+                    return Err(CacheError::Corrupt);
+                }
+            }
+            _ => return Err(CacheError::Corrupt),
+        }
     }
     Ok(())
 }
