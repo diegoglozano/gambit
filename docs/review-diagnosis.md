@@ -39,10 +39,16 @@ to practice action. Native QA has verified basic keyboard entry, cancellation,
 reveal, accepted/rejected attempts and cached restoration in an isolated build.
 Screen-reader and final release-artifact checks remain pending.
 
-Remaining release work includes native sleep notifications, explicit corrupt
-cache recovery, a durable marker for an interrupted job with zero completed
-games, diagnosis-aware recommendation labels, full queue-state reconciliation,
-final release-artifact and screen-reader verification.
+Remaining release work includes native sleep notifications, diagnosis-aware
+recommendation labels, full queue-state reconciliation, final release-artifact
+and screen-reader verification.
+
+Before searching, the queue atomically saves intent markers keyed by the full
+analysis inputs. Cache-only reopening visibly marks unfinished work even if no
+game completed; a valid completed record supersedes its marker. Unreadable
+records expose an explicit recovery action: preserve that one record under a
+unique backup name, then retry local analysis. Valid records cannot be reset by
+this action, and recovered corrupt practice cannot be silently treated as valid.
 
 ## Durable local records
 
