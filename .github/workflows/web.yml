@@ -45,8 +45,17 @@ jobs:
       - name: Install documentation tools
         shell: bash
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/oranda/releases/download/v0.6.5/oranda-installer.sh | sh
+          # The installer redirects to a separately rate-limited artifact host.
+          # Fetch the same pinned release directly and verify it before use.
+          oranda_tmp=$(mktemp -d)
+          curl --proto '=https' --tlsv1.2 -fLsS --retry 5 --retry-delay 5 \
+            -o "$oranda_tmp/oranda.tar.gz" \
+            https://github.com/axodotdev/oranda/releases/download/v0.6.5/oranda-x86_64-unknown-linux-gnu.tar.gz
+          echo "2db065e8b06253526a81595b9312b8c4468ff42f3f9fbe50a6ff21a42d3516d1  $oranda_tmp/oranda.tar.gz" | sha256sum --check
+          tar -xzf "$oranda_tmp/oranda.tar.gz" -C "$oranda_tmp"
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 "$oranda_tmp/oranda-x86_64-unknown-linux-gnu/oranda" "$HOME/.local/bin/oranda"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           python -m pip install --requirement requirements-docs.txt
       - name: Build landing page and documentation
         run: |

@@ -2,8 +2,8 @@
 
 The backend can replay one standard game for an explicitly selected player and
 find the earliest supported deterioration after a review's shared ply. It is
-not yet wired into the desktop UI, and is not a complete
-coaching release.
+wired into a work-in-progress desktop diagnosis and practice panel. It is not
+yet a complete coaching release.
 
 ## Desktop background service
 
@@ -23,9 +23,23 @@ navigation does not cancel it. App exit cancels and joins workers so active
 engine children are reaped. No queue command writes indexed evidence or legacy
 session metadata. A new request waits for a cancelling worker to finish.
 
-UI controls, practice command integration, sleep notifications, explicit corrupt
-cache recovery and a durable marker for an interrupted job with zero completed
-games remain follow-up work. This service alone does not satisfy release gates.
+The practice command accepts only move attempts and named actions, not client
+verdicts or solved flags. It rechecks current game inputs and the actual engine
+hash before saving. Practice shares the engine gate with diagnosis. Snapshots
+include monotonic revisions and factual summaries.
+
+The UI now has an explicit local-analysis explanation, progressive results,
+cancel/retry, a FEN-based practice board with pointer/arrow-key selection and
+text move input, promotion selection, and explicit reveal/done/later actions.
+Preferred moves and lines are absent from the visible answer until success or
+reveal. Synthetic browser previews and DOM-controller tests are not a substitute
+for native keyboard/screen-reader and visual checks; those remain pending.
+
+Remaining release work includes native sleep notifications, explicit corrupt
+cache recovery, a durable marker for an interrupted job with zero completed
+games, diagnosis-aware recommendation labels, full queue-state reconciliation,
+short-line board playback and exit-summary behavior. The UI change remains a
+draft until visual/accessibility verification is available.
 
 ## Durable local records
 

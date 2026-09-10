@@ -76,6 +76,8 @@ jobs:
         run: |
           node --check --input-type=module < apps/gambit-desktop/ui/main.js
           node --test apps/gambit-desktop/ui/view-model.test.mjs
+          node --test apps/gambit-desktop/ui/coaching-model.test.mjs
+          node --test apps/gambit-desktop/ui/coaching-ui.test.mjs
       - name: Check desktop formatting
         run: cargo fmt --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml -- --check
       - name: Lint desktop backend

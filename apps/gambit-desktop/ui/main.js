@@ -15,6 +15,8 @@ import {
   timelineProgress,
   validateLiveFilters,
 } from "./view-model.mjs";
+import { coachingUI } from "./coaching-ui.mjs";
+import { mockCoaching } from "./coaching-preview.mjs";
 
 const nativeInvoke = window.__TAURI__?.core?.invoke;
 const nativeListen = window.__TAURI__?.event?.listen;
@@ -56,6 +58,12 @@ const reviewRequests = createRequestGate();
 const FILTER_DEBOUNCE_MS = 250;
 let filterTimer = null;
 let reviewSaveQueue = Promise.resolve();
+const coaching = coachingUI({ invoke,
+  context: () => state.review ? { path: state.session.path, player: state.review.player,
+    ply: state.review.ply, gameIds: state.review.gameIds, gameId: state.review.gameIds[state.review.index],
+    complete: state.review.complete } : null,
+  onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
+});
 
 element("sync-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1031,6 +1039,7 @@ async function startReview(opening, player = state.player ?? state.managedUser) 
   detailRequests.invalidate();
   const request = reviewRequests.next();
   const review = {
+    player,
     gameIds,
     index: Math.max(0, gameIds.indexOf(progress.current_game_id)),
     ply: progress.ply,
@@ -1066,6 +1075,7 @@ async function startReview(opening, player = state.player ?? state.managedUser) 
     review.details = new Map(details.map((detail) => [detail.summary.id, detail]));
     renderReviewPage(reviewSummaries(gameIds, details));
     openReviewGame();
+    void coaching.load();
   } catch (error) {
     if (!reviewRequests.isCurrent(request) || state.review !== review) return;
     finishReview(false);
@@ -1090,6 +1100,7 @@ function openReviewGame() {
   if (!detail) return;
   displayGameDetail(detail);
   setPly(state.review.ply);
+  coaching.render();
   void persistReviewProgress();
 }
 
@@ -1119,6 +1130,7 @@ function renderReviewBar() {
   element("previous-review").disabled = current === 1;
   element("next-review").disabled = current === total;
   element("mark-reviewed").disabled = state.review.reviewedGameIds.has(currentId);
+  element("mark-reviewed").hidden = true;
   element("mark-reviewed").textContent = state.review.reviewedGameIds.has(currentId) ? "Reviewed ✓" : "Mark reviewed ✓";
   element("defer-review").disabled = state.review.reviewedGameIds.has(currentId) || state.review.deferredGameIds.has(currentId);
   element("defer-review").textContent = state.review.deferredGameIds.has(currentId) ? "Deferred" : "Defer";
@@ -1220,6 +1232,7 @@ function showReviewCompletion() {
     ? `${reviewed} reviewed · ${deferred} deferred for later. Your progress is saved on this Mac.`
     : `You reviewed all ${reviewed} ${reviewed === 1 ? "game" : "games"}. Your progress is saved on this Mac.`;
   element("complete-review").textContent = state.managedUser ? "Back to Today →" : "Back to Explore →";
+  if (coaching.summary()) element("review-complete-copy").textContent = coaching.summary();
   renderReviewMode();
 }
 
@@ -1277,6 +1290,7 @@ function renderReviewMode() {
   element("game-list-controls").hidden = reviewing;
   element("game-list-title").textContent = reviewing ? "Review games" : "Games";
   renderReviewBar();
+  coaching.render();
 }
 
 function text(value, className) {
@@ -1382,6 +1396,7 @@ async function initializeNativeApp() {
   if (nativeListen) {
     try {
       await nativeListen("sync-progress", (event) => updateSyncProgress(event.payload));
+      await nativeListen("coaching-progress", (event) => coaching.receive(event.payload));
     } catch {
       // Sync still has its indeterminate spinner if native progress events are unavailable.
     }
@@ -1396,6 +1411,7 @@ async function initializeNativeApp() {
 }
 
 async function mockInvoke(command, args = {}) {
+  if (["start_coaching", "coaching_status", "cancel_coaching", "coaching_practice"].includes(command)) return mockCoaching(command, args);
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
