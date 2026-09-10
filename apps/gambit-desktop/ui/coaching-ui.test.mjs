@@ -34,17 +34,23 @@ test("practice controller hides the answer, supports square entry and reveals on
     const snapshot = { path: "library", player: "A", shared_ply: 4, generation: 1, revision: 1,
       running: false, games: [{ id: 1, status: "ready", record }] };
     const calls = [];
+    let statusReads = 0;
     const ui = coachingUI({ context: () => ctx, onDone() {}, onLater() {}, invoke: async (command, args) => {
       calls.push({ command, args });
+      if (command === "coaching_status" && statusReads++ === 0) return null;
       if (command === "coaching_practice") {
-        assert.deepEqual(args.action, { kind: "attempt", uci: "g6h6" });
-        record.practice.solution = "without_reveal";
-        record.practice.attempts.push({ verdict: "strong" });
+        if (args.action.kind === "reveal") record.practice.revealed = true;
+        else {
+          assert.deepEqual(args.action, { kind: "attempt", uci: "g6h6" });
+          record.practice.solution = "without_reveal";
+          record.practice.attempts.push({ verdict: "strong" });
+        }
         snapshot.revision++;
       }
       return structuredClone(snapshot);
     } });
     await ui.load();
+    assert.equal(element("coaching-feedback").textContent, "");
     assert.equal(element("coaching-answer").hidden, true);
     assert.equal(element("coaching-answer").textContent, "");
     assert.equal(element("coaching-pv").textContent, "");
@@ -67,6 +73,9 @@ test("practice controller hides the answer, supports square entry and reveals on
     assert.match(element("coaching-answer").textContent, /Qg8#/);
     assert.match(element("coaching-feedback").textContent, /Strong move/);
     assert.equal(element("coaching-done").disabled, false);
+    element("coaching-reveal").listeners.click();
+    await new Promise(setImmediate);
+    assert.equal(element("coaching-feedback").textContent, "Progress saved on this Mac.");
     ctx = { ...ctx, path: "other-library" };
     ui.render();
     assert.equal(element("coaching-exercise").hidden, true);

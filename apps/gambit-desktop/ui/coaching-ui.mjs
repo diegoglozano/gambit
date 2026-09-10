@@ -44,6 +44,7 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
       receive(await invoke("start_coaching", { request: { expected_path: ctx.path, game_ids: ctx.gameIds,
         player: ctx.player, shared_ply: ctx.ply, analyze } }));
       receive(await invoke("coaching_status"));
+      el("feedback").textContent = "";
     } catch (error) { el("feedback").textContent = String(error); }
     finally { busy = false; render(); }
   }
@@ -60,6 +61,7 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
         gameId: id, action: { kind, ...(uci ? { uci } : {}) } });
       receive(result);
       if (!sameQueue(result, context()) || context()?.gameId !== id) return;
+      el("feedback").textContent = "Progress saved on this Mac.";
       if (kind === "attempt") {
         const attempt = current()?.record?.practice.attempts.at(-1);
         el("feedback").textContent = feedbackText(attempt?.verdict);
