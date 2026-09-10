@@ -32,7 +32,9 @@ test("practice controller hides the answer, supports square entry and reveals on
       after: { bound: "exact", score: { kind: "centipawns", value: 0 } }, loss: { kind: "lost_forced_mate" },
     } } }, practice: { solution: "unsolved", revealed: false, attempts: [] } };
     const snapshot = { path: "library", player: "A", shared_ply: 4, generation: 1, revision: 1,
-      running: false, games: [{ id: 1, status: "ready", record }] };
+      running: false, games: [{ id: 1, status: "ready", record, line_positions: [
+        "7k/5K2/6Q1/8/8/8/8/8 w - - 0 1", "6Qk/5K2/8/8/8/8/8/8 b - - 1 1",
+      ] }] };
     const calls = [];
     let statusReads = 0;
     const ui = coachingUI({ context: () => ctx, onDone() {}, onLater() {}, invoke: async (command, args) => {
@@ -54,6 +56,7 @@ test("practice controller hides the answer, supports square entry and reveals on
     assert.equal(element("coaching-answer").hidden, true);
     assert.equal(element("coaching-answer").textContent, "");
     assert.equal(element("coaching-pv").textContent, "");
+    assert.equal(element("coaching-playback").hidden, true);
     assert.equal(element("coaching-done").disabled, true);
     const board = element("coaching-board");
     assert.equal(board.children.length, 64);
@@ -76,6 +79,20 @@ test("practice controller hides the answer, supports square entry and reveals on
     element("coaching-reveal").listeners.click();
     await new Promise(setImmediate);
     assert.equal(element("coaching-feedback").textContent, "Progress saved on this Mac.");
+    assert.equal(element("coaching-playback").hidden, false);
+    element("coaching-line-next").listeners.click();
+    assert.match(element("coaching-line-status").textContent, /Qg8#/);
+    assert.equal(element("coaching-line-next").disabled, true);
+    assert.equal(element("coaching-check").disabled, true);
+    assert.equal(board.children.find(b => b.dataset.square === "g8").attributes["aria-label"], "g8, White queen");
+    // Orientation remains White's even though the line's side to move is Black.
+    assert.equal(board.children[0].dataset.square, "a8");
+    const beforePlaybackSubmit = calls.length;
+    element("coaching-form").listeners.submit({ preventDefault() {} });
+    assert.equal(calls.length, beforePlaybackSubmit);
+    element("coaching-line-start").listeners.click();
+    assert.equal(element("coaching-check").disabled, false);
+    assert.equal(board.children.find(b => b.dataset.square === "g6").attributes["aria-label"], "g6, White queen");
     ctx = { ...ctx, path: "other-library" };
     ui.render();
     assert.equal(element("coaching-exercise").hidden, true);

@@ -54,6 +54,7 @@ pub(super) struct Game {
     status: Status,
     record: Option<CacheEntry>,
     message: Option<String>,
+    line_positions: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -130,6 +131,7 @@ impl Service {
                     status: Status::Unseen,
                     record: None,
                     message: None,
+                    line_positions: Vec::new(),
                 })
                 .collect(),
             message: None,
@@ -324,6 +326,9 @@ fn update(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         change(&mut state);
+        for game in &mut state.games {
+            game.line_positions = game.record.as_ref().map_or_else(Vec::new, line_positions);
+        }
         state.revision = state.revision.saturating_add(1);
         let records = state
             .games
@@ -334,6 +339,28 @@ fn update(
         state.clone()
     };
     publish(snapshot);
+}
+
+fn line_positions(record: &CacheEntry) -> Vec<String> {
+    if !record.practice.revealed
+        && record.practice.solution == gambit_coaching::SolutionStatus::Unsolved
+    {
+        return Vec::new();
+    }
+    let gambit_coaching::DiagnosisOutcome::TurningPoint(point) = &record.diagnosis.outcome else {
+        return Vec::new();
+    };
+    replay_line(&point.position_fen, &point.pv).unwrap_or_default()
+}
+
+fn replay_line(fen: &str, moves: &[String]) -> Result<Vec<String>, gambit_engine::Error> {
+    let mut position = gambit_engine::GamePosition::from_fen(fen)?;
+    let mut positions = vec![position.position().to_fen()];
+    for notation in moves.iter().take(6) {
+        position.play_uci(notation)?;
+        positions.push(position.position().to_fen());
+    }
+    Ok(positions)
 }
 
 fn practice_action(
@@ -527,6 +554,25 @@ fn failed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supporting_line_is_legal_bounded_and_preserves_special_moves() {
+        let positions = replay_line("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 9", &["e5d6".into()]).unwrap();
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions[1], "4k3/8/3P4/8/8/8/8/4K3 b - - 0 9");
+        assert!(replay_line(&positions[0], &["e5e8".into()]).is_err());
+        let moves = ["g1f3", "g8f6", "f3g1", "f6g8"]
+            .repeat(2)
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replay_line(gambit_engine::GamePosition::default().initial_fen(), &moves)
+                .unwrap()
+                .len(),
+            7
+        );
+    }
 
     fn finish(service: &mut Service) -> Snapshot {
         for job in service.jobs.drain(..) {

@@ -32,14 +32,17 @@ The UI now has an explicit local-analysis explanation, progressive results,
 cancel/retry, a FEN-based practice board with pointer/arrow-key selection and
 text move input, promotion selection, and explicit reveal/done/later actions.
 Preferred moves and lines are absent from the visible answer until success or
-reveal. Synthetic browser previews and DOM-controller tests are not a substitute
-for native keyboard/screen-reader and visual checks; those remain pending.
+reveal. Revealed lines now support manual board stepping through up to six legal
+plies, preserving the player's orientation; exercise input is disabled away from
+the root position. Exit opens the saved-evidence session summary with a return
+to practice action. Native QA has verified basic keyboard entry, cancellation,
+reveal, accepted/rejected attempts and cached restoration in an isolated build.
+Screen-reader and final release-artifact checks remain pending.
 
 Remaining release work includes native sleep notifications, explicit corrupt
 cache recovery, a durable marker for an interrupted job with zero completed
 games, diagnosis-aware recommendation labels, full queue-state reconciliation,
-short-line board playback and exit-summary behavior. The UI change remains a
-draft until visual/accessibility verification is available.
+final release-artifact and screen-reader verification.
 
 ## Durable local records
 

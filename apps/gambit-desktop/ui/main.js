@@ -63,6 +63,7 @@ const coaching = coachingUI({ invoke,
     ply: state.review.ply, gameIds: state.review.gameIds, gameId: state.review.gameIds[state.review.index],
     complete: state.review.complete } : null,
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
+  onUpdate: () => { if (state.review?.complete) element("review-complete-copy").textContent = coaching.summary(); },
 });
 
 element("sync-form").addEventListener("submit", async (event) => {
@@ -129,8 +130,14 @@ element("next-review").addEventListener("click", () => moveReview(1));
 element("mark-reviewed").addEventListener("click", markReviewGame);
 element("defer-review").addEventListener("click", deferReviewGame);
 element("review-on-lichess").addEventListener("click", openCurrentGameOnLichess);
-element("finish-review").addEventListener("click", () => finishReview());
+element("finish-review").addEventListener("click", () => { void persistReviewProgress(); showReviewCompletion(); });
 element("complete-review").addEventListener("click", completeReview);
+element("resume-review").addEventListener("click", () => {
+  if (!state.review) return;
+  state.review.complete = false;
+  openReviewGame();
+  void coaching.load();
+});
 element("first-move").addEventListener("click", () => setPly(0));
 element("previous-move").addEventListener("click", () => setPly(state.ply - 1));
 element("next-move").addEventListener("click", () => setPly(state.ply + 1));
@@ -1225,7 +1232,9 @@ function showReviewCompletion() {
   state.review.complete = true;
   const reviewed = state.review.reviewedGameIds.size;
   const deferred = state.review.deferredGameIds.size;
-  element("review-complete-title").textContent = reviewed === state.review.gameIds.length
+  element("review-complete-title").textContent = reviewed + deferred < state.review.gameIds.length
+    ? "Session summary"
+    : reviewed === state.review.gameIds.length
     ? "Review complete"
     : "Session complete";
   element("review-complete-copy").textContent = deferred
