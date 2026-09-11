@@ -17,6 +17,8 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 
 mod coaching;
+#[cfg(target_os = "macos")]
+mod sleep;
 
 #[derive(Default)]
 struct AppState {
@@ -1202,7 +1204,7 @@ fn extension_is(path: &Path, expected: &str) -> bool {
 ///
 /// Panics when the native application runtime cannot be initialized.
 pub fn run() {
-    tauri::Builder::default()
+    let application = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
@@ -1234,18 +1236,28 @@ pub fn run() {
             restart_app
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build Gambit Desktop")
-        .run(|app, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
-                let state = app.state::<AppState>();
-                if let Ok(mut service) = state.coaching.lock() {
-                    service.shutdown();
-                }
+        .expect("failed to build Gambit Desktop");
+    #[cfg(target_os = "macos")]
+    let _sleep_observer = {
+        let app = application.handle().clone();
+        sleep::SleepObserver::new(move || {
+            let state = app.state::<AppState>();
+            if let Ok(mut service) = state.coaching.lock() {
+                service.cancel(false);
             }
-        });
+        })
+    };
+    application.run(|app, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+        ) {
+            let state = app.state::<AppState>();
+            if let Ok(mut service) = state.coaching.lock() {
+                service.shutdown();
+            }
+        }
+    });
 }
 
 #[cfg(test)]

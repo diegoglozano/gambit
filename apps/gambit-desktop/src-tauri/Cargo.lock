@@ -1224,10 +1224,14 @@ dependencies = [
 name = "gambit-desktop"
 version = "0.15.0"
 dependencies = [
+ "block2",
  "gambit",
  "gambit-chess",
  "gambit-coaching",
  "gambit-engine",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",
