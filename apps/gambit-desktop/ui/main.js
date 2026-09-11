@@ -9,13 +9,13 @@ import {
   perspectivePlayerIsBlack,
   prepareReviewProgress,
   reconcileReviewProgress,
-  reviewProgressMatches,
   reviewSummaries,
   selectFocusOpening,
   timelineProgress,
   validateLiveFilters,
 } from "./view-model.mjs";
 import { coachingUI } from "./coaching-ui.mjs";
+import { recommendationLabel, reconcileCoachingProgress, summaryText, sameQueue } from "./coaching-model.mjs";
 import { mockCoaching } from "./coaching-preview.mjs";
 
 const nativeInvoke = window.__TAURI__?.core?.invoke;
@@ -61,9 +61,21 @@ let reviewSaveQueue = Promise.resolve();
 const coaching = coachingUI({ invoke,
   context: () => state.review ? { path: state.session.path, player: state.review.player,
     ply: state.review.ply, gameIds: state.review.gameIds, gameId: state.review.gameIds[state.review.index],
-    complete: state.review.complete } : null,
+    complete: state.review.complete, deferredIds: [...state.review.deferredGameIds] } : null,
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
-  onUpdate: () => { if (state.review?.complete) element("review-complete-copy").textContent = coaching.summary(); },
+  onUpdate: (snapshot) => {
+    if (!state.review) return;
+    const before = reviewProgressSnapshot();
+    const progress = reconcileCoachingProgress(before, snapshot);
+    if (JSON.stringify(before) !== JSON.stringify(progress)) {
+      state.review.reviewedGameIds = new Set(progress.reviewed_game_ids);
+      state.review.deferredGameIds = new Set(progress.deferred_game_ids);
+      void persistReviewProgress();
+      renderReviewPage(reviewSummaries(state.review.gameIds, [...state.review.details.values()]));
+      renderReviewBar();
+    }
+    if (state.review.complete) element("review-complete-copy").textContent = coaching.summary();
+  },
 });
 
 element("sync-form").addEventListener("submit", async (event) => {
@@ -128,7 +140,7 @@ element("next-page").addEventListener("click", () => loadPage(state.session.page
 element("previous-review").addEventListener("click", () => moveReview(-1));
 element("next-review").addEventListener("click", () => moveReview(1));
 element("mark-reviewed").addEventListener("click", markReviewGame);
-element("defer-review").addEventListener("click", deferReviewGame);
+element("defer-review").addEventListener("click", () => { if (!coaching.defer()) void deferReviewGame(); });
 element("review-on-lichess").addEventListener("click", openCurrentGameOnLichess);
 element("finish-review").addEventListener("click", () => { void persistReviewProgress(); showReviewCompletion(); });
 element("complete-review").addEventListener("click", completeReview);
@@ -450,7 +462,7 @@ function renderPage(page) {
       selectGame(game.id);
     });
     const indicators = row("game-row-indicators", text(resultLabel(game.result), "game-row-result"));
-    if (reviewState) indicators.append(text(reviewState === "reviewed" ? "REVIEWED ✓" : "DEFERRED", "review-state"));
+    if (reviewState) indicators.append(text(reviewState === "reviewed" ? "COMPLETED ✓" : "FOR LATER", "review-state"));
     button.append(
       row("game-row-top", text(game.date ?? "Unknown date"), indicators),
       playerRow(game.white, game.white_elo, "White"),
@@ -844,16 +856,9 @@ function renderTodayFocus(opening) {
   element("today-focus-title").textContent = opening.line || "A recurring opening position";
   element("today-focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. Review the evidence before deciding what to change.`;
   element("today-focus-score").textContent = `${opening.score}%`;
-  const progress = reconcileReviewProgress(opening, state.reviewProgress, state.managedUser);
-  const progressCopy = element("today-review-progress");
-  const hasProgress = reviewProgressMatches(opening, state.reviewProgress, state.managedUser)
-    && (progress.reviewed_game_ids.length || progress.deferred_game_ids.length);
-  progressCopy.hidden = !hasProgress;
-  if (hasProgress) {
-    const deferred = progress.deferred_game_ids.length;
-    progressCopy.textContent = `${progress.reviewed_game_ids.length} of ${progress.game_ids.length} reviewed${deferred ? ` · ${deferred} deferred` : ""}`;
-  }
-  element("today-review-focus").textContent = reviewButtonLabel(opening, progress, hasProgress);
+  element("today-review-progress").hidden = true;
+  element("today-review-focus").textContent = recommendationLabel(null, opening.review_game_ids?.length || 1);
+  void loadRecommendationProgress(opening, state.managedUser, "today-review-focus", "today-review-progress");
   element("today-review-focus").onclick = () => startReview(opening, state.managedUser);
 }
 
@@ -905,21 +910,30 @@ function renderFocusOpening(opening) {
   element("focus-title").textContent = opening.line || "A recurring opening position";
   element("focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. This is your lowest-scoring common line; review the games before deciding what to change.`;
   element("focus-score").textContent = `${opening.score}%`;
-  const progress = reconcileReviewProgress(opening, state.reviewProgress, state.explorePlayer);
-  element("review-focus").textContent = reviewButtonLabel(
-    opening,
-    progress,
-    reviewProgressMatches(opening, state.reviewProgress, state.explorePlayer),
-  );
+  element("review-focus").textContent = recommendationLabel(null, opening.review_game_ids?.length || 1);
+  void loadRecommendationProgress(opening, state.explorePlayer, "review-focus");
   element("review-focus").onclick = () => startReview(opening, state.explorePlayer);
 }
 
-function reviewButtonLabel(opening, progress = reconcileReviewProgress(opening, null), hasProgress = false) {
-  const count = opening.review_game_ids?.length || 1;
-  if (hasProgress && progress.reviewed_game_ids.length === progress.game_ids.length) return "Review again →";
-  const remaining = count - progress.reviewed_game_ids.length;
-  if (hasProgress && remaining > 0) return `Continue ${remaining} ${remaining === 1 ? "game" : "games"} →`;
-  return `Review ${count} ${count === 1 ? "loss" : "losses"} →`;
+const recommendationRequests = new Map();
+async function loadRecommendationProgress(opening, player, buttonId, summaryId = null) {
+  const path = state.session?.path;
+  const progress = reconcileReviewProgress(opening, null, player);
+  const token = { context: { path, player, ply: progress.ply, gameIds: progress.game_ids }, summaryId };
+  recommendationRequests.set(buttonId, token);
+  if (!path || !player || !progress.game_ids.length) return;
+  try {
+    const snapshot = await invoke("coaching_overview", { request: { expected_path: path,
+      game_ids: progress.game_ids, player, shared_ply: progress.ply, analyze: false } });
+    if (state.session?.path !== path || recommendationRequests.get(buttonId) !== token) return;
+    element(buttonId).textContent = recommendationLabel(snapshot, progress.game_ids.length);
+    if (summaryId) {
+      element(summaryId).hidden = false;
+      element(summaryId).textContent = summaryText(snapshot);
+    }
+  } catch {
+    // Opening the queue exposes actionable engine/cache errors. No automatic search.
+  }
 }
 
 function renderOpenings(openings, total) {
@@ -1133,7 +1147,7 @@ function renderReviewBar() {
   element("review-title").textContent = state.review.title;
   element("review-position").textContent = `Position: ${state.review.title}`;
   element("review-size").textContent = `Latest ${total.toLocaleString()} of ${state.review.matchingLosses.toLocaleString()} matching`;
-  element("review-progress").textContent = `${reviewed} of ${total} reviewed · game ${current}`;
+  element("review-progress").textContent = `${reviewed} of ${total} completed · ${state.review.deferredGameIds.size} for later · game ${current}`;
   element("previous-review").disabled = current === 1;
   element("next-review").disabled = current === total;
   element("mark-reviewed").disabled = state.review.reviewedGameIds.has(currentId);
@@ -1159,6 +1173,7 @@ async function markReviewGame() {
 async function deferReviewGame() {
   if (!state.review || state.review.complete) return;
   const id = state.review.gameIds[state.review.index];
+  state.review.reviewedGameIds.delete(id);
   state.review.deferredGameIds.add(id);
   await completeReviewAction(id, "deferred", () => state.review?.deferredGameIds.delete(id));
 }
@@ -1186,7 +1201,7 @@ async function completeReviewAction(id, action, rollback) {
   }
   review.index = review.gameIds.indexOf(nextId);
   openReviewGame();
-  showToast(action === "reviewed" ? "Marked reviewed. Progress saved." : "Deferred for later. Progress saved.");
+  showToast(action === "reviewed" ? "Game completed. Progress saved." : "Saved for later.");
 }
 
 function setReviewActionsDisabled(disabled) {
@@ -1238,8 +1253,8 @@ function showReviewCompletion() {
     ? "Review complete"
     : "Session complete";
   element("review-complete-copy").textContent = deferred
-    ? `${reviewed} reviewed · ${deferred} deferred for later. Your progress is saved on this Mac.`
-    : `You reviewed all ${reviewed} ${reviewed === 1 ? "game" : "games"}. Your progress is saved on this Mac.`;
+    ? `${reviewed} completed · ${deferred} deferred for later. Your progress is saved on this Mac.`
+    : `${reviewed} completed. Your progress is saved on this Mac.`;
   element("complete-review").textContent = state.managedUser ? "Back to Today →" : "Back to Explore →";
   if (coaching.summary()) element("review-complete-copy").textContent = coaching.summary();
   renderReviewMode();
@@ -1405,7 +1420,20 @@ async function initializeNativeApp() {
   if (nativeListen) {
     try {
       await nativeListen("sync-progress", (event) => updateSyncProgress(event.payload));
-      await nativeListen("coaching-progress", (event) => coaching.receive(event.payload));
+      await nativeListen("coaching-progress", (event) => {
+        coaching.receive(event.payload);
+        if (state.session?.path !== event.payload.path) return;
+        for (const [buttonId, request] of recommendationRequests) {
+          if (!sameQueue(event.payload, request.context)) continue;
+          // Invalidate any older cache-only response now that live data arrived.
+          recommendationRequests.set(buttonId, { ...request });
+          element(buttonId).textContent = recommendationLabel(event.payload, request.context.gameIds.length);
+          if (request.summaryId) {
+            element(request.summaryId).hidden = false;
+            element(request.summaryId).textContent = summaryText(event.payload);
+          }
+        }
+      });
     } catch {
       // Sync still has its indeterminate spinner if native progress events are unavailable.
     }
@@ -1420,7 +1448,7 @@ async function initializeNativeApp() {
 }
 
 async function mockInvoke(command, args = {}) {
-  if (["start_coaching", "coaching_status", "cancel_coaching", "coaching_practice"].includes(command)) return mockCoaching(command, args);
+  if (["start_coaching", "coaching_status", "coaching_overview", "cancel_coaching", "coaching_practice"].includes(command)) return mockCoaching(command, args);
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {

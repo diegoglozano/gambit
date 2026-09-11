@@ -105,6 +105,27 @@ pub(super) struct Service {
 }
 
 impl Service {
+    /// Cache-only recommendation inspection uses its own worker and never
+    /// replaces or cancels the user's current diagnosis session.
+    pub fn read_cached(
+        mut request: Request,
+        app_data: PathBuf,
+        executable: PathBuf,
+    ) -> Result<Snapshot, String> {
+        request.analyze = false;
+        request.recover_game_id = None;
+        let mut reader = Self::default();
+        reader.start(request, app_data, executable, |_| {})?;
+        for job in reader.jobs.drain(..) {
+            job.thread
+                .join()
+                .map_err(|_| "saved diagnosis could not be loaded")?;
+        }
+        reader
+            .snapshot()?
+            .ok_or_else(|| "saved diagnosis is unavailable".into())
+    }
+
     pub fn start(
         &mut self,
         request: Request,
@@ -672,6 +693,13 @@ mod tests {
         let loaded = finish(&mut service);
         assert_eq!(loaded.games[0].status, Status::Unseen);
         assert_eq!(loaded.games[1].status, Status::Failed);
+        assert!(!root.path().join("coaching").exists());
+        let mut inspection = request.clone();
+        inspection.analyze = true; // Overview forcibly ignores search requests.
+        let overview =
+            Service::read_cached(inspection, root.path().into(), executable.clone()).unwrap();
+        assert_eq!(overview.games[0].status, Status::Unseen);
+        assert!(!overview.running);
         assert!(!root.path().join("coaching").exists());
         let store = CacheStore::for_library(root.path(), &library).unwrap();
         let game = ReviewGame::parse(pgn, "A").unwrap();

@@ -152,7 +152,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     el("cancel").disabled = false;
     el("recover").hidden = !game?.recoverable;
     el("recover").disabled = busy || Boolean(snapshot?.running || snapshot?.practice_busy);
-    el("summary").textContent = matches ? summaryText(snapshot) : "Completed results are saved privately on this Mac.";
+    el("summary").textContent = matches ? summaryText(snapshot, ctx.deferredIds) : "Completed results are saved privately on this Mac.";
     const point = game?.record?.diagnosis.outcome.kind === "turning_point" ? game.record.diagnosis.outcome.evidence : null;
     const practice = game?.record?.practice;
     const solved = practice && practice.solution !== "unsolved";
@@ -209,5 +209,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       render();
     });
   }
-  return { receive, load, render, summary: () => sameQueue(snapshot, context()) ? summaryText(snapshot) : null };
+  return { receive, load, render,
+    defer: () => { if (!current()?.record) return false; void action("later"); return true; },
+    summary: () => sameQueue(snapshot, context()) ? summaryText(snapshot, context()?.deferredIds) : null };
 }

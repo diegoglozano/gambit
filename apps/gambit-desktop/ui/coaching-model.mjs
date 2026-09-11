@@ -13,6 +13,33 @@ export function acceptSnapshot(current, incoming, path) {
   return incoming;
 }
 
+export function recommendationLabel(snapshot, count) {
+  const positions = snapshot?.games.filter(g => g.record?.diagnosis.outcome.kind === "turning_point").length ?? 0;
+  if (positions) return `Practice ${positions} ${positions === 1 ? "position" : "positions"} →`;
+  if (snapshot?.cancelled || snapshot?.running || snapshot?.games.some(g => g.status !== "unseen")) {
+    return snapshot.games.every(g => g.status === "ready") ? "View diagnosis summary →" : "Continue diagnosis →";
+  }
+  return `Diagnose ${count} ${count === 1 ? "loss" : "losses"} →`;
+}
+
+// Cached practice is authoritative. Old 'reviewed' flags alone are not evidence
+// that a position was diagnosed. Do not clear outcomes while cache loading runs.
+export function reconcileCoachingProgress(progress, snapshot) {
+  const reviewed = new Set(progress.reviewed_game_ids);
+  const deferred = new Set(progress.deferred_game_ids);
+  for (const game of snapshot.games) {
+    const practice = game.record?.practice;
+    if (practice) {
+      reviewed.delete(game.id);
+      deferred.delete(game.id);
+      if (practice.disposition === "completed") reviewed.add(game.id);
+      if (practice.disposition === "again_later") deferred.add(game.id);
+    } else if (!snapshot.running) reviewed.delete(game.id);
+  }
+  return { ...progress, reviewed_game_ids: progress.game_ids.filter(id => reviewed.has(id)),
+    deferred_game_ids: progress.game_ids.filter(id => deferred.has(id)) };
+}
+
 export function scoreText(evaluation) {
   const bound = { lower: "at least ", upper: "at most ", exact: "" }[evaluation.bound] ?? "";
   const score = evaluation.score;
@@ -41,12 +68,12 @@ export function fenSquares(fen) {
   });
 }
 
-export function summaryText(snapshot) {
+export function summaryText(snapshot, deferredIds = []) {
   const summary = snapshot?.summary;
   if (!summary) return "Completed results are saved privately on this Mac.";
   const parts = [`${summary.games_analyzed} analyzed`, `${summary.turning_points} turning points`,
     `${summary.solved_without_reveal} solved without reveal`, `${summary.solved_after_hint ?? 0} solved after a hint`, `${summary.completed_after_reveal} completed after reveal`,
-    `${summary.practice_again_later} for later`, `${summary.no_clear_turning_point} with no clear turning point`];
+    `${new Set([...deferredIds, ...snapshot.games.filter(g => g.record?.practice.disposition === "again_later").map(g => g.id)]).size} for later`, `${summary.no_clear_turning_point} with no clear turning point`];
   const unsupported = snapshot.games.filter((g) => g.status === "unsupported").length;
   const failed = snapshot.games.filter((g) => g.status === "failed").length;
   const pending = snapshot.games.filter((g) => ["unseen", "analyzing"].includes(g.status)).length;
