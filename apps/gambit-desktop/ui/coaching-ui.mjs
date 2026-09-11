@@ -36,7 +36,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     render();
   }
 
-  async function start(analyze) {
+  async function start(analyze, recoverGameId = null) {
     const ctx = context();
     if (!ctx?.player || busy) return;
     busy = true;
@@ -44,7 +44,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     render();
     try {
       receive(await invoke("start_coaching", { request: { expected_path: ctx.path, game_ids: ctx.gameIds,
-        player: ctx.player, shared_ply: ctx.ply, analyze } }));
+        player: ctx.player, shared_ply: ctx.ply, analyze, recover_game_id: recoverGameId } }));
       receive(await invoke("coaching_status"));
       el("feedback").textContent = "";
     } catch (error) { el("feedback").textContent = String(error); }
@@ -150,6 +150,8 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     el("analyze").textContent = matches && snapshot.games.some((g) => g.status === "ready") ? "Continue diagnosis" : "Analyze review set";
     el("cancel").hidden = !snapshot?.running && !snapshot?.practice_busy;
     el("cancel").disabled = false;
+    el("recover").hidden = !game?.recoverable;
+    el("recover").disabled = busy || Boolean(snapshot?.running || snapshot?.practice_busy);
     el("summary").textContent = matches ? summaryText(snapshot) : "Completed results are saved privately on this Mac.";
     const point = game?.record?.diagnosis.outcome.kind === "turning_point" ? game.record.diagnosis.outcome.evidence : null;
     const practice = game?.record?.practice;
@@ -187,6 +189,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   }
 
   el("analyze").addEventListener("click", () => start(true));
+  el("recover").addEventListener("click", () => start(true, context()?.gameId));
   el("cancel").addEventListener("click", async () => {
     try { await invoke("cancel_coaching", { expectedPath: snapshot.path, generation: snapshot.generation }); receive(await invoke("coaching_status")); }
     catch (error) { el("feedback").textContent = String(error); }

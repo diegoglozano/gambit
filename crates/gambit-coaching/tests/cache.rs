@@ -68,6 +68,39 @@ fn record_file(root: &Path) -> PathBuf {
 }
 
 #[test]
+fn interruption_is_durable_without_results_and_invalidates_with_inputs() {
+    let fixture = Fixture::new();
+    let key = fixture.key();
+    assert!(!fixture.store().is_incomplete(&key).unwrap());
+    fixture.store().begin_analysis(&key).unwrap();
+    assert!(fixture.store().is_incomplete(&key).unwrap());
+    let changed = CacheKey::new("game-1", &fixture.game, 100, &fixture.identity(), 200).unwrap();
+    assert!(!fixture.store().is_incomplete(&changed).unwrap());
+    fixture
+        .store()
+        .save_diagnosis(&key, fixture.diagnosis())
+        .unwrap();
+    assert!(!fixture.store().is_incomplete(&key).unwrap());
+}
+
+#[test]
+fn explicit_corrupt_recovery_preserves_bytes_and_refuses_valid_records() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let key = fixture.key();
+    store.save_diagnosis(&key, fixture.diagnosis()).unwrap();
+    assert!(store.preserve_corrupt(&key).is_err());
+    let file = record_file(fixture.root.path());
+    fs::write(&file, b"truncated private progress").unwrap();
+    let backup = store.preserve_corrupt(&key).unwrap();
+    assert_eq!(fs::read(&backup).unwrap(), b"truncated private progress");
+    assert!(store.load(&key).unwrap().is_none());
+    store.save_diagnosis(&key, fixture.diagnosis()).unwrap();
+    assert_eq!(fs::read(&backup).unwrap(), b"truncated private progress");
+    assert!(store.load(&key).unwrap().is_some());
+}
+
+#[test]
 fn roundtrip_preserves_practice_and_never_changes_library_metadata() {
     let fixture = Fixture::new();
     let store = fixture.store();

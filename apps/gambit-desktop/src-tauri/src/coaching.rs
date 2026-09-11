@@ -21,6 +21,8 @@ pub(super) struct Request {
     pub shared_ply: usize,
     /// False only loads existing results; it never starts the engine.
     pub analyze: bool,
+    #[serde(default)]
+    pub recover_game_id: Option<i64>,
 }
 
 impl Request {
@@ -31,6 +33,9 @@ impl Request {
             || self.player.trim().is_empty()
             || self.player.len() > 256
             || self.shared_ply > 1024
+            || self
+                .recover_game_id
+                .is_some_and(|id| !self.analyze || !self.game_ids.contains(&id))
         {
             return Err("select one to six distinct games and an explicit player".into());
         }
@@ -55,6 +60,7 @@ pub(super) struct Game {
     record: Option<CacheEntry>,
     message: Option<String>,
     line_positions: Vec<String>,
+    recoverable: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -132,6 +138,7 @@ impl Service {
                     record: None,
                     message: None,
                     line_positions: Vec::new(),
+                    recoverable: false,
                 })
                 .collect(),
             message: None,
@@ -154,7 +161,7 @@ impl Service {
                 );
                 update(&background, &publish, |state| {
                     state.running = false;
-                    state.cancelled = search.cancellation().is_cancelled();
+                    state.cancelled |= search.cancellation().is_cancelled();
                     if let Err(message) = result {
                         state.message = Some(message);
                     }
@@ -475,23 +482,73 @@ fn run_queue(
             DEFAULT_NODES,
         )
         .map_err(|_| "invalid analysis inputs")?;
-        match store.load(&key) {
+        let mut loaded = store.load(&key);
+        if request.recover_game_id == Some(id)
+            && matches!(
+                loaded,
+                Err(gambit_coaching::CacheError::Corrupt
+                    | gambit_coaching::CacheError::InconsistentEvidence)
+            )
+        {
+            store
+                .preserve_corrupt(&key)
+                .map_err(|_| "the unreadable record could not be preserved; nothing was reset")?;
+            loaded = store.load(&key);
+        }
+        match loaded {
             Ok(Some(record)) => update(state, publish, |s| {
                 s.games[index].status = Status::Ready;
                 s.games[index].record = Some(record);
             }),
-            Ok(None) => pending.push((index, game, key)),
-            Err(_) => failed(
-                state,
-                publish,
-                index,
-                Status::Failed,
-                "saved analysis could not be read; existing progress has been preserved",
-            ),
+            Ok(None) => {
+                if !request.analyze
+                    && store
+                        .is_incomplete(&key)
+                        .map_err(|_| "saved analysis state could not be read")?
+                {
+                    update(state, publish, |s| {
+                        s.cancelled = true;
+                        s.games[index].message = Some(
+                            "Diagnosis incomplete. Continue analysis to resume from saved games."
+                                .into(),
+                        );
+                    });
+                }
+                pending.push((index, game, key));
+            }
+            Err(error) => update(state, publish, |s| {
+                s.games[index].status = Status::Failed;
+                s.games[index].recoverable = matches!(
+                    error,
+                    gambit_coaching::CacheError::Corrupt
+                        | gambit_coaching::CacheError::InconsistentEvidence
+                );
+                s.games[index].message = Some("Saved analysis could not be read. Existing progress is preserved. Recovery keeps the unreadable file as a backup, but its practice progress cannot be reused.".into());
+            }),
         }
     }
     if !request.analyze {
         return Ok(());
+    }
+    analyze_pending(
+        request, pending, &store, executable, session, state, publish,
+    )
+}
+
+fn analyze_pending(
+    request: &Request,
+    pending: Vec<(usize, ReviewGame, CacheKey)>,
+    store: &CacheStore,
+    executable: &std::path::Path,
+    session: &EngineSession,
+    state: &Mutex<Snapshot>,
+    publish: &impl Fn(Snapshot),
+) -> Result<(), String> {
+    // Persist all queued intent before the first search can consume CPU.
+    for (_, _, key) in &pending {
+        store
+            .begin_analysis(key)
+            .map_err(|_| "analysis could not be marked resumable; no search was started")?;
     }
     for (index, game, key) in pending {
         if session.cancellation().is_cancelled() {
@@ -601,6 +658,7 @@ mod tests {
             player: "A".into(),
             shared_ply: 4,
             analyze: false,
+            recover_game_id: None,
         };
         let mut service = Service::default();
         service
@@ -615,6 +673,29 @@ mod tests {
         assert_eq!(loaded.games[0].status, Status::Unseen);
         assert_eq!(loaded.games[1].status, Status::Failed);
         assert!(!root.path().join("coaching").exists());
+        let store = CacheStore::for_library(root.path(), &library).unwrap();
+        let game = ReviewGame::parse(pgn, "A").unwrap();
+        let identity = EngineIdentity::from_file("Stockfish 17.1", &executable).unwrap();
+        let key = CacheKey::new("1", &game, 4, &identity, DEFAULT_NODES).unwrap();
+        store.begin_analysis(&key).unwrap();
+        service
+            .start(
+                request.clone(),
+                root.path().into(),
+                executable.clone(),
+                |_| {},
+            )
+            .unwrap();
+        let interrupted = finish(&mut service);
+        assert!(interrupted.cancelled);
+        assert_eq!(interrupted.games[0].status, Status::Unseen);
+        assert!(
+            interrupted.games[0]
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("incomplete")
+        );
         let mut analyze = request.clone();
         analyze.analyze = true;
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -631,6 +712,8 @@ mod tests {
             .unwrap();
         let analyzed = finish(&mut service);
         assert_eq!(analyzed.games[0].status, Status::Ready);
+        assert!(!analyzed.cancelled);
+        assert!(!store.is_incomplete(&key).unwrap());
         assert_eq!(analyzed.games[1].status, Status::Failed);
         assert!(
             events
@@ -723,6 +806,7 @@ mod tests {
             player: "Player".into(),
             shared_ply: 4,
             analyze: false,
+            recover_game_id: None,
         };
         assert!(request.validate().is_ok());
         request.game_ids = vec![1, 1];
@@ -745,6 +829,7 @@ mod tests {
             player: "Player".into(),
             shared_ply: 4,
             analyze: true,
+            recover_game_id: None,
         };
         service
             .start(
@@ -774,6 +859,7 @@ mod tests {
             player: "A".into(),
             shared_ply: 4,
             analyze: true,
+            recover_game_id: None,
         };
         service
             .start(
@@ -818,6 +904,7 @@ mod tests {
             player: "A".into(),
             shared_ply: 0,
             analyze: true,
+            recover_game_id: None,
         };
         service
             .start(

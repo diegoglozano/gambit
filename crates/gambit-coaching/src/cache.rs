@@ -226,6 +226,64 @@ impl CacheStore {
         Ok(self.directory.join(format!("{}.json", key.digest()?)))
     }
 
+    /// Persist intent before searching, including when no game has finished yet.
+    /// Markers use the complete cache key and contain no position or PGN.
+    ///
+    /// # Errors
+    /// Returns invalid keys or storage errors; callers must not start unsaved work.
+    pub fn begin_analysis(&self, key: &CacheKey) -> Result<(), CacheError> {
+        let _guard = WRITES.lock().map_err(|_| CacheError::Corrupt)?;
+        fs::create_dir_all(&self.directory)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)?;
+        temporary.write_all(b"incomplete\n")?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(self.path(key)?.with_extension("pending"))
+            .map_err(|e| CacheError::Io(e.error))?;
+        #[cfg(unix)]
+        File::open(&self.directory)?.sync_all()?;
+        Ok(())
+    }
+
+    /// A valid completed record takes precedence over an old intent marker.
+    ///
+    /// # Errors
+    /// Returns cache corruption or filesystem errors without masking them.
+    pub fn is_incomplete(&self, key: &CacheKey) -> Result<bool, CacheError> {
+        if self.load(key)?.is_some() {
+            return Ok(false);
+        }
+        match fs::metadata(self.path(key)?.with_extension("pending")) {
+            Ok(meta) => Ok(meta.is_file()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Explicit recovery only: preserve a corrupt record under a unique backup
+    /// name before allowing fresh analysis. Valid records are never reset.
+    ///
+    /// # Errors
+    /// Rejects valid/missing records, I/O failures, or failure to preserve the backup.
+    pub fn preserve_corrupt(&self, key: &CacheKey) -> Result<PathBuf, CacheError> {
+        let _guard = WRITES.lock().map_err(|_| CacheError::Corrupt)?;
+        match self.load(key) {
+            Err(CacheError::Corrupt | CacheError::InconsistentEvidence) => {}
+            Err(error) => return Err(error),
+            Ok(_) => return Err(CacheError::InvalidKey),
+        }
+        let backup = tempfile::Builder::new()
+            .prefix("recovered-")
+            .suffix(".backup")
+            .tempfile_in(&self.directory)?
+            .into_temp_path();
+        fs::rename(self.path(key)?, &backup)?;
+        let path = backup.keep().map_err(|e| CacheError::Io(e.error))?;
+        #[cfg(unix)]
+        File::open(&self.directory)?.sync_all()?;
+        Ok(path)
+    }
+
     /// Read only a complete record matching every requested input.
     ///
     /// # Errors
