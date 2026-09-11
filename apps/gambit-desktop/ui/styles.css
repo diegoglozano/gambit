@@ -344,6 +344,9 @@ button.ranked-row:hover { border-color: rgba(130,217,162,0.35); background: rgba
 .coaching-panel { padding: 20px; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel, #fff); }
 .coaching-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .coaching-panel p { line-height: 1.6; max-width: 100ch; }
+.coaching-panel button:not(.square) { padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--green); color: #102017; font: inherit; cursor: pointer; }
+.coaching-panel button:disabled { opacity: 0.5; cursor: default; }
+.coaching-panel button:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
 .coaching-exercise { display: grid; grid-template-columns: minmax(220px, 360px) minmax(220px, 1fr); gap: 24px; margin-block: 20px; align-items: start; }
 .coaching-board { width: 100%; aspect-ratio: 1; }
 .coaching-board button.square { padding: 0; border: 0; border-radius: 0; color: #15251e; font-size: clamp(24px, 3vw, 40px); position: relative; aspect-ratio: 1; }

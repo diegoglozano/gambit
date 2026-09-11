@@ -3,7 +3,7 @@ import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquare
 const symbols = { P: "♙", N: "♘", B: "♗", R: "♖", Q: "♕", K: "♔", p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" };
 const names = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
 
-export function coachingUI({ invoke, context, onDone, onLater }) {
+export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => {} }) {
   const el = (id) => document.getElementById(`coaching-${id}`);
   let snapshot = null;
   let busy = false;
@@ -12,10 +12,12 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
   let activeGame = null;
   let forceHidden = false;
   let poll = null;
+  let linePly = 0;
 
   function receive(incoming) {
     snapshot = acceptSnapshot(snapshot, incoming, context()?.path);
     render();
+    if (sameQueue(snapshot, context())) onUpdate(snapshot);
   }
 
   function current() {
@@ -68,20 +70,20 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
         if (attempt?.verdict === "strong") forceHidden = false;
       }
       if (kind === "reveal") forceHidden = false;
-      if (kind === "replay") { forceHidden = true; el("feedback").textContent = "Choose a move from the starting exercise position."; }
+      if (kind === "replay") { forceHidden = true; linePly = 0; el("feedback").textContent = "Choose a move from the starting exercise position."; }
       if (kind === "done") onDone();
       if (kind === "later") onLater();
     } catch (error) { el("feedback").textContent = String(error); }
     finally { busy = false; render(); }
   }
 
-  function renderBoard(point) {
-    const key = `${activeGame}:${point.position_fen}:${selected}`;
+  function renderBoard(point, fen = point.position_fen) {
+    const key = `${activeGame}:${fen}:${selected}:${linePly}`;
     if (key === boardKey) return;
     boardKey = key;
     const target = el("board");
     const focus = target.contains(document.activeElement) ? document.activeElement.dataset.square : null;
-    const squares = fenSquares(point.position_fen);
+    const squares = fenSquares(fen);
     if (point.position_fen.split(" ")[1] === "b") squares.reverse();
     target.replaceChildren();
     for (const [index, square] of squares.entries()) {
@@ -98,7 +100,7 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
       coordinate.textContent = square.name;
       button.append(coordinate);
       button.addEventListener("click", () => {
-        if (busy || snapshot?.practice_busy) return;
+        if (busy || snapshot?.practice_busy || linePly) return;
         if (!selected) { selected = square.name; el("feedback").textContent = `${selected} selected. Choose a destination.`; }
         else {
           const from = squares.find((s) => s.name === selected);
@@ -134,6 +136,8 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
       activeGame = ctx.gameId;
       selected = null;
       forceHidden = false;
+      linePly = 0;
+      el("line").open = false;
       el("move").value = "";
       el("feedback").textContent = "";
     }
@@ -151,22 +155,32 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
     const practice = game?.record?.practice;
     const solved = practice && practice.solution !== "unsolved";
     const shown = point && !forceHidden && (practice.revealed || solved);
+    const positions = shown ? game.line_positions ?? [] : [];
+    linePly = Math.min(linePly, Math.max(0, positions.length - 1));
     el("exercise").hidden = !point;
     el("answer").hidden = !shown;
     el("answer").textContent = shown ? `Stockfish preferred ${point.best_san}. Before: ${scoreText(point.before)}. After ${point.played_san}: ${scoreText(point.after)}. ${lossText(point.loss)}.` : "";
     el("line").hidden = !shown;
     el("pv").textContent = shown ? point.pv_san.slice(0, 6).join(" · ") : "";
+    el("playback").hidden = positions.length < 2;
+    el("line-start").disabled = linePly === 0;
+    el("line-previous").disabled = linePly === 0;
+    el("line-next").disabled = linePly >= positions.length - 1;
+    el("line-status").textContent = shown && positions.length > 1
+      ? linePly ? `Line move ${linePly} of ${positions.length - 1}: ${point.pv_san[linePly - 1]}. Return to Exercise position to enter a move.` : "Exercise position. Use Next line move to step through the continuation."
+      : "";
     el("done").hidden = !game?.record;
     el("done").disabled = busy || snapshot?.practice_busy || Boolean(point && !practice.revealed && !solved);
     el("later").hidden = !point;
     el("later").disabled = busy || snapshot?.practice_busy;
     el("replay").hidden = !point || (!practice.revealed && !solved);
     for (const name of ["check", "reveal", "replay"]) el(name).disabled = busy || snapshot?.practice_busy;
-    el("move").disabled = busy || snapshot?.practice_busy;
+    el("check").disabled ||= linePly > 0;
+    el("move").disabled = busy || snapshot?.practice_busy || linePly > 0;
     el("status").textContent = point ? `Move ${point.position_fen.split(" ")[5]} · ${point.position_fen.split(" ")[1] === "w" ? "White" : "Black"} to move. You played ${point.played_san}. Find a better move.`
       : game?.record ? `No clear turning point found at this analysis budget.${game.record.diagnosis.inconclusive_moves ? " Some decisions had inconclusive engine evidence." : ""}`
         : game?.message ?? (matches ? snapshot.message : null) ?? (game?.status === "analyzing" ? "This game is being analyzed. You can keep navigating." : "Analyze this set to find supported turning points after the shared opening position.");
-    if (point) renderBoard(point);
+    if (point) renderBoard(point, positions[linePly] ?? point.position_fen);
     if (snapshot?.running || snapshot?.practice_busy) {
       if (!poll) poll = window.setTimeout(async () => { poll = null; try { receive(await invoke("coaching_status")); } catch { /* Next navigation retries. */ } }, 1000);
     }
@@ -179,10 +193,18 @@ export function coachingUI({ invoke, context, onDone, onLater }) {
   });
   el("form").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (linePly) return;
     const move = el("move").value.trim().toLowerCase();
     if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)) { el("feedback").textContent = "Enter a move such as e2e4, or a promotion such as e7e8q."; return; }
     void action("attempt", move);
   });
   for (const name of ["reveal", "done", "later", "replay"]) el(name).addEventListener("click", () => action(name));
+  for (const [name, delta] of [["start", 0], ["previous", -1], ["next", 1]]) {
+    el(`line-${name}`).addEventListener("click", () => {
+      linePly = delta ? Math.max(0, linePly + delta) : 0;
+      selected = null;
+      render();
+    });
+  }
   return { receive, load, render, summary: () => sameQueue(snapshot, context()) ? summaryText(snapshot) : null };
 }
