@@ -348,7 +348,7 @@ button.ranked-row:hover { border-color: rgba(130,217,162,0.35); background: rgba
 .coaching-panel button:disabled { opacity: 0.5; cursor: default; }
 .coaching-panel button:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
 .coaching-panel.has-exercise > .coaching-intro { display: none; }
-.coaching-exercise { display: grid; grid-template-columns: minmax(280px, 480px) minmax(220px, 1fr); gap: 28px; margin-block: 20px; align-items: start; }
+.coaching-exercise { display: grid; grid-template-columns: minmax(280px, min(480px, calc(100vh - 420px))) minmax(220px, 1fr); gap: 28px; margin-block: 20px; align-items: start; }
 .coaching-board { width: 100%; aspect-ratio: 1; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; }
 .coaching-board button.square { padding: 0; border: 0; border-radius: 0; color: #15251e; font-size: clamp(28px, 4vw, 52px); position: relative; aspect-ratio: 1; -webkit-user-drag: none; }
 .coaching-board button.square small { position: absolute; left: 3px; bottom: 1px; font: 10px sans-serif; }
@@ -418,7 +418,7 @@ button.ranked-row:hover { border-color: rgba(130,217,162,0.35); background: rgba
 .coaching-notation summary { cursor: pointer; }
 .coaching-notation label { display: block; margin: 12px 0 6px; }
 .coaching-board button.square.legal-target::after { width: 28%; height: 28%; border: 2px solid rgba(255,255,255,0.6); background: rgba(20,65,40,0.65); }
-@media (max-width: 1100px) {
+@media (max-width: 1000px) {
   .coaching-exercise { grid-template-columns: minmax(0, 1fr); }
   .coaching-board-wrap { width: 100%; max-width: 480px; }
 }

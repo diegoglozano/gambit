@@ -54,5 +54,11 @@ test("practice teaches moves visually and keeps preview separate from attempts",
     expect(Math.abs(board.x - arrow.x)).toBeLessThan(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
+  await page.setViewportSize({ width: 1040, height: 700 });
+  await page.locator("#coaching-line-next").scrollIntoViewIfNeeded();
+  const compactBoard = await page.locator("#coaching-board").boundingBox();
+  expect(compactBoard.y).toBeGreaterThanOrEqual(0);
+  expect(compactBoard.y + compactBoard.height).toBeLessThanOrEqual(700);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });
