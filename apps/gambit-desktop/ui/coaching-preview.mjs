@@ -2,7 +2,7 @@
 let saved = null;
 const point = {
   position_fen: "7k/5K2/6Q1/8/8/8/8/8 w - - 0 1", ply: 1,
-  played_san: "Qh7+", best_san: "Qg8#", best_uci: "g6g8", pv_san: ["Qg8#"],
+  played_uci: "g6h7", played_san: "Qh7+", best_san: "Qg8#", best_uci: "g6g8", pv: ["g6g8"], pv_san: ["Qg8#"],
   before: { bound: "exact", score: { kind: "mate_for", value: 1 } },
   after: { bound: "exact", score: { kind: "centipawns", value: 0 } }, loss: { kind: "lost_forced_mate" },
 };
@@ -52,6 +52,8 @@ export async function mockCoaching(command, args) {
   }
   if (saved) {
     for (const game of saved.games) {
+      game.line_positions = game.record?.diagnosis.outcome.kind === "turning_point" && (game.record.practice.revealed || game.record.practice.solution !== "unsolved")
+        ? [point.position_fen, "6Qk/5K2/8/8/8/8/8/8 b - - 1 1"] : [];
       game.move_options = game.record?.diagnosis.outcome.kind === "turning_point" ? [
         { uci: "g6g8", fen: "6Qk/5K2/8/8/8/8/8/8 b - - 1 1" },
         { uci: "g6h6", fen: "7k/5K2/7Q/8/8/8/8/8 b - - 1 1" },

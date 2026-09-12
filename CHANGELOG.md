@@ -4,6 +4,28 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-13
+
+### Changed
+
+- Made coaching practice easier to follow without knowing chess notation, with
+  a clear player-color header, named-piece move descriptions, a visual preview
+  of the original move, and arrows for chosen moves and the engine answer.
+- Put answer playback beside the board with visible previous, next, and reset
+  controls; coordinate entry and engine notation are now optional disclosures.
+- Replaced notation-heavy practice entry titles with plain-language prompts
+  and made the practice layout adapt to narrower windows.
+
+### Fixed
+
+- Kept the current exercise and its feedback in place when background diagnosis
+  finishes after the player has already started practicing.
+
+### Added
+
+- Added Chromium and WebKit browser regression tests for move selection,
+  answer visibility, preview isolation, SVG arrows, and responsive board layout.
+
 ## [0.16.1] - 2026-09-12
 
 ### Fixed
@@ -268,7 +290,9 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/diegoglozano/gambit/compare/v0.16.1...v0.17.0
+[0.16.1]: https://github.com/diegoglozano/gambit/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/diegoglozano/gambit/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/diegoglozano/gambit/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/diegoglozano/gambit/compare/v0.13.0...v0.14.0

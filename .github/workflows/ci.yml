@@ -78,6 +78,20 @@ jobs:
           node --test apps/gambit-desktop/ui/view-model.test.mjs
           node --test apps/gambit-desktop/ui/coaching-model.test.mjs
           node --test apps/gambit-desktop/ui/coaching-ui.test.mjs
+      - name: Install browser test dependencies
+        working-directory: apps/gambit-desktop
+        run: |
+          npm ci
+          npx playwright install chromium webkit
+      - name: Test practice in Chromium and WebKit
+        working-directory: apps/gambit-desktop
+        run: npm run test:browser
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: desktop-browser-test-results
+          path: apps/gambit-desktop/test-results/
+          if-no-files-found: ignore
       - name: Check desktop formatting
         run: cargo fmt --manifest-path apps/gambit-desktop/src-tauri/Cargo.toml -- --check
       - name: Lint desktop backend
