@@ -465,6 +465,7 @@ function renderPage(page) {
     button.addEventListener("click", () => {
       const reviewIndex = state.review?.gameIds.indexOf(game.id) ?? -1;
       if (reviewIndex >= 0) {
+        state.review.practiceEntryPending = false;
         state.review.index = reviewIndex;
         openReviewGame();
         return;
@@ -1122,6 +1123,7 @@ async function moveReview(delta) {
   if (!state.review || state.review.complete) return;
   const next = state.review.index + delta;
   if (next < 0 || next >= state.review.gameIds.length) return;
+  state.review.practiceEntryPending = false;
   state.review.index = next;
   openReviewGame();
 }

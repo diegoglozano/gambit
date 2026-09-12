@@ -43,7 +43,8 @@ test("practice controller hides the answer, supports square entry and reveals on
       ] }] };
     const calls = [];
     let statusReads = 0;
-    const ui = coachingUI({ context: () => ctx, onDone() {}, onLater() {}, invoke: async (command, args) => {
+    let interacting = false;
+    const ui = coachingUI({ context: () => ctx, onDone() {}, onLater() {}, onPracticeInteraction: () => { interacting = true; }, invoke: async (command, args) => {
       calls.push({ command, args });
       if (command === "coaching_status" && statusReads++ === 0) return null;
       if (command === "coaching_practice") {
@@ -82,7 +83,9 @@ test("practice controller hides the answer, supports square entry and reveals on
     element("coaching-played").listeners.click();
     assert.equal(square("g6").attributes["aria-label"], "g6, White queen");
     document.elementFromPoint = () => square("h6");
+    interacting = false;
     square("g6").listeners.pointerdown({ pointerId: 1, button: 0, clientX: 10, clientY: 10, preventDefault() {} });
+    assert.equal(interacting, true); // Keep navigation stable before the drag ends.
     board.listeners.pointermove({ pointerId: 1, clientX: 40, clientY: 10 });
     assert.equal(element("coaching-drag-piece").hidden, false);
     board.listeners.pointerup({ pointerId: 1, clientX: 40, clientY: 10 });

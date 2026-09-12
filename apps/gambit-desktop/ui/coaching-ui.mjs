@@ -149,6 +149,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       button.addEventListener("pointerdown", (event) => {
         if (!canMove() || gesture || (event.button !== undefined && event.button !== 0)) return;
         event.preventDefault();
+        if (options.some(move => move.uci.startsWith(square.name))) onPracticeInteraction();
         gesture = { name: square.name, point, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
           piece: options.some(move => move.uci.startsWith(square.name)) ? square.piece : null, dragged: false };
         target.setPointerCapture?.(event.pointerId);
