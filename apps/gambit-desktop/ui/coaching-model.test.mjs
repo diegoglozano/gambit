@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress, queueGameState, queueStateLabel } from "./coaching-model.mjs";
+import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress, queueGameState, queueStateLabel, practiceEntryGameId } from "./coaching-model.mjs";
+
+test("Today and Explore practice entry prefer actionable exercises over no-result or completed games", () => {
+  const exercise = (id, disposition = "active", solution = "unsolved") => ({ id, record: {
+    diagnosis: { outcome: { kind: "turning_point" } }, practice: { disposition, solution },
+  } });
+  const snapshot = { games: [{ id: 1, record: { diagnosis: { outcome: { kind: "no_clear_turning_point" } } } },
+    exercise(2, "completed", "without_reveal"), exercise(3), exercise(4)] };
+  assert.equal(practiceEntryGameId(snapshot, 1), 3);
+  assert.equal(practiceEntryGameId(snapshot, 2), 3);
+  assert.equal(practiceEntryGameId(snapshot, 4), 4);
+  assert.equal(practiceEntryGameId({ games: [exercise(2, "completed")] }, 1), 2);
+  assert.equal(practiceEntryGameId({ games: [snapshot.games[0]] }, 1), null);
+});
 
 test("every queue lifecycle state has a factual visible label", () => {
   for (const status of ["unseen", "analyzing", "unsupported", "failed"]) {

@@ -190,20 +190,23 @@
               <strong id="coaching-progress" role="status">Local review diagnosis</strong>
               <div><button id="coaching-analyze" type="button">Analyze review set</button> <button id="coaching-cancel" type="button" hidden>Cancel analysis</button></div>
             </div>
-            <p>Analyze these games privately on this Mac to find the first important move you could have improved. This uses local CPU; no games or analysis are uploaded. You can cancel or keep browsing.</p>
+            <p class="coaching-intro">Analyze these games privately on this Mac to find the first important move you could have improved. This uses local CPU; no games or analysis are uploaded. You can cancel or keep browsing.</p>
             <p id="coaching-status"></p>
             <button id="coaching-recover" type="button" hidden>Preserve unreadable record as backup and retry analysis</button>
             <div id="coaching-exercise" class="coaching-exercise" hidden>
-              <div class="board coaching-board" id="coaching-board" role="group" aria-label="Practice position. Use arrow keys to move between squares, Enter to select, Escape to clear."></div>
+              <div class="coaching-board-wrap">
+                <div class="board coaching-board" id="coaching-board" role="group" aria-label="Interactive practice board. Drag a piece, or select a piece and destination. Arrow keys move focus, Enter selects, Escape clears."></div>
+                <p id="coaching-move-status" role="status" aria-live="polite"></p>
+              </div>
               <div class="coaching-practice">
                 <h3>Try a better move</h3>
-                <p>Select a starting square and destination, then check your move. Or type the move below.</p>
+                <p>Move a piece on the board, then check your move. You can also enter a move below.</p>
                 <form id="coaching-form">
                   <label for="coaching-move">Move (for example e2e4)</label>
                   <input id="coaching-move" maxlength="5" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="coaching-feedback" />
-                  <label for="coaching-promotion">Promotion piece</label>
+                  <label id="coaching-promotion-label" for="coaching-promotion">Promotion piece</label>
                   <select id="coaching-promotion"><option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option></select>
-                  <button id="coaching-check" type="submit">Check move</button>
+                  <div class="coaching-move-actions"><button id="coaching-check" type="submit">Check move</button><button id="coaching-reset" type="button">Undo move</button></div>
                 </form>
                 <button id="coaching-reveal" type="button">Show the answer</button>
                 <button id="coaching-replay" type="button" hidden>Practice this position again</button>
@@ -218,6 +221,7 @@
                 </details>
               </div>
             </div>
+            <span id="coaching-drag-piece" class="coaching-drag-piece" aria-hidden="true" hidden></span>
             <p id="coaching-feedback" role="status" aria-live="polite"></p>
             <div class="coaching-outcomes"><button id="coaching-done" type="button" hidden>Done with this game</button> <button id="coaching-later" type="button" hidden>Practice again later</button></div>
             <details><summary>Review-set evidence</summary><p id="coaching-summary"></p></details>

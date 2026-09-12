@@ -22,6 +22,13 @@ export function recommendationLabel(snapshot, count) {
   return `Diagnose ${count} ${count === 1 ? "loss" : "losses"} →`;
 }
 
+export function practiceEntryGameId(snapshot, currentId) {
+  const exercises = snapshot.games.filter(game => game.record?.diagnosis.outcome.kind === "turning_point");
+  const active = exercises.filter(game => game.record.practice.disposition === "active" && game.record.practice.solution === "unsolved");
+  return active.find(game => game.id === currentId)?.id ?? active[0]?.id
+    ?? exercises.find(game => game.id === currentId)?.id ?? exercises[0]?.id ?? null;
+}
+
 // Cached practice is authoritative. Old 'reviewed' flags alone are not evidence
 // that a position was diagnosed. Do not clear outcomes while cache loading runs.
 export function reconcileCoachingProgress(progress, snapshot) {

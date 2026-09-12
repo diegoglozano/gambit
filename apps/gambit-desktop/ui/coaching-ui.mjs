@@ -3,7 +3,7 @@ import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquare
 const symbols = { P: "♙", N: "♘", B: "♗", R: "♖", Q: "♕", K: "♔", p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" };
 const names = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
 
-export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => {} }) {
+export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => {}, onExerciseChange = () => {} }) {
   const el = (id) => document.getElementById(`coaching-${id}`);
   let snapshot = null;
   let busy = false;
@@ -13,6 +13,37 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   let forceHidden = false;
   let poll = null;
   let linePly = 0;
+  let pendingMove = null;
+  let gesture = null;
+
+  function canMove() { return !busy && !snapshot?.practice_busy && !linePly && !pendingMove; }
+
+  function clearMove() {
+    pendingMove = null;
+    selected = null;
+    el("move").value = "";
+  }
+
+  function chooseSquare(point, name) {
+    if (!canMove()) return;
+    const options = current()?.move_options ?? [];
+    const ownPiece = options.some(move => move.uci.startsWith(name));
+    if (name === selected) selected = null;
+    else if (!selected || ownPiece) {
+      if (!ownPiece) { el("feedback").textContent = "Choose one of your pieces with a legal move."; return; }
+      selected = name;
+      el("feedback").textContent = `${name} selected. Click a highlighted square or drag the piece there.`;
+    } else {
+      const choices = options.filter(move => move.uci.startsWith(`${selected}${name}`));
+      const move = choices.find(move => move.uci.length === 4 || move.uci.endsWith(el("promotion").value));
+      if (!move) { el("feedback").textContent = "That destination is not legal. Choose a highlighted square."; return; }
+      pendingMove = move;
+      selected = null;
+      el("move").value = move.uci;
+      el("feedback").textContent = "Your move is on the board. Check move to evaluate it, or Undo move to choose another.";
+    }
+    render();
+  }
 
   function receive(incoming) {
     snapshot = acceptSnapshot(snapshot, incoming, context()?.path);
@@ -68,17 +99,19 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
         const attempt = current()?.record?.practice.attempts.at(-1);
         el("feedback").textContent = feedbackText(attempt?.verdict);
         if (attempt?.verdict === "strong") forceHidden = false;
+        else clearMove();
       }
-      if (kind === "reveal") forceHidden = false;
-      if (kind === "replay") { forceHidden = true; linePly = 0; el("feedback").textContent = "Choose a move from the starting exercise position."; }
+      if (kind === "reveal") { forceHidden = false; clearMove(); }
+      if (kind === "replay") { forceHidden = true; linePly = 0; clearMove(); el("feedback").textContent = "Choose a move from the starting exercise position."; }
       if (kind === "done") onDone();
       if (kind === "later") onLater();
     } catch (error) { el("feedback").textContent = String(error); }
     finally { busy = false; render(); }
   }
 
-  function renderBoard(point, fen = point.position_fen) {
-    const key = `${activeGame}:${fen}:${selected}:${linePly}`;
+  function renderBoard(point, fen = pendingMove?.fen ?? point.position_fen) {
+    const options = current()?.move_options ?? [];
+    const key = `${activeGame}:${fen}:${selected}:${linePly}:${options.length}:${busy}:${snapshot?.practice_busy}`;
     if (key === boardKey) return;
     boardKey = key;
     const target = el("board");
@@ -92,45 +125,29 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       button.dataset.square = square.name;
       button.className = `square ${(square.name.charCodeAt(0) + Number(square.name[1])) % 2 ? "light" : "dark"}`;
       button.classList.toggle("selected", square.name === selected);
+      button.classList.toggle("legal-target", canMove() && Boolean(selected) && options.some(move => move.uci.startsWith(`${selected}${square.name}`)));
+      button.classList.toggle("last-move", Boolean(pendingMove) && [pendingMove.uci.slice(0, 2), pendingMove.uci.slice(2, 4)].includes(square.name));
+      button.classList.toggle("movable", canMove() && options.some(move => move.uci.startsWith(square.name)));
       button.tabIndex = square.name === (focus ?? selected ?? squares[0].name) ? 0 : -1;
       button.setAttribute("aria-label", `${square.name}, ${square.piece ? `${square.piece === square.piece.toUpperCase() ? "White" : "Black"} ${names[square.piece.toLowerCase()]}` : "empty"}`);
       button.setAttribute("aria-pressed", String(square.name === selected));
       button.textContent = symbols[square.piece] ?? "";
-      button.draggable = Boolean(square.piece) && !linePly;
+      button.draggable = false;
+      button.setAttribute("aria-disabled", String(!canMove()));
       const coordinate = document.createElement("small");
       coordinate.textContent = square.name;
       button.append(coordinate);
-      button.addEventListener("click", () => {
-        if (busy || snapshot?.practice_busy || linePly) return;
-        if (!selected) { selected = square.name; el("feedback").textContent = `${selected} selected. Choose a destination.`; }
-        else {
-          const from = squares.find((s) => s.name === selected);
-          const promotion = from?.piece.toLowerCase() === "p" && /[18]$/.test(square.name) ? el("promotion").value : "";
-          el("move").value = `${selected}${square.name}${promotion}`;
-          selected = null;
-          el("feedback").textContent = "Move entered. Choose Check move to submit it.";
-        }
-        renderBoard(point);
+      // Keyboard/assistive activation uses click. Pointer interaction is owned
+      // by the stable board container; HTML drag is unreliable in WKWebView.
+      button.addEventListener("click", (event) => {
+        if (!event?.detail) chooseSquare(point, square.name);
       });
-      button.addEventListener("dragstart", (event) => {
-        if (busy || snapshot?.practice_busy || linePly || !square.piece) return event.preventDefault();
-        event.dataTransfer.setData("text/plain", square.name);
-        event.dataTransfer.effectAllowed = "move";
-      });
-      button.addEventListener("dragover", (event) => {
-        if (!busy && !snapshot?.practice_busy && !linePly) event.preventDefault();
-      });
-      button.addEventListener("drop", (event) => {
+      button.addEventListener("pointerdown", (event) => {
+        if (!canMove() || gesture || (event.button !== undefined && event.button !== 0)) return;
         event.preventDefault();
-        if (busy || snapshot?.practice_busy || linePly) return;
-        const fromName = event.dataTransfer.getData("text/plain");
-        const from = squares.find((candidate) => candidate.name === fromName);
-        if (!from?.piece) return;
-        const promotion = from.piece.toLowerCase() === "p" && /[18]$/.test(square.name) ? el("promotion").value : "";
-        el("move").value = `${fromName}${square.name}${promotion}`;
-        selected = null;
-        el("feedback").textContent = "Move entered. Choose Check move to submit it.";
-        renderBoard(point);
+        gesture = { name: square.name, point, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+          piece: options.some(move => move.uci.startsWith(square.name)) ? square.piece : null, dragged: false };
+        target.setPointerCapture?.(event.pointerId);
       });
       button.addEventListener("keydown", (event) => {
         if (event.key === "Escape") { selected = null; renderBoard(point); return; }
@@ -150,7 +167,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   function render() {
     const ctx = context();
     el("panel").hidden = !ctx || ctx.complete;
-    if (!ctx) return;
+    if (!ctx) { onExerciseChange(false); return; }
     if (snapshot?.path !== ctx.path) snapshot = null;
     const game = current();
     if (activeGame !== ctx.gameId) {
@@ -158,6 +175,9 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       selected = null;
       forceHidden = false;
       linePly = 0;
+      clearMove();
+      gesture = null;
+      el("drag-piece").hidden = true;
       el("line").open = false;
       el("move").value = "";
       el("feedback").textContent = "";
@@ -175,6 +195,10 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     el("recover").disabled = busy || Boolean(snapshot?.running || snapshot?.practice_busy);
     el("summary").textContent = matches ? summaryText(snapshot, ctx.deferredIds) : "Completed results are saved privately on this Mac.";
     const point = game?.record?.diagnosis.outcome.kind === "turning_point" ? game.record.diagnosis.outcome.evidence : null;
+    onExerciseChange(Boolean(point) && !ctx.complete);
+    el("panel").classList.toggle("has-exercise", Boolean(point));
+    if (point && !running) el("progress").textContent = "Practice this turning point";
+    el("analyze").hidden = Boolean(matches && snapshot.games.every(game => game.status === "ready"));
     const practice = game?.record?.practice;
     const solved = practice && practice.solution !== "unsolved";
     const shown = point && !forceHidden && (practice.revealed || solved);
@@ -200,14 +224,71 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     for (const name of ["check", "reveal", "replay"]) el(name).disabled = busy || snapshot?.practice_busy;
     el("check").disabled ||= linePly > 0;
     el("move").disabled = busy || snapshot?.practice_busy || linePly > 0;
+    const promoting = Boolean(pendingMove?.uci.length === 5 || (selected && game?.move_options?.some(move => move.uci.startsWith(selected) && move.uci.length === 5)));
+    el("promotion").hidden = !promoting;
+    el("promotion-label").hidden = !promoting;
+    el("reset").disabled = busy || snapshot?.practice_busy || (!pendingMove && !selected && !linePly && !el("move").value);
+    el("reset").textContent = linePly ? "Return to exercise" : "Undo move";
+    el("move-status").textContent = linePly ? "Viewing the answer line — return to the exercise to move pieces."
+      : pendingMove ? `Your move: ${pendingMove.uci.slice(0, 2)} → ${pendingMove.uci.slice(2, 4)}. Check it below.`
+      : "Your turn. Drag a piece, or click a piece then a highlighted destination.";
     el("status").textContent = point ? `Move ${point.position_fen.split(" ")[5]} · ${point.position_fen.split(" ")[1] === "w" ? "White" : "Black"} to move. You played ${point.played_san}. Find a better move.`
       : game?.record ? `No clear turning point found at this analysis budget.${game.record.diagnosis.inconclusive_moves ? " Some decisions had inconclusive engine evidence." : ""}`
         : game?.message ?? (matches ? snapshot.message : null) ?? (game?.status === "analyzing" ? "This game is being analyzed. You can keep navigating." : "Analyze this set to find supported turning points after the shared opening position.");
-    if (point) renderBoard(point, positions[linePly] ?? point.position_fen);
+    if (point) renderBoard(point, linePly ? positions[linePly] : pendingMove?.fen ?? point.position_fen);
     if (snapshot?.running || snapshot?.practice_busy) {
       if (!poll) poll = window.setTimeout(async () => { poll = null; try { receive(await invoke("coaching_status")); } catch { /* Next navigation retries. */ } }, 1000);
     }
   }
+
+  function endGesture() {
+    if (gesture) el("board").releasePointerCapture?.(gesture.pointerId);
+    gesture = null;
+    el("drag-piece").hidden = true;
+    el("board").querySelectorAll("button").forEach(button => button.classList.toggle("drag-origin", false));
+    el("board").querySelectorAll("button").forEach(button => {
+      button.classList.toggle("selected", button.dataset.square === selected);
+      button.classList.toggle("legal-target", Boolean(selected) && Boolean(current()?.move_options?.some(move => move.uci.startsWith(`${selected}${button.dataset.square}`))));
+    });
+  }
+  el("board").addEventListener("pointermove", (event) => {
+    if (!gesture?.piece || event.pointerId !== gesture.pointerId || Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 6) return;
+    gesture.dragged = true;
+    el("board").querySelectorAll("button").forEach(button => {
+      button.classList.toggle("drag-origin", button.dataset.square === gesture.name);
+      button.classList.toggle("selected", button.dataset.square === gesture.name);
+      button.classList.toggle("legal-target", Boolean(current()?.move_options?.some(move => move.uci.startsWith(`${gesture.name}${button.dataset.square}`))));
+    });
+    const ghost = el("drag-piece");
+    ghost.textContent = symbols[gesture.piece];
+    ghost.style.left = `${event.clientX}px`;
+    ghost.style.top = `${event.clientY}px`;
+    ghost.hidden = false;
+  });
+  el("board").addEventListener("pointerup", (event) => {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    const { name, point, dragged } = gesture;
+    const destination = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-square]");
+    endGesture();
+    if (dragged) {
+      if (!destination || !el("board").contains(destination) || destination.dataset.square === name) return;
+      selected = name;
+      chooseSquare(point, destination.dataset.square);
+    } else chooseSquare(point, name);
+  });
+  el("board").addEventListener("pointercancel", endGesture);
+  el("reset").addEventListener("click", () => {
+    clearMove(); linePly = 0; el("feedback").textContent = "Choose another move from the exercise position."; render();
+  });
+  el("move").addEventListener("input", () => {
+    pendingMove = current()?.move_options?.find(move => move.uci === el("move").value.trim().toLowerCase()) ?? null;
+    selected = null; render();
+  });
+  el("promotion").addEventListener("change", () => {
+    if (pendingMove?.uci.length !== 5) return;
+    pendingMove = current()?.move_options?.find(move => move.uci === pendingMove.uci.slice(0, 4) + el("promotion").value) ?? pendingMove;
+    el("move").value = pendingMove.uci; render();
+  });
 
   el("analyze").addEventListener("click", () => start(true));
   el("recover").addEventListener("click", () => start(true, context()?.gameId));
@@ -225,6 +306,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   for (const name of ["reveal", "done", "later", "replay"]) el(name).addEventListener("click", () => action(name));
   for (const [name, delta] of [["start", 0], ["previous", -1], ["next", 1]]) {
     el(`line-${name}`).addEventListener("click", () => {
+      clearMove();
       linePly = delta ? Math.max(0, linePly + delta) : 0;
       selected = null;
       render();

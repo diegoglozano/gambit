@@ -15,7 +15,7 @@ import {
   validateLiveFilters,
 } from "./view-model.mjs";
 import { coachingUI } from "./coaching-ui.mjs";
-import { recommendationLabel, reconcileCoachingProgress, summaryText, sameQueue, queueGameState, queueStateLabel } from "./coaching-model.mjs";
+import { recommendationLabel, reconcileCoachingProgress, summaryText, sameQueue, queueGameState, queueStateLabel, practiceEntryGameId } from "./coaching-model.mjs";
 import { mockCoaching } from "./coaching-preview.mjs";
 
 const nativeInvoke = window.__TAURI__?.core?.invoke;
@@ -63,9 +63,18 @@ const coaching = coachingUI({ invoke,
     ply: state.review.ply, gameIds: state.review.gameIds, gameId: state.review.gameIds[state.review.index],
     complete: state.review.complete, deferredIds: [...state.review.deferredGameIds] } : null,
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
+  onExerciseChange: (practicing) => element("library-layout").classList.toggle("practice-mode", practicing),
   onUpdate: (snapshot) => {
     if (!state.review) return;
     state.review.coachingStates = new Map(snapshot.games.map(game => [game.id, queueGameState(game)]));
+    if (state.review.practiceEntryPending && !snapshot.running) {
+      state.review.practiceEntryPending = false;
+      const currentId = state.review.gameIds[state.review.index];
+      const firstExercise = practiceEntryGameId(snapshot, currentId);
+      if (firstExercise !== null && firstExercise !== currentId) {
+        state.review.index = state.review.gameIds.indexOf(firstExercise); openReviewGame();
+      }
+    }
     const before = reviewProgressSnapshot();
     const progress = reconcileCoachingProgress(before, snapshot);
     if (JSON.stringify(before) !== JSON.stringify(progress)) {
@@ -1073,6 +1082,7 @@ async function startReview(opening, player = state.player ?? state.managedUser) 
     deferredGameIds: new Set(progress.deferred_game_ids),
     details: new Map(),
     coachingStates: new Map(),
+    practiceEntryPending: true,
     complete: false,
     previous: {
       filters: { ...state.filters },

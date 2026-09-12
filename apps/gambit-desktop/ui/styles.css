@@ -347,22 +347,34 @@ button.ranked-row:hover { border-color: rgba(130,217,162,0.35); background: rgba
 .coaching-panel button:not(.square) { padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--green); color: #102017; font: inherit; cursor: pointer; }
 .coaching-panel button:disabled { opacity: 0.5; cursor: default; }
 .coaching-panel button:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
-.coaching-exercise { display: grid; grid-template-columns: minmax(220px, 360px) minmax(220px, 1fr); gap: 24px; margin-block: 20px; align-items: start; }
-.coaching-board { width: 100%; aspect-ratio: 1; }
-.coaching-board button.square { padding: 0; border: 0; border-radius: 0; color: #15251e; font-size: clamp(24px, 3vw, 40px); position: relative; aspect-ratio: 1; }
+.coaching-panel.has-exercise > .coaching-intro { display: none; }
+.coaching-exercise { display: grid; grid-template-columns: minmax(280px, 480px) minmax(220px, 1fr); gap: 28px; margin-block: 20px; align-items: start; }
+.coaching-board { width: 100%; aspect-ratio: 1; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; }
+.coaching-board button.square { padding: 0; border: 0; border-radius: 0; color: #15251e; font-size: clamp(28px, 4vw, 52px); position: relative; aspect-ratio: 1; -webkit-user-drag: none; }
 .coaching-board button.square small { position: absolute; left: 3px; bottom: 1px; font: 10px sans-serif; }
 .coaching-board button.square.selected { box-shadow: inset 0 0 0 4px #a55b00; }
+.coaching-board button.square.movable { cursor: grab; }
+.coaching-board button.square.drag-origin { color: transparent; }
+.coaching-board button.square.drag-origin small { color: #15251e; }
+.coaching-board button.square.last-move { box-shadow: inset 0 0 0 4px #a55b00; }
+.coaching-board button.square.legal-target::after { content: ""; position: absolute; width: 24%; height: 24%; border-radius: 50%; background: rgba(20, 65, 40, 0.5); pointer-events: none; }
+.coaching-drag-piece { position: fixed; transform: translate(-50%, -50%); z-index: 1000; pointer-events: none; color: #15251e; font: 56px/1 "Arial Unicode MS", "Apple Symbols", serif; text-shadow: 0 3px 8px #0005; }
+.library-layout.practice-mode { display: block; min-height: 0; }
+.library-layout.practice-mode .board-panel, .library-layout.practice-mode .moves-panel { display: none; }
+.library-layout.practice-mode .game-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); max-height: none; }
+.library-layout.practice-mode .game-row { border-right: 1px solid var(--line); }
 .coaching-board button.square:focus-visible { outline: 3px solid #1554c0; outline-offset: -3px; z-index: 1; }
 .coaching-practice form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-block: 16px; }
 .coaching-practice form label { grid-column: 1; }
 .coaching-practice form input, .coaching-practice form select { grid-column: 2; width: 100%; }
+.coaching-move-actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .coaching-practice button, .coaching-outcomes button { margin: 4px 4px 4px 0; }
 #coaching-feedback { min-height: 1.6em; }
 .coaching-panel [hidden] { display: none !important; }
 
 @media (max-width: 780px) {
   .coaching-exercise { grid-template-columns: 1fr; }
-  .coaching-board { max-width: 360px; }
+  .coaching-board-wrap { max-width: 480px; }
   .app-shell { display: block; }
   .sidebar { position: relative; width: 100%; height: auto; padding: 16px; flex-direction: row; align-items: center; }
   .brand { padding: 0; }
