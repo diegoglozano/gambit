@@ -39,8 +39,16 @@ to practice action. Native QA has verified basic keyboard entry, cancellation,
 reveal, accepted/rejected attempts and cached restoration in an isolated build.
 Screen-reader and final release-artifact checks remain pending.
 
-Remaining release work includes native sleep notifications, final release-artifact
-and screen-reader verification, plus native regression testing of queue recovery.
+Remaining release work includes final release-artifact and screen-reader
+verification, plus native regression testing of queue recovery.
+
+On macOS, an owned AppKit workspace will-sleep observer cancels all active
+diagnosis/practice sessions without clearing completed records or automatically
+restarting on wake. A native notification test checks cancellation and observer
+unregistration without putting the host to sleep. The narrow Objective-C bridge
+documents its unsafe registration/removal calls; unsafe code remains denied
+elsewhere in the desktop crate. See Apple's
+[will-sleep notification](https://developer.apple.com/documentation/appkit/nsworkspace/willsleepnotification).
 
 Recommendations inspect only the selected queue's cached records on a separate
 read-only worker, without replacing active analysis or starting the engine.
