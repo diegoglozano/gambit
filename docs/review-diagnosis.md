@@ -39,9 +39,14 @@ to practice action. Native QA has verified basic keyboard entry, cancellation,
 reveal, accepted/rejected attempts and cached restoration in an isolated build.
 Screen-reader and final release-artifact checks remain pending.
 
-Remaining release work includes native sleep notifications, diagnosis-aware
-recommendation labels, full queue-state reconciliation, final release-artifact
-and screen-reader verification.
+Remaining release work includes native sleep notifications, final release-artifact
+and screen-reader verification, plus native regression testing of queue recovery.
+
+Recommendations inspect only the selected queue's cached records on a separate
+read-only worker, without replacing active analysis or starting the engine.
+They show Diagnose, Continue diagnosis, Practice positions, or View summary.
+Cached practice dispositions reconcile legacy completed/deferred queue flags;
+legacy opened/reviewed flags alone do not count as a completed diagnosis.
 
 Before searching, the queue atomically saves intent markers keyed by the full
 analysis inputs. Cache-only reopening visibly marks unfinished work even if no

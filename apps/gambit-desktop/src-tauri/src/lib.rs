@@ -65,6 +65,35 @@ fn coaching_status(state: State<'_, AppState>) -> Result<Option<coaching::Snapsh
 }
 
 #[tauri::command]
+async fn coaching_overview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: coaching::Request,
+) -> Result<coaching::Snapshot, String> {
+    if state
+        .database
+        .lock()
+        .map_err(|_| "database state is unavailable")?
+        .as_ref()
+        != Some(&request.expected_path)
+    {
+        return Err("the active library has changed".into());
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "app storage is unavailable")?;
+    let executable = std::env::current_exe()
+        .map_err(|_| "app location is unavailable")?
+        .with_file_name("gambit-stockfish");
+    tauri::async_runtime::spawn_blocking(move || {
+        coaching::Service::read_cached(request, app_data, executable)
+    })
+    .await
+    .map_err(|_| "saved diagnosis could not be loaded")?
+}
+
+#[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // Tauri command injection owns State.
 fn cancel_coaching(
     state: State<'_, AppState>,
@@ -1195,6 +1224,7 @@ pub fn run() {
             save_review_progress,
             start_coaching,
             coaching_status,
+            coaching_overview,
             cancel_coaching,
             coaching_practice,
             open_game_url,

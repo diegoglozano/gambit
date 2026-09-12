@@ -1,6 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText } from "./coaching-model.mjs";
+import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress } from "./coaching-model.mjs";
+
+test("recommendations report diagnosis and practice rather than legacy opened counts", () => {
+  assert.equal(recommendationLabel(null, 6), "Diagnose 6 losses →");
+  assert.equal(recommendationLabel({ cancelled: true, games: [{ status: "unseen" }] }, 1), "Continue diagnosis →");
+  assert.equal(recommendationLabel({ games: [{ status: "ready", record: { diagnosis: { outcome: { kind: "turning_point" } } } }] }, 1), "Practice 1 position →");
+  assert.equal(recommendationLabel({ games: [{ status: "ready" }] }, 1), "View diagnosis summary →");
+});
+
+test("cached outcomes repair legacy completion and replay without losing unanalyzed deferrals", () => {
+  const progress = { game_ids: [1, 2, 3, 4], reviewed_game_ids: [1, 3], deferred_game_ids: [2, 4] };
+  const games = [
+    { id: 1, record: { practice: { disposition: "active" } } },
+    { id: 2, record: { practice: { disposition: "completed" } } },
+    { id: 3, status: "unseen" }, { id: 4, status: "unsupported" },
+  ];
+  const pending = reconcileCoachingProgress(progress, { running: true, games });
+  assert.deepEqual(pending.reviewed_game_ids, [2, 3]);
+  const loaded = reconcileCoachingProgress(progress, { running: false, games });
+  assert.deepEqual(loaded.reviewed_game_ids, [2]);
+  assert.deepEqual(loaded.deferred_game_ids, [4]);
+  games[0].record.practice.disposition = "again_later";
+  assert.deepEqual(reconcileCoachingProgress(progress, { running: false, games }).deferred_game_ids, [1, 4]);
+  assert.deepEqual(progress.reviewed_game_ids, [1, 3]);
+});
 
 test("stale library, generation and revision cannot replace current progress", () => {
   const current = { path: "a", generation: 2, revision: 4 };
