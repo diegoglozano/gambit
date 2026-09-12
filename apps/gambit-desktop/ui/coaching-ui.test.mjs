@@ -171,7 +171,8 @@ test("Black promotion, text preview and busy guards keep backend-provided boards
       games: [{ id: 2, record, status: "ready", move_options: [
         { uci: "b2b1q", fen: "4k3/8/8/8/8/8/8/1q2K3 w - - 0 10" }, { uci: "b2b1n", fen: knight },
       ] }] };
-    const ui = coachingUI({ context: () => ({ path: "library", player: "B", ply: 0, gameIds: [2], gameId: 2 }),
+    let ctx = { path: "library", player: "B", ply: 0, gameIds: [2], gameId: 2 };
+    const ui = coachingUI({ context: () => ctx,
       invoke() { assert.fail("preview must not invoke the engine or save an attempt"); }, onDone() {}, onLater() {} });
     element("coaching-promotion").value = "q";
     ui.receive(snapshot);
@@ -189,7 +190,10 @@ test("Black promotion, text preview and busy guards keep backend-provided boards
     assert.equal(square("b2").attributes["aria-label"], "b2, Black pawn");
     element("coaching-move").value = "b2b1n"; element("coaching-move").listeners.input();
     assert.equal(square("b1").attributes["aria-label"], "b1, Black knight");
-    element("coaching-reset").listeners.click();
+    ctx = { ...ctx, path: "another-library" }; ui.render();
+    ctx = { ...ctx, path: "library" }; ui.receive(snapshot);
+    assert.equal(element("coaching-move").value, "");
+    assert.equal(square("b2").attributes["aria-label"], "b2, Black pawn");
     ui.receive({ ...snapshot, revision: 2, practice_busy: true });
     square("b2").listeners.click();
     assert.equal(square("b2").attributes["aria-pressed"], "false");

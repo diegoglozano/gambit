@@ -170,8 +170,9 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     if (!ctx) { onExerciseChange(false); return; }
     if (snapshot?.path !== ctx.path) snapshot = null;
     const game = current();
-    if (activeGame !== ctx.gameId) {
-      activeGame = ctx.gameId;
+    const exerciseKey = JSON.stringify([ctx.path, ctx.player?.toLowerCase(), ctx.ply, ctx.gameIds, ctx.gameId]);
+    if (activeGame !== exerciseKey) {
+      activeGame = exerciseKey;
       selected = null;
       forceHidden = false;
       linePly = 0;
