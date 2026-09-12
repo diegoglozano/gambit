@@ -50,6 +50,15 @@ export async function mockCoaching(command, args) {
     if (kind === "replay") practice.disposition = "active";
     saved.revision++;
   }
-  if (saved) summary();
+  if (saved) {
+    for (const game of saved.games) {
+      game.move_options = game.record?.diagnosis.outcome.kind === "turning_point" ? [
+        { uci: "g6g8", fen: "6Qk/5K2/8/8/8/8/8/8 b - - 1 1" },
+        { uci: "g6h6", fen: "7k/5K2/7Q/8/8/8/8/8 b - - 1 1" },
+        { uci: "g6h7", fen: "7k/5K1Q/8/8/8/8/8/8 b - - 1 1" },
+      ] : [];
+    }
+    summary();
+  }
   return structuredClone(saved);
 }

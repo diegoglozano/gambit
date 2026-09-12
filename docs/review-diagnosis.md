@@ -2,8 +2,9 @@
 
 The backend can replay one standard game for an explicitly selected player and
 find the earliest supported deterioration after a review's shared ply. It is
-wired into a work-in-progress desktop diagnosis and practice panel. It is not
-yet a complete coaching release.
+available in the desktop diagnosis and practice panel. It provides bounded
+engine evidence and corrective exercises, not full-game annotation or inferred
+positional themes.
 
 ## Desktop background service
 
@@ -37,10 +38,16 @@ plies, preserving the player's orientation; exercise input is disabled away from
 the root position. Exit opens the saved-evidence session summary with a return
 to practice action. Native QA has verified basic keyboard entry, cancellation,
 reveal, accepted/rejected attempts and cached restoration in an isolated build.
-Screen-reader and final release-artifact checks remain pending.
+Basic VoiceOver interaction and universal release-artifact checks have also
+passed; this is not a comprehensive screen-reader audit.
 
-Remaining release work includes final release-artifact and screen-reader
-verification, plus native regression testing of queue recovery.
+Practice now presents one primary interactive board. Native pointer dragging
+and click-to-move show legal destinations and preview the resulting board before
+the explicit Check move action. Every preview comes from pure backend legal
+replay (including castling, en passant, and promotion), without engine searches,
+saved attempts, scores, or preferred-move hints. Undo restores the exercise;
+rejected attempts restore it automatically. Today and Explore shortcuts open an
+available exercise rather than a cached game with no turning point.
 
 On macOS, an owned AppKit workspace will-sleep observer cancels all active
 diagnosis/practice sessions without clearing completed records or automatically

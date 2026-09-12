@@ -4,6 +4,18 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-12
+
+### Fixed
+
+- Made coaching practice use a single primary interactive board instead of
+  displaying a competing noninteractive game viewer.
+- Replaced unreliable native HTML dragging with pointer-driven piece movement,
+  legal-destination highlights, accurate move previews, and an Undo move action.
+  Castling, en passant, and promotions use backend-validated board replay.
+- Practice shortcuts now open an available exercise rather than resuming on a
+  game with no turning point. Rejected moves restore the exercise for another try.
+
 ## [0.16.0] - 2026-09-12
 
 ### Added

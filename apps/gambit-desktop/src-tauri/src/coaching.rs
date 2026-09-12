@@ -54,12 +54,19 @@ pub(super) enum Status {
 }
 
 #[derive(Clone, Serialize)]
+pub(super) struct MoveOption {
+    uci: String,
+    fen: String,
+}
+
+#[derive(Clone, Serialize)]
 pub(super) struct Game {
     id: i64,
     status: Status,
     record: Option<CacheEntry>,
     message: Option<String>,
     line_positions: Vec<String>,
+    move_options: Vec<MoveOption>,
     recoverable: bool,
 }
 
@@ -159,6 +166,7 @@ impl Service {
                     record: None,
                     message: None,
                     line_positions: Vec::new(),
+                    move_options: Vec::new(),
                     recoverable: false,
                 })
                 .collect(),
@@ -356,6 +364,14 @@ fn update(
         change(&mut state);
         for game in &mut state.games {
             game.line_positions = game.record.as_ref().map_or_else(Vec::new, line_positions);
+            game.move_options = game.record.as_ref().map_or_else(Vec::new, |record| {
+                let gambit_coaching::DiagnosisOutcome::TurningPoint(point) =
+                    &record.diagnosis.outcome
+                else {
+                    return Vec::new();
+                };
+                legal_move_options(&point.position_fen).unwrap_or_default()
+            });
         }
         state.revision = state.revision.saturating_add(1);
         let records = state
@@ -389,6 +405,26 @@ fn replay_line(fen: &str, moves: &[String]) -> Result<Vec<String>, gambit_engine
         positions.push(position.position().to_fen());
     }
     Ok(positions)
+}
+
+// All legal choices, without scores or preferred-move ordering. This is pure
+// board replay: previewing a move never runs Stockfish or saves an attempt.
+fn legal_move_options(fen: &str) -> Result<Vec<MoveOption>, gambit_engine::Error> {
+    let root = gambit_engine::GamePosition::from_fen(fen)?;
+    let mut moves = gambit_chess::MoveList::default();
+    root.position().generate_legal_moves(&mut moves);
+    Ok(moves
+        .as_slice()
+        .iter()
+        .map(|chess_move| {
+            let mut position = root.position();
+            position.play_unchecked(*chess_move);
+            MoveOption {
+                uci: chess_move.to_uci(),
+                fen: position.to_fen(),
+            }
+        })
+        .collect())
 }
 
 fn practice_action(
@@ -632,6 +668,45 @@ fn failed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn move_previews_include_every_legal_choice_and_replay_special_moves() {
+        assert_eq!(
+            legal_move_options(gambit_engine::GamePosition::default().initial_fen())
+                .unwrap()
+                .len(),
+            20
+        );
+        for (fen, uci, expected) in [
+            (
+                "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 9",
+                "e5d6",
+                "4k3/8/3P4/8/8/8/8/4K3 b - - 0 9",
+            ),
+            (
+                "4k3/8/8/8/8/8/8/4K2R w K - 0 1",
+                "e1g1",
+                "4k3/8/8/8/8/8/8/5RK1 b - - 1 1",
+            ),
+            (
+                "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+                "a7a8n",
+                "N3k3/8/8/8/8/8/8/4K3 b - - 0 1",
+            ),
+        ] {
+            let options = legal_move_options(fen).unwrap();
+            assert_eq!(
+                options.iter().find(|option| option.uci == uci).unwrap().fen,
+                expected
+            );
+            for option in options {
+                let mut replay = gambit_engine::GamePosition::from_fen(fen).unwrap();
+                replay.play_uci(&option.uci).unwrap();
+                assert_eq!(replay.position().to_fen(), option.fen);
+            }
+        }
+        assert!(legal_move_options("not a FEN").is_err());
+    }
 
     #[test]
     fn supporting_line_is_legal_bounded_and_preserves_special_moves() {
