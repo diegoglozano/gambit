@@ -40,6 +40,20 @@ export function reconcileCoachingProgress(progress, snapshot) {
     deferred_game_ids: progress.game_ids.filter(id => deferred.has(id)) };
 }
 
+export function queueGameState(game) {
+  const practice = game.record?.practice;
+  if (practice?.disposition === "completed") return "completed";
+  if (practice?.disposition === "again_later") return "deferred";
+  if (practice && (practice.revealed || practice.solution !== "unsolved" || practice.attempts?.length)) return "attempted";
+  return game.record ? "ready" : game.status;
+}
+
+export function queueStateLabel(state) {
+  return { unseen: "NOT ANALYZED", analyzing: "ANALYZING", ready: "READY TO PRACTICE",
+    attempted: "ATTEMPTED", completed: "COMPLETED ✓", deferred: "FOR LATER",
+    unsupported: "UNSUPPORTED", failed: "FAILED" }[state] ?? "";
+}
+
 export function scoreText(evaluation) {
   const bound = { lower: "at least ", upper: "at most ", exact: "" }[evaluation.bound] ?? "";
   const score = evaluation.score;

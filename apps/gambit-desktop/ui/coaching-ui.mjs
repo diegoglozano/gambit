@@ -96,6 +96,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       button.setAttribute("aria-label", `${square.name}, ${square.piece ? `${square.piece === square.piece.toUpperCase() ? "White" : "Black"} ${names[square.piece.toLowerCase()]}` : "empty"}`);
       button.setAttribute("aria-pressed", String(square.name === selected));
       button.textContent = symbols[square.piece] ?? "";
+      button.draggable = Boolean(square.piece) && !linePly;
       const coordinate = document.createElement("small");
       coordinate.textContent = square.name;
       button.append(coordinate);
@@ -109,6 +110,26 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
           selected = null;
           el("feedback").textContent = "Move entered. Choose Check move to submit it.";
         }
+        renderBoard(point);
+      });
+      button.addEventListener("dragstart", (event) => {
+        if (busy || snapshot?.practice_busy || linePly || !square.piece) return event.preventDefault();
+        event.dataTransfer.setData("text/plain", square.name);
+        event.dataTransfer.effectAllowed = "move";
+      });
+      button.addEventListener("dragover", (event) => {
+        if (!busy && !snapshot?.practice_busy && !linePly) event.preventDefault();
+      });
+      button.addEventListener("drop", (event) => {
+        event.preventDefault();
+        if (busy || snapshot?.practice_busy || linePly) return;
+        const fromName = event.dataTransfer.getData("text/plain");
+        const from = squares.find((candidate) => candidate.name === fromName);
+        if (!from?.piece) return;
+        const promotion = from.piece.toLowerCase() === "p" && /[18]$/.test(square.name) ? el("promotion").value : "";
+        el("move").value = `${fromName}${square.name}${promotion}`;
+        selected = null;
+        el("feedback").textContent = "Move entered. Choose Check move to submit it.";
         renderBoard(point);
       });
       button.addEventListener("keydown", (event) => {

@@ -4,6 +4,37 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-12
+
+### Added
+
+- Added private, on-demand Stockfish diagnosis for up to six review games with
+  progressive results, cancellation, reproducible evidence, and one supported
+  player-caused turning point per game.
+- Added one-move corrective practice with pointer, keyboard, and text input,
+  equivalent-strong-move acceptance, explicit reveal, and manual playback of a
+  short legal engine continuation.
+- Added factual review-set summaries, diagnosis-aware recommendations, durable
+  practice outcomes, interrupted-analysis markers, and explicit corrupt-cache
+  recovery that preserves the unreadable record as a backup.
+- Bundled the pinned local engine, notices, and corresponding source in the
+  universal macOS app and validated it on native Apple Silicon and Intel hosts.
+
+### Changed
+
+- Review completion now uses explicit completed and practice-later outcomes,
+  reconciles older queue flags with durable practice state, and shows the
+  evidence summary when completing or exiting a session.
+- macOS sleep cancels active local analysis safely while retaining completed
+  cached games for a user-initiated continuation after wake.
+
+### Fixed
+
+- Cleared stale analysis and saving messages after the underlying operation
+  completed.
+- Made the documentation workflow download and verify its pinned Oranda binary
+  directly from the GitHub release to avoid the installer host's rate limit.
+
 ## [0.15.0] - 2026-09-07
 
 ### Changed
@@ -225,7 +256,8 @@ All notable changes to Gambit are documented in this file.
 - First binary release for Linux, macOS, and Windows, with shell and PowerShell
   installers.
 
-[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/diegoglozano/gambit/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/diegoglozano/gambit/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/diegoglozano/gambit/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/diegoglozano/gambit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/diegoglozano/gambit/compare/v0.12.0...v0.13.0

@@ -15,7 +15,7 @@ import {
   validateLiveFilters,
 } from "./view-model.mjs";
 import { coachingUI } from "./coaching-ui.mjs";
-import { recommendationLabel, reconcileCoachingProgress, summaryText, sameQueue } from "./coaching-model.mjs";
+import { recommendationLabel, reconcileCoachingProgress, summaryText, sameQueue, queueGameState, queueStateLabel } from "./coaching-model.mjs";
 import { mockCoaching } from "./coaching-preview.mjs";
 
 const nativeInvoke = window.__TAURI__?.core?.invoke;
@@ -65,15 +65,16 @@ const coaching = coachingUI({ invoke,
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
   onUpdate: (snapshot) => {
     if (!state.review) return;
+    state.review.coachingStates = new Map(snapshot.games.map(game => [game.id, queueGameState(game)]));
     const before = reviewProgressSnapshot();
     const progress = reconcileCoachingProgress(before, snapshot);
     if (JSON.stringify(before) !== JSON.stringify(progress)) {
       state.review.reviewedGameIds = new Set(progress.reviewed_game_ids);
       state.review.deferredGameIds = new Set(progress.deferred_game_ids);
       void persistReviewProgress();
-      renderReviewPage(reviewSummaries(state.review.gameIds, [...state.review.details.values()]));
       renderReviewBar();
     }
+    renderReviewPage(reviewSummaries(state.review.gameIds, [...state.review.details.values()]));
     if (state.review.complete) element("review-complete-copy").textContent = coaching.summary();
   },
 });
@@ -462,7 +463,7 @@ function renderPage(page) {
       selectGame(game.id);
     });
     const indicators = row("game-row-indicators", text(resultLabel(game.result), "game-row-result"));
-    if (reviewState) indicators.append(text(reviewState === "reviewed" ? "COMPLETED ✓" : "FOR LATER", "review-state"));
+    if (reviewState) indicators.append(text(queueStateLabel(reviewState), "review-state"));
     button.append(
       row("game-row-top", text(game.date ?? "Unknown date"), indicators),
       playerRow(game.white, game.white_elo, "White"),
@@ -474,7 +475,8 @@ function renderPage(page) {
 
 function reviewGameState(id) {
   if (!state.review) return null;
-  if (state.review.reviewedGameIds.has(id)) return "reviewed";
+  if (state.review.coachingStates?.has(id)) return state.review.coachingStates.get(id);
+  if (state.review.reviewedGameIds.has(id)) return "completed";
   if (state.review.deferredGameIds.has(id)) return "deferred";
   return null;
 }
@@ -1070,6 +1072,7 @@ async function startReview(opening, player = state.player ?? state.managedUser) 
     reviewedGameIds: new Set(progress.reviewed_game_ids),
     deferredGameIds: new Set(progress.deferred_game_ids),
     details: new Map(),
+    coachingStates: new Map(),
     complete: false,
     previous: {
       filters: { ...state.filters },
@@ -1452,7 +1455,7 @@ async function mockInvoke(command, args = {}) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
-    return { current_version: "0.15.0", version: "0.16.0", notes: "A faster, friendlier Gambit is ready." };
+    return { current_version: "0.16.0", version: "0.17.0", notes: "A faster, friendlier Gambit is ready." };
   }
   if (command === "install_update" || command === "restart_app" || command === "save_review_progress") return null;
   if (command === "get_game") return mockDetail(args.id);
