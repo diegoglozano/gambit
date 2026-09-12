@@ -29,7 +29,7 @@ hash before saving. Practice shares the engine gate with diagnosis. Snapshots
 include monotonic revisions and factual summaries.
 
 The UI now has an explicit local-analysis explanation, progressive results,
-cancel/retry, a FEN-based practice board with pointer/arrow-key selection and
+cancel/retry, a FEN-based practice board with click, drag, arrow-key selection and
 text move input, promotion selection, and explicit reveal/done/later actions.
 Preferred moves and lines are absent from the visible answer until success or
 reveal. Revealed lines now support manual board stepping through up to six legal
@@ -55,6 +55,9 @@ read-only worker, without replacing active analysis or starting the engine.
 They show Diagnose, Continue diagnosis, Practice positions, or View summary.
 Cached practice dispositions reconcile legacy completed/deferred queue flags;
 legacy opened/reviewed flags alone do not count as a completed diagnosis.
+Every queued game also exposes its derived lifecycle label: not analyzed,
+analyzing, ready to practice, attempted, completed, for later, unsupported, or
+failed.
 
 Before searching, the queue atomically saves intent markers keyed by the full
 analysis inputs. Cache-only reopening visibly marks unfinished work even if no

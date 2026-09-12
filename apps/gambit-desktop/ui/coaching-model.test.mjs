@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress } from "./coaching-model.mjs";
+import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress, queueGameState, queueStateLabel } from "./coaching-model.mjs";
+
+test("every queue lifecycle state has a factual visible label", () => {
+  for (const status of ["unseen", "analyzing", "unsupported", "failed"]) {
+    assert.equal(queueGameState({ status }), status);
+    assert.notEqual(queueStateLabel(status), "");
+  }
+  const practice = { disposition: "active", solution: "unsolved", revealed: false, attempts: [] };
+  assert.equal(queueGameState({ record: { practice } }), "ready");
+  assert.equal(queueGameState({ record: { practice: { ...practice, attempts: [{}] } } }), "attempted");
+  assert.equal(queueGameState({ record: { practice: { ...practice, disposition: "completed" } } }), "completed");
+  assert.equal(queueGameState({ record: { practice: { ...practice, disposition: "again_later" } } }), "deferred");
+  for (const status of ["ready", "attempted", "completed", "deferred"]) assert.notEqual(queueStateLabel(status), "");
+});
 
 test("recommendations report diagnosis and practice rather than legacy opened counts", () => {
   assert.equal(recommendationLabel(null, 6), "Diagnose 6 losses →");

@@ -182,7 +182,7 @@ code { color: var(--cream); }
 .game-row { width: 100%; display: block; padding: 15px 17px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
 .game-row:hover { background: rgba(255,255,255,0.025); }
 .game-row.active { background: rgba(130,217,162,0.1); box-shadow: inset 3px 0 var(--green); }
-.game-row.reviewed { opacity: 0.58; }
+.game-row.completed { opacity: 0.58; }
 .game-row.deferred { box-shadow: inset 3px 0 rgba(233,225,204,0.35); }
 .game-row-top, .game-row-player { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .game-row-top { margin-bottom: 10px; color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: 0.07em; }

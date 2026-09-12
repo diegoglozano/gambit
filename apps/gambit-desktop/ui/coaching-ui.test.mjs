@@ -61,6 +61,11 @@ test("practice controller hides the answer, supports square entry and reveals on
     const board = element("coaching-board");
     assert.equal(board.children.length, 64);
     assert.equal(board.children.filter((b) => b.tabIndex === 0).length, 1);
+    const transfer = { value: "", setData(_type, value) { this.value = value; }, getData() { return this.value; } };
+    board.children.find((b) => b.dataset.square === "g6").listeners.dragstart({ dataTransfer: transfer, preventDefault() { assert.fail("piece drag refused"); } });
+    board.children.find((b) => b.dataset.square === "h6").listeners.drop({ dataTransfer: transfer, preventDefault() {} });
+    assert.equal(element("coaching-move").value, "g6h6");
+    element("coaching-move").value = "";
     let stopped = false;
     board.children[0].listeners.keydown({ key: "ArrowRight", preventDefault() {}, stopPropagation() { stopped = true; } });
     assert.equal(stopped, true);
