@@ -1452,7 +1452,7 @@ async function mockInvoke(command, args = {}) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
-    return { current_version: "0.15.0", version: "0.16.0", notes: "A faster, friendlier Gambit is ready." };
+    return { current_version: "0.16.0", version: "0.17.0", notes: "A faster, friendlier Gambit is ready." };
   }
   if (command === "install_update" || command === "restart_app" || command === "save_review_progress") return null;
   if (command === "get_game") return mockDetail(args.id);
