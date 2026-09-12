@@ -77,6 +77,16 @@ the player to Today (or Explore for an unmanaged library). Exiting early still
 restores the player's previous filters, sort, page, selection, and originating
 view without changing the database.
 
+**Analyze review set** finds supported turning points locally with Stockfish.
+Practice shows the position before your decision and which color you play.
+Click a piece to see its legal destinations, then click a destination or drag
+there and choose **Check my move**. **See the move I played** previews the
+original decision without recording an attempt. Move descriptions name the
+piece, and arrows show its path. **Show me a better move** reveals the answer;
+use **See next move**, **Back**, and **Starting position** to follow it on the
+board. Coordinate entry and engine notation are optional. Completed practice
+and positions saved for later remain on this Mac.
+
 The app replays a selected standard-chess mainline. The board automatically
 faces the selected player and can be flipped manually. Arrow keys and board
 controls move through the game without moving the surrounding window. Raw PGN
@@ -137,13 +147,28 @@ npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles app
 Build the universal release DMG and its SHA-256 checksum with:
 
 ```console
-./scripts/build-desktop-dmg.sh 0.16.0
+./scripts/build-desktop-dmg.sh 0.17.0
 ```
 
 Pull requests exercise that universal packaging path. After the main Release
 workflow publishes a version tag, the Desktop release workflow builds the DMG
 and signed updater files from the same commit and attaches them to the existing
 GitHub Release. A manual workflow dispatch can rebuild an existing tag.
+
+## Frontend checks
+
+Run the controller tests and browser regression checks from `apps/gambit-desktop`:
+
+```console
+npm ci
+npm test
+npx playwright install chromium webkit
+npm run test:browser
+```
+
+The browser suite checks visual practice in Chromium and WebKit, including
+answer visibility, SVG geometry, move previews, and layout at four window sizes.
+CI runs both browsers on macOS and saves traces and screenshots on failures.
 
 ## Signing and notarization
 

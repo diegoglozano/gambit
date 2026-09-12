@@ -1,0 +1,11 @@
+{
+  "name": "gambit-desktop-ui",
+  "private": true,
+  "scripts": {
+    "test": "node --test ui/*.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2"
+  }
+}

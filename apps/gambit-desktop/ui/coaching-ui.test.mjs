@@ -29,12 +29,13 @@ test("practice controller hides the answer, supports square entry and reveals on
   try {
     let ctx = { path: "library", player: "A", ply: 4, gameIds: [1], gameId: 1 };
     const record = { diagnosis: { outcome: { kind: "turning_point", evidence: {
-      position_fen: "7k/5K2/6Q1/8/8/8/8/8 w - - 0 1", played_san: "Qh7+", best_san: "Qg8#", pv_san: ["Qg8#"],
+      position_fen: "7k/5K2/6Q1/8/8/8/8/8 w - - 0 1", played_uci: "g6h7", played_san: "Qh7+", best_uci: "g6g8", best_san: "Qg8#", pv_san: ["Qg8#"],
       before: { bound: "exact", score: { kind: "mate_for", value: 1 } },
       after: { bound: "exact", score: { kind: "centipawns", value: 0 } }, loss: { kind: "lost_forced_mate" },
     } } }, practice: { solution: "unsolved", revealed: false, attempts: [] } };
     const snapshot = { path: "library", player: "A", shared_ply: 4, generation: 1, revision: 1,
       running: false, games: [{ id: 1, status: "ready", record, move_options: [
+        { uci: "g6h7", fen: "7k/5K1Q/8/8/8/8/8/8 b - - 1 1" },
         { uci: "g6h6", fen: "7k/5K2/7Q/8/8/8/8/8 b - - 1 1" },
         { uci: "g6g8", fen: "6Qk/5K2/8/8/8/8/8/8 b - - 1 1" },
       ], line_positions: [
@@ -63,10 +64,23 @@ test("practice controller hides the answer, supports square entry and reveals on
     assert.equal(element("coaching-pv").textContent, "");
     assert.equal(element("coaching-playback").hidden, true);
     assert.equal(element("coaching-done").disabled, true);
+    assert.equal(element("coaching-check").disabled, true);
+    assert.equal(element("coaching-solution").hidden, true);
+    assert.equal(element("coaching-arrow").hidden, true);
+    assert.match(element("coaching-played-description").textContent, /queen from g6 to h7/);
     const board = element("coaching-board");
     assert.equal(board.children.length, 64);
     assert.equal(board.children.filter((b) => b.tabIndex === 0).length, 1);
     const square = name => board.children.find(b => b.dataset.square === name);
+    element("coaching-played").listeners.click();
+    assert.equal(square("h7").attributes["aria-label"], "h7, White queen");
+    assert.equal(element("coaching-check").disabled, true);
+    assert.equal(element("coaching-arrow").hidden, false);
+    assert.equal(element("coaching-arrow").classes.has("played"), true);
+    element("coaching-form").listeners.submit({ preventDefault() {} });
+    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 0);
+    element("coaching-played").listeners.click();
+    assert.equal(square("g6").attributes["aria-label"], "g6, White queen");
     document.elementFromPoint = () => square("h6");
     square("g6").listeners.pointerdown({ pointerId: 1, button: 0, clientX: 10, clientY: 10, preventDefault() {} });
     board.listeners.pointermove({ pointerId: 1, clientX: 40, clientY: 10 });
@@ -119,7 +133,7 @@ test("practice controller hides the answer, supports square entry and reveals on
     assert.equal(element("coaching-feedback").textContent, "Progress saved on this Mac.");
     assert.equal(element("coaching-playback").hidden, false);
     element("coaching-line-next").listeners.click();
-    assert.match(element("coaching-line-status").textContent, /Qg8#/);
+    assert.match(element("coaching-line-status").textContent, /queen from g6 to g8/);
     assert.equal(element("coaching-line-next").disabled, true);
     assert.equal(element("coaching-check").disabled, true);
     assert.equal(board.children.find(b => b.dataset.square === "g8").attributes["aria-label"], "g8, White queen");
@@ -129,7 +143,9 @@ test("practice controller hides the answer, supports square entry and reveals on
     element("coaching-form").listeners.submit({ preventDefault() {} });
     assert.equal(calls.length, beforePlaybackSubmit);
     element("coaching-line-start").listeners.click();
-    assert.equal(element("coaching-check").disabled, false);
+    assert.equal(element("coaching-check").disabled, true); // No move chosen yet.
+    assert.equal(element("coaching-solution").hidden, false);
+    assert.equal(element("coaching-arrow").hidden, false);
     assert.equal(board.children.find(b => b.dataset.square === "g6").attributes["aria-label"], "g6, White queen");
     ctx = { ...ctx, path: "other-library" };
     ui.render();

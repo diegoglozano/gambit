@@ -195,30 +195,42 @@
             <button id="coaching-recover" type="button" hidden>Preserve unreadable record as backup and retry analysis</button>
             <div id="coaching-exercise" class="coaching-exercise" hidden>
               <div class="coaching-board-wrap">
-                <div class="board coaching-board" id="coaching-board" role="group" aria-label="Interactive practice board. Drag a piece, or select a piece and destination. Arrow keys move focus, Enter selects, Escape clears."></div>
+                <div class="coaching-turn"><span id="coaching-side" class="coaching-side"></span><strong id="coaching-turn-label">Your turn</strong><span id="coaching-move-number"></span></div>
+                <div class="coaching-board-stage">
+                  <div class="board coaching-board" id="coaching-board" role="group" aria-label="Interactive practice board. Drag a piece, or select a piece and destination. Arrow keys move focus, Enter selects, Escape clears."></div>
+                  <svg id="coaching-arrow" class="coaching-arrow" viewBox="0 0 800 800" aria-hidden="true" style="display: none"><defs><marker id="practice-arrowhead" markerWidth="3" markerHeight="3" refX="2.3" refY="1.5" orient="auto"><path d="M0,0 L3,1.5 L0,3 Z" fill="currentColor" /></marker></defs><line id="coaching-arrow-line" stroke="currentColor" stroke-width="13" stroke-linecap="round" marker-end="url(#practice-arrowhead)" /></svg>
+                </div>
                 <p id="coaching-move-status" role="status" aria-live="polite"></p>
               </div>
               <div class="coaching-practice">
-                <h3>Try a better move</h3>
-                <p>Move a piece on the board, then check your move. You can also enter a move below.</p>
-                <form id="coaching-form">
-                  <label for="coaching-move">Move (for example e2e4)</label>
-                  <input id="coaching-move" maxlength="5" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="coaching-feedback" />
-                  <label id="coaching-promotion-label" for="coaching-promotion">Promotion piece</label>
-                  <select id="coaching-promotion"><option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option></select>
-                  <div class="coaching-move-actions"><button id="coaching-check" type="submit">Check move</button><button id="coaching-reset" type="button">Undo move</button></div>
-                </form>
-                <button id="coaching-reveal" type="button">Show the answer</button>
-                <button id="coaching-replay" type="button" hidden>Practice this position again</button>
-                <p id="coaching-answer" hidden></p>
-                <details id="coaching-line" hidden><summary>Supporting engine line</summary><p id="coaching-pv"></p>
+                <span class="eyebrow">Learn from your game</span>
+                <h3 id="coaching-task">Find a better move</h3>
+                <p id="coaching-guide">Click one of your pieces to see where it can go. Then click a highlighted square.</p>
+                <div id="coaching-solution" class="coaching-solution" hidden>
+                  <span class="eyebrow">A better move</span>
+                  <p id="coaching-best-description"></p>
                   <div id="coaching-playback" hidden>
-                    <button id="coaching-line-start" type="button">Exercise position</button>
-                    <button id="coaching-line-previous" type="button">Previous line move</button>
-                    <button id="coaching-line-next" type="button">Next line move</button>
+                    <button id="coaching-line-start" class="coaching-secondary" type="button">↺ Starting position</button>
+                    <button id="coaching-line-previous" class="coaching-secondary" type="button">← Back</button>
+                    <button id="coaching-line-next" type="button">See next move →</button>
                     <p id="coaching-line-status" role="status" aria-live="polite"></p>
                   </div>
-                </details>
+                </div>
+                <div class="coaching-context">
+                  <span class="eyebrow">What happened</span>
+                  <p id="coaching-played-description"></p>
+                  <button id="coaching-played" class="coaching-secondary" type="button">See the move I played</button>
+                </div>
+                <form id="coaching-form">
+                  <div id="coaching-choice" class="coaching-choice" role="status">Choose your move on the board</div>
+                  <label id="coaching-promotion-label" for="coaching-promotion">Promote to</label>
+                  <select id="coaching-promotion"><option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option></select>
+                  <div class="coaching-move-actions"><button id="coaching-check" type="submit">Check my move</button><button id="coaching-reset" class="coaching-secondary" type="button">Undo move</button></div>
+                  <details class="coaching-notation"><summary>Enter a move with coordinates</summary><label for="coaching-move">From and to squares</label><input id="coaching-move" maxlength="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e2e4" aria-describedby="coaching-feedback" /></details>
+                </form>
+                <button id="coaching-reveal" class="coaching-secondary" type="button">Show me a better move</button>
+                <button id="coaching-replay" class="coaching-secondary" type="button" hidden>Practice this position again</button>
+                <details id="coaching-line" hidden><summary>Engine details and notation</summary><p id="coaching-answer" hidden></p><p id="coaching-pv"></p></details>
               </div>
             </div>
             <span id="coaching-drag-piece" class="coaching-drag-piece" aria-hidden="true" hidden></span>

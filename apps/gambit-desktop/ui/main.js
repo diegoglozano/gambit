@@ -62,6 +62,7 @@ const coaching = coachingUI({ invoke,
   context: () => state.review ? { path: state.session.path, player: state.review.player,
     ply: state.review.ply, gameIds: state.review.gameIds, gameId: state.review.gameIds[state.review.index],
     complete: state.review.complete, deferredIds: [...state.review.deferredGameIds] } : null,
+  onPracticeInteraction: () => { if (state.review) state.review.practiceEntryPending = false; },
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
   onExerciseChange: (practicing) => element("library-layout").classList.toggle("practice-mode", practicing),
   onUpdate: (snapshot) => {
@@ -864,7 +865,7 @@ function renderTodayFocus(opening) {
   if (!opening) return;
   const board = renderMiniBoard(opening.board);
   element("today-focus-board").replaceChildren(board);
-  element("today-focus-title").textContent = opening.line || "A recurring opening position";
+  element("today-focus-title").textContent = "Practice an opening from your games";
   element("today-focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. Review the evidence before deciding what to change.`;
   element("today-focus-score").textContent = `${opening.score}%`;
   element("today-review-progress").hidden = true;
@@ -918,7 +919,7 @@ function renderFocusOpening(opening) {
   const card = element("explore-focus");
   card.hidden = !opening;
   if (!opening) return;
-  element("focus-title").textContent = opening.line || "A recurring opening position";
+  element("focus-title").textContent = "Practice an opening from your games";
   element("focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. This is your lowest-scoring common line; review the games before deciding what to change.`;
   element("focus-score").textContent = `${opening.score}%`;
   element("review-focus").textContent = recommendationLabel(null, opening.review_game_ids?.length || 1);
@@ -1157,8 +1158,8 @@ function renderReviewBar() {
   const total = state.review.gameIds.length;
   const currentId = state.review.gameIds[state.review.index];
   const reviewed = state.review.reviewedGameIds.size;
-  element("review-title").textContent = state.review.title;
-  element("review-position").textContent = `Position: ${state.review.title}`;
+  element("review-title").textContent = "Opening practice";
+  element("review-position").textContent = `From move ${Math.floor(state.review.ply / 2) + 1}`;
   element("review-size").textContent = `Latest ${total.toLocaleString()} of ${state.review.matchingLosses.toLocaleString()} matching`;
   element("review-progress").textContent = `${reviewed} of ${total} completed · ${state.review.deferredGameIds.size} for later · game ${current}`;
   element("previous-review").disabled = current === 1;
@@ -1465,7 +1466,7 @@ async function mockInvoke(command, args = {}) {
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
-    return { current_version: "0.16.0", version: "0.17.0", notes: "A faster, friendlier Gambit is ready." };
+    return { current_version: "0.17.0", version: "0.18.0", notes: "A faster, friendlier Gambit is ready." };
   }
   if (command === "install_update" || command === "restart_app" || command === "save_review_progress") return null;
   if (command === "get_game") return mockDetail(args.id);
