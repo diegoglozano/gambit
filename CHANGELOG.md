@@ -20,6 +20,8 @@ All notable changes to Gambit are documented in this file.
 
 - Kept the current exercise and its feedback in place when background diagnosis
   finishes after the player has already started practicing.
+- Kept the whole practice board in view after previews, answer reveals, and
+  playback, and scaled pieces to fit compact boards.
 
 ### Added
 

@@ -1,6 +1,15 @@
 import { test, expect } from "@playwright/test";
 
+test.use({ viewport: { width: 1040, height: 700 } });
+
 test("practice teaches moves visually and keeps preview separate from attempts", async ({ page }) => {
+  const assertBoardVisible = async () => {
+    const board = await page.locator("#coaching-board").boundingBox();
+    expect(board.y).toBeGreaterThanOrEqual(0);
+    expect(board.y + board.height).toBeLessThanOrEqual(700);
+    const pieceSize = await page.locator("#coaching-board button").first().evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    expect(pieceSize).toBeLessThanOrEqual(board.width / 8);
+  };
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/");
@@ -21,6 +30,7 @@ test("practice teaches moves visually and keeps preview separate from attempts",
   await expect(page.locator("#coaching-arrow")).toHaveClass(/played/);
   await expect(page.locator("#coaching-check")).toBeDisabled();
   await expect(page.locator("#coaching-solution")).toBeHidden();
+  await assertBoardVisible();
   await page.locator("#coaching-played").click();
   await expect(page.locator("#coaching-board [data-square=g6]")).toHaveAttribute("aria-label", "g6, White queen");
 
@@ -35,12 +45,22 @@ test("practice teaches moves visually and keeps preview separate from attempts",
   await expect(page.locator("#game-list")).not.toContainText("ANALYZING");
   await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
   await expect(page.locator("#coaching-solution")).toBeVisible();
+  await assertBoardVisible();
   await expect(page.locator("#coaching-line-next")).toBeVisible();
   await page.locator("#coaching-line-next").click();
   await expect(page.locator("#coaching-board [data-square=g8]")).toHaveAttribute("aria-label", "g8, White queen");
   await expect(page.locator("#coaching-line-status")).toContainText("queen from g6 to g8");
   await expect(page.locator("#coaching-arrow")).toBeVisible();
   await expect(page.locator("#coaching-check")).toBeDisabled();
+  await assertBoardVisible();
+
+  await page.locator("#coaching-replay").click();
+  await expect(page.locator("#coaching-solution")).toBeHidden();
+  await page.locator("#coaching-reveal").click();
+  await expect(page.locator("#coaching-solution")).toBeVisible();
+  await assertBoardVisible();
+  await page.locator("#coaching-line-next").click();
+  await assertBoardVisible();
 
   // A missing stylesheet can still pass DOM tests. Check the real board and
   // arrow geometry, then verify the layout at desktop and narrow widths.

@@ -17,6 +17,9 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   let gesture = null;
   let viewingPlayed = false;
 
+  // Revealing an answer changes the sidebar height. Keep the pieces in view.
+  function showBoard() { el("board-wrap").scrollIntoView?.({ block: "nearest" }); }
+
   function canMove() { return !busy && !snapshot?.practice_busy && !linePly && !pendingMove && !viewingPlayed; }
 
   function clearMove() {
@@ -46,6 +49,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       el("feedback").textContent = "Your move is on the board. Check move to evaluate it, or Undo move to choose another.";
     }
     render();
+    showBoard();
   }
 
   function receive(incoming) {
@@ -110,7 +114,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       if (kind === "done") onDone();
       if (kind === "later") onLater();
     } catch (error) { el("feedback").textContent = String(error); }
-    finally { busy = false; render(); }
+    finally { busy = false; render(); if (context()?.gameId === id && ["attempt", "reveal", "replay"].includes(kind)) showBoard(); }
   }
 
   function renderBoard(point, fen = pendingMove?.fen ?? point.position_fen) {
@@ -318,10 +322,10 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     onPracticeInteraction();
     const show = !viewingPlayed;
     clearMove(); linePly = 0; viewingPlayed = show;
-    render();
+    render(); showBoard();
   });
   el("reset").addEventListener("click", () => {
-    clearMove(); linePly = 0; el("feedback").textContent = "Choose another move from the exercise position."; render();
+    clearMove(); linePly = 0; el("feedback").textContent = "Choose another move from the exercise position."; render(); showBoard();
   });
   el("move").addEventListener("input", () => {
     onPracticeInteraction();
@@ -353,7 +357,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       clearMove();
       linePly = delta ? Math.max(0, linePly + delta) : 0;
       selected = null;
-      render();
+      render(); showBoard();
     });
   }
   return { receive, load, render,
