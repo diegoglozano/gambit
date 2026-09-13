@@ -373,8 +373,12 @@ impl CacheStore {
             if progress.attempts.len() == 100 {
                 progress.attempts.remove(0);
             }
+            progress.disposition = if attempt.verdict == crate::AttemptVerdict::Strong {
+                PracticeDisposition::Completed
+            } else {
+                PracticeDisposition::Active
+            };
             progress.attempts.push(attempt);
-            progress.disposition = PracticeDisposition::Active;
         })
     }
 

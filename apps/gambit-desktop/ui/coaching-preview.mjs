@@ -42,9 +42,10 @@ export async function mockCoaching(command, args) {
     if (kind === "attempt") {
       const verdict = ["g6g8", "g6h6"].includes(uci) ? "strong" : uci === "g6h7" ? "try_again" : "illegal";
       practice.attempts.push({ uci, verdict });
+      practice.disposition = verdict === "strong" ? "completed" : "active";
       if (verdict === "strong" && practice.solution === "unsolved") practice.solution = practice.revealed ? "after_hint" : "without_reveal";
     }
-    if (kind === "reveal") practice.revealed = true;
+    if (kind === "reveal") { practice.revealed = true; practice.disposition = "completed"; }
     if (kind === "done") practice.disposition = "completed";
     if (kind === "later") practice.disposition = "again_later";
     if (kind === "replay") practice.disposition = "active";

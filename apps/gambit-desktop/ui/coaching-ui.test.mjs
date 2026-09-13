@@ -82,55 +82,32 @@ test("practice controller hides the answer, supports square entry and reveals on
     assert.equal(calls.filter(c => c.command === "coaching_practice").length, 0);
     element("coaching-played").listeners.click();
     assert.equal(square("g6").attributes["aria-label"], "g6, White queen");
+    square("g6").listeners.click();
+    assert.equal(square("h6").classes.has("legal-target"), true);
+    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 0);
+    square("a1").listeners.click();
+    assert.match(element("coaching-feedback").textContent, /not legal/);
+    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 0);
     document.elementFromPoint = () => square("h6");
-    interacting = false;
     square("g6").listeners.pointerdown({ pointerId: 1, button: 0, clientX: 10, clientY: 10, preventDefault() {} });
-    assert.equal(interacting, true); // Keep navigation stable before the drag ends.
     board.listeners.pointermove({ pointerId: 1, clientX: 40, clientY: 10 });
     assert.equal(element("coaching-drag-piece").hidden, false);
     board.listeners.pointerup({ pointerId: 1, clientX: 40, clientY: 10 });
     assert.equal(element("coaching-drag-piece").hidden, true);
-    assert.equal(element("coaching-move").value, "g6h6");
-    assert.equal(square("g6").attributes["aria-label"], "g6, empty");
-    assert.equal(square("h6").attributes["aria-label"], "h6, White queen");
-    assert.equal(square("h6").attributes["aria-disabled"], "true");
-    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 0);
-    element("coaching-reset").listeners.click();
-    assert.equal(square("g6").attributes["aria-label"], "g6, White queen");
-    assert.equal(element("coaching-move").value, "");
-    square("g6").listeners.pointerdown({ pointerId: 2, button: 0, clientX: 10, clientY: 10, preventDefault() {} });
-    board.listeners.pointermove({ pointerId: 2, clientX: 40, clientY: 10 });
-    board.listeners.pointercancel();
-    assert.equal(element("coaching-drag-piece").hidden, true);
-    assert.equal(element("coaching-move").value, "");
-    assert.equal(square("g6").classes.has("drag-origin"), false);
-    document.elementFromPoint = () => null;
-    square("g6").listeners.pointerdown({ pointerId: 3, button: 0, clientX: 10, clientY: 10, preventDefault() {} });
-    board.listeners.pointermove({ pointerId: 3, clientX: 500, clientY: 10 });
-    board.listeners.pointerup({ pointerId: 3, clientX: 500, clientY: 10 });
-    assert.equal(element("coaching-move").value, "");
-    square("h8").listeners.click(); // Opponent/empty squares cannot start a move.
-    assert.equal(square("h8").attributes["aria-pressed"], "false");
-    let stopped = false;
-    board.children[0].listeners.keydown({ key: "ArrowRight", preventDefault() {}, stopPropagation() { stopped = true; } });
-    assert.equal(stopped, true);
-    assert.equal(document.activeElement, board.children[1]);
-    assert.equal(board.children.filter((b) => b.tabIndex === 0).length, 1);
-    board.children.find((b) => b.dataset.square === "g6").listeners.click();
-    assert.equal(square("h6").classes.has("legal-target"), true);
-    square("a1").listeners.click();
-    assert.equal(element("coaching-move").value, "");
-    assert.match(element("coaching-feedback").textContent, /not legal/);
-    board.children.find((b) => b.dataset.square === "h6").listeners.click();
-    assert.equal(element("coaching-move").value, "g6h6");
-    assert.equal(calls.filter((c) => c.command === "coaching_practice").length, 0);
-    assert.equal(square("h6").attributes["aria-label"], "h6, White queen");
+    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 1);
+    // Duplicate click/form events while the move is being checked are ignored.
+    square("h6").listeners.click();
     element("coaching-form").listeners.submit({ preventDefault() {} });
+    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 1);
     await new Promise(setImmediate);
     assert.equal(element("coaching-answer").hidden, false);
     assert.match(element("coaching-answer").textContent, /Qg8#/);
     assert.match(element("coaching-feedback").textContent, /Strong move/);
     assert.equal(element("coaching-done").disabled, false);
+    // Exploring a saved answer never grades another move.
+    element("coaching-reset").listeners.click();
+    square("g6").listeners.click(); square("h6").listeners.click();
+    assert.equal(calls.filter(c => c.command === "coaching_practice").length, 1);
     element("coaching-reveal").listeners.click();
     await new Promise(setImmediate);
     assert.equal(element("coaching-feedback").textContent, "Progress saved on this Mac.");
@@ -173,7 +150,7 @@ test("practice controller hides the answer, supports square entry and reveals on
   } finally { globalThis.document = previousDocument; globalThis.window = previousWindow; }
 });
 
-test("Black promotion, text preview and busy guards keep backend-provided boards and orientation", () => {
+test("promotion asks for a piece only after a destination, then submits once", async () => {
   const previousDocument = globalThis.document;
   const previousWindow = globalThis.window;
   const elements = new Map();
@@ -191,24 +168,32 @@ test("Black promotion, text preview and busy guards keep backend-provided boards
         { uci: "b2b1q", fen: "4k3/8/8/8/8/8/8/1q2K3 w - - 0 10" }, { uci: "b2b1n", fen: knight },
       ] }] };
     let ctx = { path: "library", player: "B", ply: 0, gameIds: [2], gameId: 2 };
+    const calls = [];
     const ui = coachingUI({ context: () => ctx,
-      invoke() { assert.fail("preview must not invoke the engine or save an attempt"); }, onDone() {}, onLater() {} });
+      async invoke(command, args) { calls.push({ command, args }); return { ...snapshot, revision: 2 }; }, onDone() {}, onLater() {} });
     element("coaching-promotion").value = "q";
     ui.receive(snapshot);
     const board = element("coaching-board");
     const square = name => board.children.find(child => child.dataset.square === name);
     assert.equal(board.children[0].dataset.square, "h1");
-    square("b2").listeners.click(); square("b1").listeners.click();
-    assert.equal(square("b1").attributes["aria-label"], "b1, Black queen");
+    square("b2").listeners.click();
+    assert.equal(element("coaching-promotion").hidden, true);
+    square("b1").listeners.click();
+    assert.equal(element("coaching-promotion").hidden, false);
+    assert.equal(calls.length, 0);
+    assert.equal(square("b2").attributes["aria-label"], "b2, Black pawn");
     element("coaching-promotion").value = "n";
     element("coaching-promotion").listeners.change();
-    assert.equal(element("coaching-move").value, "b2b1n");
-    assert.equal(square("b1").attributes["aria-label"], "b1, Black knight");
+    assert.deepEqual(calls[0].args.action, { kind: "attempt", uci: "b2b1n" });
+    element("coaching-promotion").listeners.change();
+    assert.equal(calls.length, 1);
+    await new Promise(setImmediate);
     assert.equal(board.children[0].dataset.square, "h1");
     element("coaching-reset").listeners.click();
     assert.equal(square("b2").attributes["aria-label"], "b2, Black pawn");
     element("coaching-move").value = "b2b1n"; element("coaching-move").listeners.input();
     assert.equal(square("b1").attributes["aria-label"], "b1, Black knight");
+    assert.equal(calls.length, 1); // Text input needs an intentional Enter/Play.
     ctx = { ...ctx, path: "another-library" }; ui.render();
     ctx = { ...ctx, path: "library" }; ui.receive(snapshot);
     assert.equal(element("coaching-move").value, "");

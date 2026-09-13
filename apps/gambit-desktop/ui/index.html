@@ -224,9 +224,9 @@
                 <form id="coaching-form">
                   <div id="coaching-choice" class="coaching-choice" role="status">Choose your move on the board</div>
                   <label id="coaching-promotion-label" for="coaching-promotion">Promote to</label>
-                  <select id="coaching-promotion"><option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option></select>
-                  <div class="coaching-move-actions"><button id="coaching-check" type="submit">Check my move</button><button id="coaching-reset" class="coaching-secondary" type="button">Undo move</button></div>
-                  <details class="coaching-notation"><summary>Enter a move with coordinates</summary><label for="coaching-move">From and to squares</label><input id="coaching-move" maxlength="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e2e4" aria-describedby="coaching-feedback" /></details>
+                  <select id="coaching-promotion"><option value="" disabled>Choose a piece</option><option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option></select>
+                  <div class="coaching-move-actions"><button id="coaching-reset" class="coaching-secondary" type="button">Undo move</button></div>
+                  <details class="coaching-notation"><summary>Enter a move with coordinates</summary><label for="coaching-move">From and to squares</label><input id="coaching-move" maxlength="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e2e4" aria-describedby="coaching-feedback" /><button id="coaching-check" type="submit">Play move</button></details>
                 </form>
                 <button id="coaching-reveal" class="coaching-secondary" type="button">Show me a better move</button>
                 <button id="coaching-replay" class="coaching-secondary" type="button" hidden>Practice this position again</button>
@@ -235,7 +235,7 @@
             </div>
             <span id="coaching-drag-piece" class="coaching-drag-piece" aria-hidden="true" hidden></span>
             <p id="coaching-feedback" role="status" aria-live="polite"></p>
-            <div class="coaching-outcomes"><button id="coaching-done" type="button" hidden>Done with this game</button> <button id="coaching-later" type="button" hidden>Practice again later</button></div>
+            <div class="coaching-outcomes"><button id="coaching-done" type="button" hidden>Continue →</button> <button id="coaching-later" type="button" hidden>Practice again later</button></div>
             <details><summary>Review-set evidence</summary><p id="coaching-summary"></p></details>
           </section>
 
