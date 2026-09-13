@@ -179,7 +179,7 @@ npx --yes @tauri-apps/cli@2.11.4 build --debug --bundles app
 Build the universal release DMG and its SHA-256 checksum with:
 
 ```console
-./scripts/build-desktop-dmg.sh 0.17.0
+./scripts/build-desktop-dmg.sh 0.18.0
 ```
 
 Pull requests exercise that universal packaging path. After the main Release

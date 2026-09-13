@@ -57,3 +57,13 @@ history. Chromium and WebKit exercise usable recent games during background
 history and a manual sync completing during solved-lesson inspection. Native
 exit/relaunch retains completed practice and reopens the correction for visual
 inspection. No participant comprehension study has been performed.
+
+
+Assembled fresh-user native QA (September 13, isolated app identifier): enter a
+public Lichess username, then Build my library. The default full-history journey
+showed 24 usable games and automatic six-game preparation by the five-second
+check. A supported lesson was available by the 84-second check while the full
+initial import was still running. One Learn this move action opened the lesson
+on the player's side at 1040 × 700; no queue or diagnosis decisions were needed.
+These are observed upper bounds from one local run, not benchmark averages or
+participant results. Library replay remained usable during import.
