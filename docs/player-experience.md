@@ -1,160 +1,238 @@
-# Player experience direction
+# Player experience and product direction
+
+Updated September 13, 2026, after v0.17.0. This is the product brief and handoff
+for the next development loop. It supersedes the previous delivery plan on this
+page. It describes intended behavior; the [desktop guide](desktop.md) describes
+what is available today.
 
 ## Product promise
 
-Gambit is the private chess memory that connects a player's games and turns
-them into a short, useful review habit.
+Gambit should become a **free, smart chess academy built around the player's
+own games**: understand a problem, practice a correction, and see whether it
+improves in later games.
 
-> Lichess helps you analyze a game. Gambit helps you understand your chess.
+The core question is: **What should I learn from my games, and how do I stop
+making the same mistake?**
 
-The desktop app should not try to replace the place where somebody plays or
-the analysis page they open immediately after a game. Its distinctive job is
-to answer three questions across a player's history:
+The database, search, and analysis board are foundations for that promise.
+The user cites alternatives such as En Croissant as a reason to focus on
+differentiation through learning; this brief makes no comparative feature
+claims. More database controls and more engine output are not sufficient
+product outcomes.
 
-1. What changed since I last looked?
-2. What pattern is most worth reviewing?
-3. Am I improving at it?
+The initial player is a regular Lichess user who wants to improve but does not
+know opening positions, notation, or engine variations by heart. They should
+learn by looking at and moving pieces on a board.
 
-## Target player and usage loop
+## The learning loop
 
-The initial target is a regular online player who has accumulated enough games
-that reviewing them one at a time no longer reveals the larger pattern. They
-may eventually have games from several online accounts, downloaded PGNs, and
-over-the-board events.
+1. **Ingest games.** Connect a Lichess username once. Fetch new games and
+   maintain the local library automatically. Chess.com is a future source that
+   should feed the same player history and learning loop.
+2. **Navigate and search.** Preserve the existing game browser, filters, search,
+   and replay. The user considers this broadly satisfactory; it is not the
+   next redesign priority.
+3. **Explore and understand.** Investigate openings and recurring positions,
+   and, most importantly, supported errors and repeated incorrect decisions.
+   Prepare useful findings without making the player assemble a review queue
+   and start several separate jobs.
+4. **Learn a correction.** Show a concrete position from the player's games,
+   what they played, what went wrong, and a better continuation. Let them try
+   directly on the board, with short visual feedback.
+5. **Revisit and improve.** Bring useful corrections back for practice and
+   look for recurrence in later games. Solving an exercise is practice
+   progress; fewer supported errors in later games is evidence of improvement.
 
-The intended loop is:
+The intended first journey is: enter a Lichess username, see recent games while
+analysis continues, open one useful finding, and learn from the board. The
+player should not need to understand internal analysis states to get value.
 
-1. Play wherever the player already plays.
-2. Let Gambit bring new games into one local library.
-3. Open Gambit once or twice a week and immediately see what changed.
-4. Review a small, prioritized set of games or positions.
-5. Return after playing more games to see whether the pattern improved.
+## Analysis priorities
 
-Success means that opening Gambit leads to a review decision, not merely to
-browsing a list of games.
+### Openings and patterns
 
-## Experience principles
+Show the lines the player actually reaches, their results, recurring positions,
+and where games diverge. Use board previews and readable opening names when
+available, with notation and tables on demand.
 
-- **Lead with the next useful action.** Prefer “Review four losses from this
-  line” over “This line occurred 37 times.”
-- **Show the evidence.** Every recommendation includes its sample size, result
-  breakdown, scope, and links to the games behind it.
-- **Do not overclaim.** A low-scoring opening or recurring position is a review
-  candidate, not necessarily a chess mistake. Only engine-backed analysis may
-  label inaccuracies, mistakes, or blunders.
-- **Deliver value quickly.** A new Lichess user should be able to inspect recent
-  games before a complete historical sync finishes.
-- **Keep ownership visible but quiet.** Local storage and privacy should build
-  trust without becoming the main task on every screen.
-- **Unify the player, not just the files.** The app should eventually understand
-  that several usernames and imported PGNs can describe the same person.
+A low score in an opening is a reason to investigate, not proof that the opening
+or a move is wrong. Keep performance observations separate from supported
+errors.
 
-## Intended information architecture
+### Errors: highest priority
 
-### Today
+Help the player answer:
 
-The default destination after sync. It should contain:
+- Where do I usually make consequential mistakes?
+- Do I repeatedly choose the same bad move in the same position?
+- Does a similar, supported problem occur in different games?
+- What should I notice next time, and what should I do differently?
 
-- games and results since the previous visit;
-- one evidence-backed “work on this” recommendation;
-- one positive trend worth reinforcing;
-- the next review set, sized in games and estimated minutes;
-- recent games as supporting detail rather than the main event.
+Use local Stockfish analysis as evidence behind the experience. Lead with the
+board and plain language. Evaluation numbers, depth, budgets, and principal
+variations are supporting details, not required knowledge or routine decisions.
 
-### Review
+Start with defensible recurrence: the same playable position and played choice
+across games. Broader tactical or positional themes need a validated way to
+identify them. Do not infer labels such as missed forks or weak king safety
+from a centipawn swing alone. When a theme is not established, show the concrete
+mistake and legal continuation honestly.
 
-A finite queue of games and positions selected from a recommendation. A player
-can step through the evidence, open the original game, mark an item reviewed,
-and defer it. Local engine analysis can later turn suitable positions into
-“find a better move” exercises.
+Prioritize findings using consequence, recurrence, recency, and confidence.
+Show the supporting sample and source games. A single mistake can be worth
+teaching, but must not be presented as a habit. No supported result at a bounded
+analysis budget does not mean the player made no mistakes.
 
-### Library
+## Simplify the workflow
 
-The current searchable, sortable game browser remains the dependable archive.
-It supports detailed inspection and export, but is not the primary return
-screen.
+The current experience asks the player to make selections and then push
+buttons through too many stages. v0.17.0 improved visual practice; the next
+work must simplify the journey itself.
 
-### Explore
+| Current friction | Intended experience |
+| --- | --- |
+| Choose a pattern, open a review set, start diagnosis, then enter practice | One entry into a useful lesson; the app prepares evidence |
+| Decide whether to diagnose, continue diagnosis, practice, or view a summary | One contextual action based on readiness |
+| Select a move, then press Check my move | Completing a legal board move submits the attempt |
+| Repeatedly mark reviewed, done, or next to maintain progress | Save progress automatically, with a clear continuation or exit |
+| Read coordinates and variations to understand a position | Board previews, arrows, short playback, and named-piece guidance |
+| Wait for a whole import or analysis set | Existing games stay usable; findings appear progressively |
 
-Longer-term patterns and player-controlled investigation: opening performance,
-form over time, opponents, colors, rating bands, time controls, and recurring
-positions. Explore should progressively turn frequency tables into comparisons
-and review entry points.
+Automatic submission needs an intentional gesture: piece selection alone is
+not an attempt; completing a destination by click or drop is. Promotion asks
+only for the piece choice. Prevent duplicate submissions, show evaluation
+progress, and offer clear retry/recovery. Explanation playback and exploratory
+moves must not accidentally become graded attempts. Preserve an accessible
+keyboard path.
 
-## Delivery plan
+Automatic progress must distinguish solved without help, answer revealed,
+skipped, and saved for later. Opening a lesson is not solving it. After feedback,
+let the player inspect the board at their own pace rather than immediately
+replacing it with the next exercise.
 
-### Slice 1: one pattern worth reviewing
+## UX principles
 
-Use the existing local position index to add a player-scoped focus card to
-Explore:
+- **One useful next step.** One clear primary action per learning screen;
+  secondary controls appear when relevant.
+- **Automate preparation.** Sync, bounded analysis, caching, and lesson
+  selection happen behind the workflow. Explain local analysis at setup;
+  resource controls and pause/cancel remain accessible.
+- **Teach visually.** Show the position, consequence, and correction without
+  requiring FEN, SAN, UCI, or memorized positions.
+- **Explain honestly.** Show evidence and uncertainty. A legal visual
+  continuation is preferable to an unsupported explanation of a chess concept.
+- **Preserve attention.** Background work must not switch the current game,
+  reset a move, clear feedback, or interrupt an explanation.
+- **Keep lessons small.** A short, useful lesson is better than an exhaustive
+  dashboard or a large unfinished queue.
+- **Stay free and local-first.** The learning loop should not depend on a paid
+  coaching service or uploading games to Gambit. Sync communicates directly
+  with the chosen source.
 
-- calculate wins, draws, losses, and unfinished games for common positions
-  after move two;
-- consider only lines with at least four completed games and at least one loss;
-- select the lowest-scoring common line, with deterministic tie-breaking;
-- show score, sample size, and loss count;
-- open a representative loss at the matching position;
-- hide the recommendation when no player identity is in scope or evidence is
-  insufficient.
+## Roles of the existing destinations
 
-This is deliberately described as a review candidate. It requires no engine
-and makes the current Explore data actionable.
+**Today** is the learning home: one prioritized finding, a short practice
+continuation, and later evidence of progress. Sync/analysis status is useful,
+quiet context rather than a dashboard of competing actions.
 
-### Slice 2: the return moment
+**Library** remains the searchable archive and access to source games.
+Preserve its working navigation and filters.
 
-Status: in progress. Managed libraries now open on Today, synchronize without
-blocking the existing library, and persist the latest successful check with the
-new games' player-relative record. Automatic checks are limited to one per 15
-minutes and an offline or failed check leaves that local summary intact. A
-bounded recent-first initial sync remains before this slice is complete.
+**Explore** supports player-led investigation of openings, patterns, and
+errors. Findings lead into the same learning flow as Today.
 
-- synchronize a managed library automatically on launch, without blocking use
-  of the existing database;
-- persist the latest successful sync boundary and summary per library;
-- add a Today summary for new games and player-relative results;
-- prioritize a bounded recent sync so first value does not wait for full
-  history, then backfill safely.
+**Practice/review** is the lesson experience, not an administrative queue to
+manage. Returning to the source game and leaving a lesson remain easy.
 
-### Slice 3: a real review queue
+## Starting point: v0.17.0
 
-Status: in progress. Opening recommendations now create a focused, bounded
-queue of matching losses. The game list shows exactly that set, explains its
-scope, stays aligned to the relevant position, and restores the previous
-Library state on exit. Players can mark games reviewed, defer them, or open
-them on Lichess; progress is stored per library, resumes across launches, and
-is summarized on Today. The period comparison remains.
+Available foundations include Lichess ingestion and background checks, indexed
+search, game replay, opening/recurring-position summaries, bounded local
+turning-point diagnosis, durable practice outcomes, visual move previews, and
+answer playback. See [local turning-point evidence](review-diagnosis.md) for
+the engine and cache contracts.
 
-- generate a short queue from the selected pattern;
-- preserve progress locally across launches;
-- add mark-reviewed, defer, and open-on-Lichess actions;
-- compare the recent result for that pattern with the preceding period.
+Important gaps:
 
-### Slice 4: one player across sources
+- Diagnosis is reached through selected review sets and explicit controls,
+  rather than an automatic learning pipeline over newly imported games.
+- Recommendations start from opening results; error-first lesson selection
+  is the intended priority.
+- Legal answer lines and move descriptions do not yet establish reliable
+  explanations of the underlying chess concept.
+- Current summaries group identical positions/choices within bounded sets.
+  They do not establish library-wide themes, spaced repetition, or measured
+  long-term improvement.
+- Practice still requires explicit checking and several progress actions.
 
-- store a player profile with multiple aliases;
-- associate imported sources with that profile;
-- make additional online sources additive rather than separate libraries;
-- provide source status, last sync time, and repair/reconnect actions.
+Keep legal replay, authoritative backend grading, cancellation, cache validity,
+evidence bounds, and privacy protections. Simplifying the interface should reuse
+these services rather than bypass them.
 
-### Slice 5: local chess analysis
+## Next development loop
 
-- run optional local Stockfish analysis outside the interaction thread;
-- detect critical evaluation swings across the review set;
-- cluster recurring tactical or positional failures only where the evidence
-  supports the label;
-- create private, repeatable training positions and track recurrence.
+Deliver **one simple path from the player's games to a useful lesson**.
+
+1. Walk through a fresh Lichess user and a returning user in the native app.
+   Record necessary decisions, clicks, and waiting from import to first lesson
+   as the baseline.
+2. Design the complete journey before changing individual controls: one lesson
+   entry, progressive preparation, direct board attempt, visual feedback,
+   saved progress, and a clear return path.
+3. Implement bounded automatic preparation using existing diagnosis services.
+   Define scheduling/resource budgets internally, reuse valid cache, and make
+   interruption/resumption understandable.
+4. Prefer a supported error when selecting the first lesson. Show its source
+   game and concrete correction. If none is ready, offer useful progress or
+   browsing rather than an empty training funnel.
+5. Remove redundant confirmation and queue-management steps. Verify direct
+   move submission, reveal, retry, continuation, and leaving mid-lesson.
+6. Validate the journey natively with real engine evidence and a player who
+   does not rely on notation. Technical test passes alone do not establish
+   that the learning experience works.
+
+### Acceptance criteria
+
+- After entering a Lichess username, the player need not select games, build a
+  review set, or start diagnosis manually to receive a first lesson.
+- A returning player enters an available lesson from Today with one action.
+- Games and cached lessons remain usable while background work runs.
+- Completing a legal move grades it without a separate Check action; selecting
+  a piece or playing an answer line never records an unintended attempt.
+- The original decision, supported consequence, and correction are
+  understandable on the board without notation or engine numbers.
+- Progress survives exit/relaunch; revealed or skipped work is not counted as
+  an independent solve.
+- Failed, cancelled, unsupported, insufficient-evidence, and no-result states
+  have clear recovery or alternatives without engine expertise.
+- Background results preserve the current interaction; the flow works at the
+  minimum supported window size and through keyboard input.
+
+## Later work and boundaries
+
+Once the simple lesson flow works, expand recurrence across the library,
+validate broader problem themes, add appropriate repeat practice, and compare
+later opportunities with earlier ones. Add Chess.com to the same player model
+when that source is implemented.
+
+Chess.com, a full opening repertoire, generic course content, full-game
+annotation, a theme taxonomy, and a conversational coach are not prerequisites
+for the next slice. Do not redesign satisfactory Library/search functionality
+without evidence of a learning-flow problem. This brief documents direction;
+it does not implement the new workflow or require another binary release.
 
 ## Measures of success
 
-Early product decisions should be evaluated with local, privacy-preserving
-signals where possible:
+Use representative local QA or explicitly opt-in research. These measures
+do not require uploading private games or silent telemetry.
 
-- time from first launch to the first useful recommendation;
-- percentage of sessions that start a review;
-- number of recommended games reviewed per active week;
-- return rate after a completed review;
-- percentage of recommendations with enough evidence to be trusted;
-- improvement in the selected pattern over a later comparison window.
+- Time and user decisions from first import to the first useful lesson.
+- Time and actions from returning to the app to beginning practice.
+- Whether a player can explain the problem and what to notice next time.
+- Completion and return to short lessons, distinguishing help from independent
+  solves.
+- Recurrence of supported errors in later comparable opportunities, with
+  sample size, scope, and uncertainty visible.
 
-Raw library size and number of filters used are supporting metrics, not the
-primary definition of product value.
+Library size, filters used, and completed engine jobs are operational signals.
+Product success is the player's understanding and improvement.

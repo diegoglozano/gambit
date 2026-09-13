@@ -30,6 +30,11 @@ automation, CI, and HPC workflows. See the
 [desktop guide](https://diegoglozano.github.io/gambit/docs/desktop/) for
 installation, development instructions, current scope, and privacy details.
 
+The [product direction](docs/player-experience.md) sets the next desktop
+priority: a free, automatic learning loop that turns the player's games into
+understandable errors and focused practice, with fewer setup and confirmation
+steps.
+
 ## Gambit databases
 
 Build a self-contained chess database when you want to query the same corpus
