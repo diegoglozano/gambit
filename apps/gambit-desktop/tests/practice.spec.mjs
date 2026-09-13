@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test.use({ viewport: { width: 1040, height: 700 } });
 
-test("practice teaches moves visually and keeps preview separate from attempts", async ({ page }) => {
+test("practice teaches moves visually and submits intentional board moves", async ({ page }) => {
   const assertBoardVisible = async () => {
     const board = await page.locator("#coaching-board").boundingBox();
     expect(board.y).toBeGreaterThanOrEqual(0);
@@ -38,8 +38,7 @@ test("practice teaches moves visually and keeps preview separate from attempts",
   await expect(page.locator("#coaching-board [data-square=h6]")).toHaveClass(/legal-target/);
   await page.locator("#coaching-board [data-square=h6]").click();
   await expect(page.locator("#coaching-choice")).toHaveText("Your queen from g6 to h6");
-  await expect(page.locator("#coaching-check")).toBeEnabled();
-  await page.locator("#coaching-check").click();
+
   await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
   await expect(page.locator("#game-list")).not.toContainText("NOT ANALYZED");
   await expect(page.locator("#game-list")).not.toContainText("ANALYZING");

@@ -15,15 +15,30 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   let linePly = 0;
   let pendingMove = null;
   let gesture = null;
+  let promotionChoices = [];
   let viewingPlayed = false;
 
   // Revealing an answer changes the sidebar height. Keep the pieces in view.
   function showBoard() { el("board-wrap").scrollIntoView?.({ block: "nearest" }); }
 
-  function canMove() { return !busy && !snapshot?.practice_busy && !linePly && !pendingMove && !viewingPlayed; }
+  function canMove() {
+    const practice = current()?.record?.practice;
+    const exploring = !forceHidden && (practice?.revealed || practice?.solution && practice.solution !== "unsolved");
+    return !busy && !snapshot?.practice_busy && !linePly && !pendingMove && !viewingPlayed && !promotionChoices.length && !exploring;
+  }
+
+  function submitMove(move) {
+    if (!move || busy || snapshot?.practice_busy) return;
+    pendingMove = move;
+    selected = null;
+    promotionChoices = [];
+    el("move").value = move.uci;
+    void action("attempt", move.uci);
+  }
 
   function clearMove() {
     pendingMove = null;
+    promotionChoices = [];
     viewingPlayed = false;
     selected = null;
     el("move").value = "";
@@ -41,12 +56,16 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       el("feedback").textContent = `${names[fenSquares(point.position_fen).find(square => square.name === name)?.piece.toLowerCase()] ?? "Piece"} on ${name} selected. Click a highlighted square.`;
     } else {
       const choices = options.filter(move => move.uci.startsWith(`${selected}${name}`));
-      const move = choices.find(move => move.uci.length === 4 || move.uci.endsWith(el("promotion").value));
+      const move = choices[0];
       if (!move) { el("feedback").textContent = "That destination is not legal. Choose a highlighted square."; return; }
-      pendingMove = move;
-      selected = null;
-      el("move").value = move.uci;
-      el("feedback").textContent = "Your move is on the board. Check move to evaluate it, or Undo move to choose another.";
+      if (move.uci.length === 5) {
+        promotionChoices = choices;
+        selected = null;
+        el("promotion").value = "";
+        el("feedback").textContent = "Choose the piece to promote your pawn to. This submits your move.";
+        render();
+        el("promotion").focus();
+      } else submitMove(move);
     }
     render();
     showBoard();
@@ -113,7 +132,10 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       if (kind === "replay") { forceHidden = true; linePly = 0; clearMove(); el("feedback").textContent = "Choose a move from the starting exercise position."; }
       if (kind === "done") onDone();
       if (kind === "later") onLater();
-    } catch (error) { el("feedback").textContent = String(error); }
+    } catch (error) {
+      if (kind === "attempt") clearMove();
+      el("feedback").textContent = `${error}${kind === "attempt" ? " Your attempt was not saved. Play your move again to retry." : ""}`;
+    }
     finally { busy = false; render(); if (context()?.gameId === id && ["attempt", "reveal", "replay"].includes(kind)) showBoard(); }
   }
 
@@ -238,28 +260,29 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       : "";
     el("done").hidden = !game?.record;
     el("done").disabled = busy || snapshot?.practice_busy || Boolean(point && !practice.revealed && !solved);
+    el("done").textContent = "Continue →";
     el("later").hidden = !point;
     el("later").disabled = busy || snapshot?.practice_busy;
     el("replay").hidden = !point || (!practice.revealed && !solved);
     for (const name of ["check", "reveal", "replay"]) el(name).disabled = busy || snapshot?.practice_busy;
     el("check").disabled ||= linePly > 0 || viewingPlayed || !el("move").value;
     el("move").disabled = busy || snapshot?.practice_busy || linePly > 0 || viewingPlayed;
-    const promoting = Boolean(pendingMove?.uci.length === 5 || (selected && game?.move_options?.some(move => move.uci.startsWith(selected) && move.uci.length === 5)));
+    const promoting = promotionChoices.length > 0;
     el("promotion").hidden = !promoting;
     el("promotion-label").hidden = !promoting;
-    el("reset").disabled = busy || snapshot?.practice_busy || (!pendingMove && !selected && !linePly && !viewingPlayed && !el("move").value);
+    el("reset").disabled = busy || snapshot?.practice_busy || (!promotionChoices.length && !pendingMove && !selected && !linePly && !viewingPlayed && !el("move").value);
     el("reset").textContent = linePly || viewingPlayed ? "Return to exercise" : "Undo move";
     const moveDescription = point && describeMove(point.position_fen, pendingMove?.uci);
     el("choice").textContent = viewingPlayed ? "Watching your move from the game" : linePly ? "Watching a better continuation" : pendingMove ? `Your ${moveDescription}` : "Choose your move on the board";
     el("choice").classList.toggle("is-chosen", Boolean(pendingMove));
     el("task").textContent = shown ? "Explore a better move" : "Find a better move";
-    el("guide").textContent = viewingPlayed ? "This is the move you made in the game. Return to your turn to try a different idea." : linePly ? "Watch the pieces move through the answer. Return to the starting position to try your own idea." : pendingMove ? "Check your move, or undo it to try a different idea."
-      : "Click one of your pieces to see where it can go. Then click a highlighted square. You can also drag pieces.";
+    el("guide").textContent = viewingPlayed ? "This is the move you made in the game. Return to your turn to try a different idea." : linePly ? "Watch the pieces move through the answer. Return to the starting position to try your own idea." : busy ? "Checking your move privately. Your progress saves automatically." : shown ? "Take your time to compare the moves. Continue when you are ready." : promoting ? "Choose your promotion piece to submit the move."
+      : "Click a piece, then a highlighted square, or drag it there. Completing your move checks it automatically.";
     el("move-status").textContent = viewingPlayed ? "Your move from the game. Return to your turn to try a different move."
       : linePly ? "Following the answer. Use the arrows to watch each move on the board."
-      : pendingMove ? `Your ${moveDescription}. Ready to check.`
+      : busy ? "Checking your move…" : pendingMove ? `Your ${moveDescription}. Progress saved.`
       : selected ? "The dots show legal destinations for your selected piece."
-      : "Choose a piece → choose a highlighted square → check your move";
+      : "Choose a piece → play your move. It checks automatically.";
     if (point) {
       const black = point.position_fen.split(" ")[1] === "b";
       el("side").classList.toggle("black", black);
@@ -333,9 +356,8 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     selected = null; render();
   });
   el("promotion").addEventListener("change", () => {
-    if (pendingMove?.uci.length !== 5) return;
-    pendingMove = current()?.move_options?.find(move => move.uci === pendingMove.uci.slice(0, 4) + el("promotion").value) ?? pendingMove;
-    el("move").value = pendingMove.uci; render();
+    const move = promotionChoices.find(move => move.uci.endsWith(el("promotion").value));
+    if (move && el("promotion").value) submitMove(move);
   });
 
   el("analyze").addEventListener("click", () => start(true));
@@ -346,12 +368,18 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   });
   el("form").addEventListener("submit", (event) => {
     event.preventDefault();
-    if (linePly || viewingPlayed) return;
+    if (linePly || viewingPlayed || busy || snapshot?.practice_busy || promotionChoices.length
+      || (!forceHidden && (current()?.record?.practice.revealed || current()?.record?.practice.solution !== "unsolved"))) return;
     const move = el("move").value.trim().toLowerCase();
     if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)) { el("feedback").textContent = "Choose a piece and destination on the board, or enter coordinates such as e2e4."; return; }
     void action("attempt", move);
   });
-  for (const name of ["reveal", "done", "later", "replay"]) el(name).addEventListener("click", () => action(name));
+  el("done").addEventListener("click", () => {
+    if (busy || snapshot?.practice_busy) return;
+    if (current()?.record?.practice.disposition === "completed") onDone();
+    else void action("done");
+  });
+  for (const name of ["reveal", "later", "replay"]) el(name).addEventListener("click", () => action(name));
   for (const [name, delta] of [["start", 0], ["previous", -1], ["next", 1]]) {
     el(`line-${name}`).addEventListener("click", () => {
       clearMove();

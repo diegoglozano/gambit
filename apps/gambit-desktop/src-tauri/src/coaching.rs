@@ -481,7 +481,10 @@ fn practice_action(
     }
     store
         .update_practice(&record.key, |progress| match action {
-            PracticeAction::Reveal => progress.revealed = true,
+            PracticeAction::Reveal => {
+                progress.revealed = true;
+                progress.disposition = PracticeDisposition::Completed;
+            }
             PracticeAction::Done => progress.disposition = PracticeDisposition::Completed,
             PracticeAction::Later => progress.disposition = PracticeDisposition::AgainLater,
             PracticeAction::Replay => progress.disposition = PracticeDisposition::Active,
@@ -1071,6 +1074,16 @@ mod tests {
                 .practice
                 .solution,
             gambit_coaching::SolutionStatus::WithoutReveal
+        );
+        // A verified solve is already durable before any Continue/Done action.
+        assert_eq!(
+            practiced.games[0]
+                .record
+                .as_ref()
+                .unwrap()
+                .practice
+                .disposition,
+            PracticeDisposition::Completed
         );
         let done = service
             .practice(
