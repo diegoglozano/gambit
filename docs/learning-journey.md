@@ -66,4 +66,6 @@ check. A supported lesson was available by the 84-second check while the full
 initial import was still running. One Learn this move action opened the lesson
 on the player's side at 1040 × 700; no queue or diagnosis decisions were needed.
 These are observed upper bounds from one local run, not benchmark averages or
-participant results. Library replay remained usable during import.
+participant results. Library replay remained usable during import. The full history completed with
+1,798 indexed games while the Black-side lesson remained open at the same
+position, with its feedback and controls intact.
