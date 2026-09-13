@@ -62,7 +62,7 @@
               <div>
                 <span class="eyebrow">Recommended</span>
                 <h2>Sync from Lichess</h2>
-                <p>Enter a public username. Later syncs fetch only what changed.</p>
+                <p>Enter a public username. Gambit syncs your games and prepares small lessons with Stockfish privately on this Mac. You can pause local analysis and keep browsing.</p>
               </div>
               <label>
                 Lichess username
@@ -117,6 +117,10 @@
             <button class="sync-button" id="today-sync" type="button">↻ Sync now</button>
           </header>
 
+          <details class="learning-controls"><summary>Local analysis and sync</summary>
+            <p>Gambit prepares a few games privately with Stockfish: one engine thread and short, bounded passes. Games and saved lessons stay available.</p>
+            <button id="learning-pause" type="button" hidden>Pause preparation</button>
+            <button id="learning-resume" type="button" hidden>Resume preparation</button>
           <article class="today-sync-card" aria-live="polite">
             <div>
               <span class="eyebrow">Latest check</span>
@@ -130,6 +134,7 @@
               <div><strong id="today-total-games">—</strong><span>total games</span></div>
             </div>
           </article>
+          </details>
 
           <article class="today-focus-card" id="today-focus" hidden>
             <div class="today-focus-board" id="today-focus-board" aria-hidden="true"></div>
@@ -140,7 +145,7 @@
               <p class="today-review-progress" id="today-review-progress" hidden>—</p>
               <button id="today-review-focus" type="button">Review a loss →</button>
             </div>
-            <div class="today-focus-score">
+            <div class="today-focus-score" id="today-focus-score">
               <strong id="today-focus-score">—</strong>
               <span>player score</span>
             </div>
@@ -162,10 +167,10 @@
 
           <div class="review-bar" id="review-bar" hidden>
             <div class="review-copy">
-              <span class="eyebrow">Review set</span>
+              <span class="eyebrow" id="review-kind">Review set</span>
               <strong id="review-title">Recurring opening losses</strong>
               <div class="review-scope" aria-label="Review scope">
-                <span>Losses</span>
+                <span id="review-result">Losses</span>
                 <span id="review-position">Opening position</span>
                 <span id="review-size">Latest 1 of 1</span>
               </div>

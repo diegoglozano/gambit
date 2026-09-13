@@ -229,8 +229,9 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     const point = game?.record?.diagnosis.outcome.kind === "turning_point" ? game.record.diagnosis.outcome.evidence : null;
     onExerciseChange(Boolean(point) && !ctx.complete);
     el("panel").classList.toggle("has-exercise", Boolean(point));
+    el("panel").classList.toggle("lesson", Boolean(ctx.lesson));
     if (point && !running) el("progress").textContent = "Practice this turning point";
-    el("analyze").hidden = Boolean(matches && snapshot.games.every(game => game.status === "ready"));
+    el("analyze").hidden = Boolean(point && ctx.lesson || matches && snapshot.games.every(game => game.status === "ready"));
     const practice = game?.record?.practice;
     const solved = practice && practice.solution !== "unsolved";
     const shown = point && !forceHidden && (practice.revealed || solved);
@@ -389,6 +390,9 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     });
   }
   return { receive, load, render,
+    nextExercise: (id) => sameQueue(snapshot, context()) ? snapshot.games.find(game => game.id !== id
+      && game.record?.diagnosis.outcome.kind === "turning_point"
+      && game.record.practice.disposition === "active" && game.record.practice.solution === "unsolved" && !game.record.practice.revealed)?.id ?? null : null,
     defer: () => { if (!current()?.record) return false; void action("later"); return true; },
     summary: () => sameQueue(snapshot, context()) ? summaryText(snapshot, context()?.deferredIds) : null };
 }

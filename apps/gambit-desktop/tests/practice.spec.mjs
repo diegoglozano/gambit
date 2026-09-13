@@ -15,8 +15,8 @@ test("practice teaches moves visually and submits intentional board moves", asyn
   await page.goto("/");
   await page.locator("#username").fill("demo");
   await page.locator("#sync-form button[type=submit]").click();
+  await expect(page.locator("#today-review-focus")).toHaveText("Learn this move →");
   await page.locator("#today-review-focus").click();
-  await page.locator("#coaching-analyze").click();
   await expect(page.locator("#coaching-board button")).toHaveCount(64);
   await expect(page.locator("#coaching-turn-label")).toHaveText("You play White");
   await expect(page.locator("#coaching-arrow")).toBeHidden();
@@ -40,8 +40,8 @@ test("practice teaches moves visually and submits intentional board moves", asyn
   await expect(page.locator("#coaching-choice")).toHaveText("Your queen from g6 to h6");
 
   await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
-  await expect(page.locator("#game-list")).not.toContainText("NOT ANALYZED");
-  await expect(page.locator("#game-list")).not.toContainText("ANALYZING");
+  await expect(page.locator(".games-panel")).toBeHidden();
+  await expect(page.locator("#previous-review")).toBeHidden();
   await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
   await expect(page.locator("#coaching-solution")).toBeVisible();
   await assertBoardVisible();

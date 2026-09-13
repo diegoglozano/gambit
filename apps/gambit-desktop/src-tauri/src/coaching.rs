@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gambit_coaching::{
     CacheEntry, CacheKey, CacheStore, DEFAULT_NODES, EngineIdentity, EngineSession, EngineWorker,
@@ -610,7 +610,13 @@ fn analyze_pending(
             .begin_analysis(key)
             .map_err(|_| "analysis could not be marked resumable; no search was started")?;
     }
+    // Bound a pass, rather than silently recording truncated games as no-result.
+    // Finished records remain reusable; the interrupted game retains its marker.
+    let deadline = Instant::now() + Duration::from_secs(180);
     for (index, game, key) in pending {
+        if Instant::now() >= deadline {
+            session.cancel();
+        }
         if session.cancellation().is_cancelled() {
             break;
         }
@@ -623,7 +629,21 @@ fn analyze_pending(
             DEFAULT_NODES,
             session.cancellation(),
             |position| {
-                session.analyze(executable, position, DEFAULT_NODES, Duration::from_secs(30))
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    session.cancel();
+                    return Err(gambit_engine::Error::Cancelled);
+                }
+                let result = session.analyze(
+                    executable,
+                    position,
+                    DEFAULT_NODES,
+                    remaining.min(Duration::from_secs(30)),
+                );
+                if Instant::now() >= deadline {
+                    session.cancel();
+                }
+                result
             },
         );
         if session.cancellation().is_cancelled() {
@@ -651,6 +671,11 @@ fn analyze_pending(
                 "local analysis failed for this game; retry is available",
             ),
         }
+    }
+    if Instant::now() >= deadline {
+        update(state, publish, |s| {
+            s.message = Some("Preparation paused after a short local analysis pass. Resume to continue from saved games.".into());
+        });
     }
     Ok(())
 }

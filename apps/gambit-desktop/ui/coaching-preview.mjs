@@ -16,6 +16,13 @@ function summary() {
     no_clear_turning_point: ready.length - points.length, repeated_positions: [], move_range: points.length ? [1, 1] : null };
 }
 export async function mockCoaching(command, args) {
+  if (command === "coaching_overview") {
+    const request = args.request;
+    const records = saved?.path === request.expected_path && saved.shared_ply === request.shared_ply ? saved.games : [];
+    return { path: request.expected_path, player: request.player, shared_ply: request.shared_ply,
+      generation: 0, revision: 0, running: false, cancelled: Boolean(saved?.cancelled),
+      games: request.game_ids.map(id => structuredClone(records.find(game => game.id === id) ?? { id, status: "unseen", record: null })) };
+  }
   if (command === "start_coaching") {
     const request = args.request;
     const records = saved?.path === request.expected_path ? saved.games : [];

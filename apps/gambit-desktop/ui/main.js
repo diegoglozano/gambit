@@ -16,6 +16,7 @@ import {
 } from "./view-model.mjs";
 import { coachingUI } from "./coaching-ui.mjs";
 import { recommendationLabel, reconcileCoachingProgress, summaryText, sameQueue, queueGameState, queueStateLabel, practiceEntryGameId } from "./coaching-model.mjs";
+import { learningFlow, lessonFinding, lessonBoard } from "./learning-model.mjs";
 import { mockCoaching } from "./coaching-preview.mjs";
 
 const nativeInvoke = window.__TAURI__?.core?.invoke;
@@ -58,14 +59,16 @@ const reviewRequests = createRequestGate();
 const FILTER_DEBOUNCE_MS = 250;
 let filterTimer = null;
 let reviewSaveQueue = Promise.resolve();
+const learning = learningFlow({ invoke, blocked: () => Boolean(state.review), onUpdate: renderLearningHome });
 const coaching = coachingUI({ invoke,
   context: () => state.review ? { path: state.session.path, player: state.review.player,
     ply: state.review.ply, gameIds: state.review.gameIds, gameId: state.review.gameIds[state.review.index],
-    complete: state.review.complete, deferredIds: [...state.review.deferredGameIds] } : null,
+    lesson: state.review.lesson, complete: state.review.complete, deferredIds: [...state.review.deferredGameIds] } : null,
   onPracticeInteraction: () => { if (state.review) state.review.practiceEntryPending = false; },
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
   onExerciseChange: (practicing) => element("library-layout").classList.toggle("practice-mode", practicing),
   onUpdate: (snapshot) => {
+    learning.receive(snapshot);
     if (!state.review) return;
     state.review.coachingStates = new Map(snapshot.games.map(game => [game.id, queueGameState(game)]));
     if (state.review.practiceEntryPending && !snapshot.running) {
@@ -153,7 +156,10 @@ element("next-review").addEventListener("click", () => moveReview(1));
 element("mark-reviewed").addEventListener("click", markReviewGame);
 element("defer-review").addEventListener("click", () => { if (!coaching.defer()) void deferReviewGame(); });
 element("review-on-lichess").addEventListener("click", openCurrentGameOnLichess);
-element("finish-review").addEventListener("click", () => { void persistReviewProgress(); showReviewCompletion(); });
+element("finish-review").addEventListener("click", () => {
+  if (state.review?.lesson) finishReview(false);
+  else { void persistReviewProgress(); showReviewCompletion(); }
+});
 element("complete-review").addEventListener("click", completeReview);
 element("resume-review").addEventListener("click", () => {
   if (!state.review) return;
@@ -283,9 +289,10 @@ async function autoSyncManagedLibrary() {
     renderDatabaseInfo(result.session.info);
     renderTodaySync(result.report);
     if (!state.review) {
+      void learning.prepare({ path: expectedPath, player: state.managedUser }, { refresh: true });
       if (state.currentView === "today") await loadToday();
       else if (state.currentView === "explore") await loadExplore();
-      else await loadPage(0);
+      else await loadPage(state.session.page.offset, { preserveInteraction: true });
     }
     if (result.report.created || result.report.updated) showToast(syncToast(result.report));
   } catch (error) {
@@ -376,6 +383,7 @@ async function showSession(session, options = {}) {
   detailRequests.invalidate();
   exploreRequests.invalidate();
   reviewRequests.invalidate();
+  learning.reset();
   state.session = session;
   state.player = player;
   state.filters = player ? { player } : {};
@@ -406,6 +414,7 @@ async function showSession(session, options = {}) {
   renderReviewMode();
   renderTodaySync(state.syncReport);
   showView(options.view ?? (player ? "today" : "library"));
+  if (player) void learning.prepare({ path: session.path, player });
   if (session.page.games.length) await selectGame(session.page.games[0].id);
 }
 
@@ -426,7 +435,9 @@ async function loadPage(offset, options = {}) {
     state.session.page = page;
     renderPage(page);
     setFilterStatus(`${gameCount(page.total)} matching`);
-    if (selectedId !== null && page.games.some((game) => game.id === selectedId)) {
+    if (options.preserveInteraction && state.detail) {
+      markSelectedGame(selectedId);
+    } else if (selectedId !== null && page.games.some((game) => game.id === selectedId)) {
       markSelectedGame(selectedId);
       state.boardFlipped = perspectivePlayerIsBlack(state.player, state.managedUser, state.detail?.summary.black);
       setPly(state.ply, false);
@@ -837,43 +848,66 @@ function showView(view) {
 
 async function loadToday() {
   if (!state.session || !state.managedUser) return;
-  element("today-title").textContent = `Welcome back, ${state.managedUser}`;
-  element("today-subtitle").textContent = "See what changed, then review one pattern from your games.";
+  element("today-title").textContent = `Learn from your games, ${state.managedUser}`;
+  element("today-subtitle").textContent = "One small correction to notice next time you play.";
   if (state.syncRunning && !state.syncReport) renderTodaySyncPending("Checking Lichess for new games…");
   else renderTodaySync(state.syncReport);
+  await learning.prepare({ path: state.session.path, player: state.managedUser });
+}
 
-  const player = state.managedUser;
-  if (state.explore && state.explorePlayer?.toLowerCase() === player.toLowerCase()) {
-    renderTodayFocus(selectFocusOpening(state.explore.openings));
-    return;
+function renderLearningHome(plan) {
+  if (!plan || plan.path !== state.session?.path) return;
+  const finding = lessonFinding(plan.snapshot, plan.games);
+  const running = plan.loading || plan.snapshot?.running;
+  element("today-focus").hidden = false;
+  element("today-focus-score").hidden = true;
+  element("today-focus-board").hidden = !finding;
+  const button = element("today-review-focus");
+  button.disabled = false;
+  element("today-review-progress").hidden = false;
+  const ready = plan.snapshot?.games.filter(game => game.record?.diagnosis.outcome.kind === "turning_point").length ?? 0;
+  const analyzed = plan.snapshot?.games.filter(game => game.record).length ?? 0;
+  element("today-review-progress").textContent = plan.error ?? (plan.snapshot?.message || (running
+    ? `Preparing lessons privately · ${analyzed} of ${plan.games.length || "a few"} games checked. You can keep browsing.`
+    : plan.paused ? "Preparation paused. Saved lessons and games are available."
+    : `${analyzed} games checked · ${ready} supported ${ready === 1 ? "mistake" : "mistakes"}. This is a small sample of your history.`));
+  if (finding) {
+    const { source, point, supportingIds, revisit } = finding;
+    element("today-focus-board").replaceChildren(renderMiniBoard(lessonBoard(point.position_fen)));
+    element("today-focus-title").textContent = revisit ? "Revisit a correction" : "A move worth learning from";
+    const opponent = source?.white?.toLowerCase() === plan.player.toLowerCase() ? source?.black : source?.white;
+    element("today-focus-description").textContent = `Your game${opponent ? ` against ${opponent}` : ""}${source?.date ? ` · ${source.date.replaceAll(".", "-")}` : ""}. ${supportingIds.length > 1
+      ? `The same position and choice appeared in ${supportingIds.length} of these games.`
+      : "One supported mistake, with a better legal continuation to try."}`;
+    button.textContent = revisit ? "Revisit lesson →" : "Learn this move →";
+    button.onclick = () => void enterLesson(finding);
+  } else {
+    element("today-focus-title").textContent = running ? "Finding a useful first lesson" : plan.paused || plan.error ? "Your games are ready to explore" : "Keep exploring your games";
+    element("today-focus-description").textContent = running
+      ? "Stockfish is checking a few recent decisions on this Mac. A lesson appears as soon as there is supported evidence."
+      : !plan.games.length ? "There are no completed games to prepare yet. Your library stays available; new games can become lessons after the next sync."
+      : "This short pass has no supported lesson ready. That does not mean every move was good. Explore a game or resume preparation when available.";
+    button.textContent = "Browse my games →";
+    button.onclick = () => navigateToView("library");
   }
-  const request = exploreRequests.next();
-  element("today-focus").hidden = true;
+  element("learning-pause").hidden = !plan.snapshot?.running;
+  element("learning-resume").hidden = Boolean(running || !plan.paused && !plan.error && !plan.snapshot?.games.some(game => ["failed", "unseen"].includes(game.status)));
+}
+
+async function enterLesson(finding) {
+  const plan = learning.current();
+  if (!plan || state.review) return;
   try {
-    const report = await invoke("explore_database", { player });
-    if (!exploreRequests.isCurrent(request)) return;
-    state.explore = report;
-    state.explorePlayer = player;
-    renderTodayFocus(selectFocusOpening(report.openings));
-  } catch (error) {
-    if (exploreRequests.isCurrent(request)) showToast(`Could not load your review pattern: ${error}`, true);
-  }
+    if (plan.snapshot?.running) await learning.pause();
+    await startReview({ line: "Your games", ply: 0, review_game_ids: plan.games.map(game => game.id),
+      game_id: finding.game.id, losses: plan.games.length }, plan.player, { lesson: true, gameId: finding.game.id });
+  } catch (error) { showToast(String(error), true); }
 }
 
-function renderTodayFocus(opening) {
-  const card = element("today-focus");
-  card.hidden = !opening;
-  if (!opening) return;
-  const board = renderMiniBoard(opening.board);
-  element("today-focus-board").replaceChildren(board);
-  element("today-focus-title").textContent = "Practice an opening from your games";
-  element("today-focus-description").textContent = `${opening.losses} ${opening.losses === 1 ? "loss" : "losses"} in ${opening.completed} completed games. Review the evidence before deciding what to change.`;
-  element("today-focus-score").textContent = `${opening.score}%`;
-  element("today-review-progress").hidden = true;
-  element("today-review-focus").textContent = recommendationLabel(null, opening.review_game_ids?.length || 1);
-  void loadRecommendationProgress(opening, state.managedUser, "today-review-focus", "today-review-progress");
-  element("today-review-focus").onclick = () => startReview(opening, state.managedUser);
-}
+element("learning-pause").addEventListener("click", () => void learning.pause().catch(error => showToast(String(error), true)));
+element("learning-resume").addEventListener("click", () => {
+  if (state.session && state.managedUser) void learning.prepare({ path: state.session.path, player: state.managedUser }, { resume: true });
+});
 
 async function loadExplore() {
   if (!state.session) return;
@@ -1064,8 +1098,11 @@ async function openExplorePosition(position) {
   setPly(position.ply);
 }
 
-async function startReview(opening, player = state.player ?? state.managedUser) {
-  const progress = prepareReviewProgress(opening, state.reviewProgress, player);
+async function startReview(opening, player = state.player ?? state.managedUser, options = {}) {
+  const progress = options.lesson ? {
+    pattern: `lessons:${player.toLowerCase()}`, title: "Learn from your games", game_ids: opening.review_game_ids,
+    reviewed_game_ids: [], deferred_game_ids: [], current_game_id: options.gameId, ply: 0, matching_losses: opening.review_game_ids.length,
+  } : prepareReviewProgress(opening, state.reviewProgress, player);
   const gameIds = progress.game_ids;
   window.clearTimeout(filterTimer);
   filterTimer = null;
@@ -1073,6 +1110,7 @@ async function startReview(opening, player = state.player ?? state.managedUser) 
   detailRequests.invalidate();
   const request = reviewRequests.next();
   const review = {
+    lesson: Boolean(options.lesson),
     player,
     gameIds,
     index: Math.max(0, gameIds.indexOf(progress.current_game_id)),
@@ -1084,7 +1122,7 @@ async function startReview(opening, player = state.player ?? state.managedUser) 
     deferredGameIds: new Set(progress.deferred_game_ids),
     details: new Map(),
     coachingStates: new Map(),
-    practiceEntryPending: true,
+    practiceEntryPending: !options.lesson,
     complete: false,
     previous: {
       filters: { ...state.filters },
@@ -1160,7 +1198,11 @@ function renderReviewBar() {
   const total = state.review.gameIds.length;
   const currentId = state.review.gameIds[state.review.index];
   const reviewed = state.review.reviewedGameIds.size;
-  element("review-title").textContent = "Opening practice";
+  element("review-title").textContent = state.review.lesson ? "A correction from your game" : "Opening practice";
+  for (const id of ["previous-review", "next-review", "defer-review"]) element(id).hidden = state.review.lesson;
+  element("review-size").hidden = state.review.lesson;
+  element("review-position").hidden = state.review.lesson;
+  element("review-progress").hidden = state.review.lesson;
   element("review-position").textContent = `From move ${Math.floor(state.review.ply / 2) + 1}`;
   element("review-size").textContent = `Latest ${total.toLocaleString()} of ${state.review.matchingLosses.toLocaleString()} matching`;
   element("review-progress").textContent = `${reviewed} of ${total} completed · ${state.review.deferredGameIds.size} for later · game ${current}`;
@@ -1210,7 +1252,12 @@ async function completeReviewAction(id, action, rollback) {
   }
   if (state.review !== review) return;
   renderReviewPage(reviewSummaries(review.gameIds, [...review.details.values()]));
-  const nextId = nextReviewGameId(reviewProgressSnapshot(), id);
+  const nextId = review.lesson ? coaching.nextExercise(id) : nextReviewGameId(reviewProgressSnapshot(), id);
+  if (nextId === null && review.lesson) {
+    finishReview(false, "today");
+    showToast("Lesson progress saved. Come back when you are ready.");
+    return;
+  }
   if (nextId === null) {
     showReviewCompletion();
     return;
@@ -1320,9 +1367,12 @@ function renderReviewMode() {
   element("review-bar").hidden = !reviewing || complete;
   element("review-complete").hidden = !complete;
   element("library-layout").hidden = complete;
-  element("workspace-eyebrow").textContent = reviewing ? "Review" : "Library";
+  element("library-layout").classList.toggle("lesson-mode", Boolean(state.review?.lesson));
+  element("review-kind").textContent = state.review?.lesson ? "Lesson" : "Review set";
+  element("review-result").hidden = Boolean(state.review?.lesson);
+  element("workspace-eyebrow").textContent = reviewing ? state.review.lesson ? "Lesson" : "Review" : "Library";
   element("library-title").textContent = reviewing
-    ? complete ? "Review session" : "Review opening losses"
+    ? state.review.lesson ? "Learn from your games" : complete ? "Review session" : "Review opening losses"
     : state.managedUser ? `${state.managedUser}'s games` : "Your games";
   element("workspace-actions").hidden = reviewing;
   element("query-panel").hidden = reviewing;
@@ -1437,6 +1487,7 @@ async function initializeNativeApp() {
     try {
       await nativeListen("sync-progress", (event) => updateSyncProgress(event.payload));
       await nativeListen("coaching-progress", (event) => {
+        learning.receive(event.payload);
         coaching.receive(event.payload);
         if (state.session?.path !== event.payload.path) return;
         for (const [buttonId, request] of recommendationRequests) {
@@ -1466,6 +1517,7 @@ async function initializeNativeApp() {
 async function mockInvoke(command, args = {}) {
   if (["start_coaching", "coaching_status", "coaching_overview", "cancel_coaching", "coaching_practice"].includes(command)) return mockCoaching(command, args);
   await new Promise((resolve) => setTimeout(resolve, command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user" ? 650 : 80));
+  if (command === "lesson_games") return mockSession().page.games;
   if (command === "app_version") return "Preview";
   if (command === "check_for_update") {
     return { current_version: "0.17.0", version: "0.18.0", notes: "A faster, friendlier Gambit is ready." };

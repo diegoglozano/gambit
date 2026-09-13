@@ -6,7 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use gambit::collection::{self, SyncReport, SyncRequest};
 use gambit::index::{
-    self, DatabaseInfo, ExploreReport, GameDetail, GameOrder, GamePage, GameSort, SortDirection,
+    self, DatabaseInfo, ExploreReport, GameDetail, GameOrder, GamePage, GameSort, GameSummary,
+    SortDirection,
 };
 use gambit::query::{self, PlayerColor, QueryFormat, QueryOptions, ResultFilter};
 use gambit::sync::PlayerResultCounts;
@@ -64,6 +65,87 @@ fn coaching_status(state: State<'_, AppState>) -> Result<Option<coaching::Snapsh
         .lock()
         .map_err(|_| "analysis state is unavailable")?
         .snapshot()
+}
+
+/// A bounded, player-scoped preparation sample independent of opening results.
+#[tauri::command]
+async fn lesson_games(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    expected_path: PathBuf,
+    player: String,
+) -> Result<Vec<GameSummary>, String> {
+    if database(&state)? != expected_path {
+        return Err("the active library has changed".into());
+    }
+    if player.trim().is_empty() || player.len() > 256 {
+        return Err("choose a player to prepare lessons".into());
+    }
+    // Keep up to three unfinished lessons from the last entered cohort usable
+    // when new games arrive. Cached practice remains authoritative in the UI.
+    let retained = known_library(&app, &expected_path)?
+        .and_then(|library| library.review_progress)
+        .filter(|progress| progress.pattern == format!("lessons:{}", player.trim().to_lowercase()))
+        .map_or_else(Vec::new, |progress| {
+            progress
+                .game_ids
+                .into_iter()
+                .filter(|id| !progress.reviewed_game_ids.contains(id))
+                .take(3)
+                .collect()
+        });
+    tauri::async_runtime::spawn_blocking(move || {
+        select_lesson_games(&expected_path, &player, &retained)
+    })
+    .await
+    .map_err(|_| "lesson preparation could not be loaded")?
+}
+
+fn select_lesson_games(
+    path: &Path,
+    player: &str,
+    retained: &[i64],
+) -> Result<Vec<GameSummary>, String> {
+    let options = QueryOptions {
+        player: Some(player.trim().into()),
+        ..QueryOptions::default()
+    };
+    let page = index::search_games_ordered(path, &options, 0, 24, GameOrder::default())
+        .map_err(|_| "your recent games could not be read")?;
+    let mut games = Vec::new();
+    for &id in retained.iter().take(3) {
+        if let Ok(detail) = index::game(path, id) {
+            let summary = detail.summary;
+            let belongs = [&summary.white, &summary.black].iter().any(|name| {
+                name.as_ref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(player.trim()))
+            });
+            if belongs
+                && matches!(
+                    summary.result.as_deref(),
+                    Some("white_win" | "black_win" | "draw")
+                )
+                && !games.iter().any(|game: &GameSummary| game.id == id)
+            {
+                games.push(summary);
+            }
+        }
+    }
+    for game in page.games {
+        if games.len() == 6 {
+            break;
+        }
+        if game.mainline_plies > 0
+            && matches!(
+                game.result.as_deref(),
+                Some("white_win" | "black_win" | "draw")
+            )
+            && !games.iter().any(|saved| saved.id == game.id)
+        {
+            games.push(game);
+        }
+    }
+    Ok(games)
 }
 
 #[tauri::command]
@@ -1227,6 +1309,7 @@ pub fn run() {
             start_coaching,
             coaching_status,
             coaching_overview,
+            lesson_games,
             cancel_coaching,
             coaching_practice,
             open_game_url,
@@ -1263,6 +1346,45 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lesson_sample_is_recent_bounded_and_player_scoped_with_retained_work() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lessons.gambit");
+        let mut builder = index::Builder::create(&path).unwrap();
+        for day in 1..=8 {
+            let pgn = format!(
+                "[White \"A\"]\n[Black \"B\"]\n[Date \"2026.09.{day:02}\"]\n[Result \"1-0\"]\n1.e4 e5 1-0"
+            );
+            builder.add(pgn.as_bytes(), &format!("{day}.pgn")).unwrap();
+        }
+        builder
+            .add(
+                &b"[White \"Other\"]\n[Black \"B\"]\n[Date \"2026.09.10\"]\n1.e4 e5 0-1"[..],
+                "other.pgn",
+            )
+            .unwrap();
+        builder
+            .add(
+                &b"[White \"A\"]\n[Black \"B\"]\n[Date \"2026.09.11\"]\n1.e4 *"[..],
+                "unfinished.pgn",
+            )
+            .unwrap();
+        builder.finish().unwrap();
+        let sample = select_lesson_games(&path, "a", &[]).unwrap();
+        assert_eq!(sample.len(), 6);
+        assert_eq!(sample[0].date.as_deref(), Some("2026.09.08"));
+        assert!(
+            sample
+                .iter()
+                .all(|game| game.result.as_deref() == Some("white_win"))
+        );
+        let retained = select_lesson_games(&path, "A", &[1, 1, 9]).unwrap();
+        assert_eq!(retained.len(), 6);
+        assert_eq!(retained[0].id, 1);
+        assert_eq!(retained.iter().filter(|game| game.id == 1).count(), 1);
+        assert!(!retained.iter().any(|game| game.id == 9));
+    }
 
     #[test]
     fn validates_lichess_usernames_before_creating_paths() {
