@@ -78,6 +78,7 @@ jobs:
           node --test apps/gambit-desktop/ui/view-model.test.mjs
           node --test apps/gambit-desktop/ui/coaching-model.test.mjs
           node --test apps/gambit-desktop/ui/coaching-ui.test.mjs
+          node --test apps/gambit-desktop/ui/learning-model.test.mjs
       - name: Install browser test dependencies
         working-directory: apps/gambit-desktop
         run: |

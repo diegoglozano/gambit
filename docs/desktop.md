@@ -54,15 +54,37 @@ cards open a representative game at the relevant ply.
 The longer-term player workflow and the evidence rules for recommendations are
 described in [Player experience direction](player-experience.md).
 
-Managed Lichess libraries open on **Today**. The existing local database is
-available immediately while Gambit checks Lichess in the background. Automatic
-checks run no more than once every 15 minutes; **Sync now** always checks
-explicitly with full progress. Today shows how many games were added or
-refreshed by the latest successful check, when it ran, the new games'
-player-relative record, the current library size, and the player-scoped opening
-review candidate. That summary survives relaunches. A failed background check
-does not prevent the local library or its previous successful summary from
-being used.
+Managed Lichess libraries open on **Today**, the learning home. Gambit prepares
+up to six completed games from the latest 24 player games, independently of
+opening results, keeping up to three unfinished lessons from the last entered
+sample when available. Valid cached evidence loads before new engine searches.
+Each local pass uses one engine thread, the existing fixed node budget and a
+three-minute elapsed-time limit. A partially analyzed game stays incomplete;
+it is never reported as a completed no-result diagnosis.
+
+Today offers one supported mistake with a position preview and source game.
+**Learn this move** enters the lesson directly; the player does not select games,
+build a queue or start diagnosis. Concrete recurrence within this small sample,
+consequence, recency and evidence bounds guide selection. A single game is not
+called a habit. Games stay available while evidence arrives progressively;
+when no lesson is ready, **Browse my games** offers a useful alternative.
+**Local analysis and sync** contains pause/resume and quiet sync context.
+Interrupted preparation does not restart silently on relaunch.
+
+Successful attempts and reveal save progress automatically. **Continue** moves
+to another supported exercise when one is available, or returns to Today.
+**Exit** returns immediately with progress preserved. No-result or unsupported
+games are not inserted between lessons. Entering a ready lesson pauses its
+preparation pass so the player can practice without competing searches.
+
+The local database is available immediately while Gambit checks Lichess in the
+background, no more than once every 15 minutes. **Sync now** checks explicitly.
+The latest successful check and new-game record survive relaunch; a failed
+background check preserves local games and lessons. Background arrivals retain
+the current lesson and the Library's game, move and board orientation.
+
+Explore's opening recommendation remains an investigation rather than an
+error claim, and retains its manual review-set tools:
 
 Starting the recommendation opens a review set containing up to six recent
 losses that reached the highlighted opening position. Review mode shows only

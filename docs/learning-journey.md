@@ -35,3 +35,10 @@ checks. A release needs native real-engine validation of the assembled journey.
 No private game data, positions, or analysis reports belong in PR attachments.
 Technical checks cannot establish learning comprehension; participant research
 must be explicitly identified when it has actually happened.
+
+Direct submission native QA confirmed selection without attempts, automatic
+grading on destination, rejected-move restoration, and feedback preservation.
+An isolated native returning-player launch showed automatic preparation on
+Today without any game-selection or diagnosis action. Controller tests cover
+interruption, cache reuse, late preparation while a lesson opens, and honest
+empty/failure states; browser checks enter from Today with one action.

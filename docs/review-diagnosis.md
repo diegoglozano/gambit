@@ -22,7 +22,11 @@ isolates unsupported/failed games and resolves the packaged adjacent engine.
 Library switching cancels old work without blocking navigation; normal game
 navigation does not cancel it. App exit cancels and joins workers so active
 engine children are reaped. No queue command writes indexed evidence or legacy
-session metadata. A new request waits for a cancelling worker to finish.
+session metadata. A new request waits for a cancelling worker to finish. Preparation passes stop
+after three minutes of elapsed analysis time, preserving completed records and
+leaving interrupted games marked incomplete. This is not truncated-game evidence.
+Today automatically prepares a recent player-scoped sample at shared ply zero;
+manual Explore review sets continue to use their opening/shared-ply keys.
 
 The practice command accepts only move attempts and named actions, not client
 verdicts or solved flags. It rechecks current game inputs and the actual engine

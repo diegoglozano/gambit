@@ -422,3 +422,13 @@ button.ranked-row:hover { border-color: rgba(130,217,162,0.35); background: rgba
   .coaching-exercise { grid-template-columns: minmax(0, 1fr); }
   .coaching-board-wrap { width: 100%; max-width: 480px; }
 }
+
+.learning-controls { margin: 18px 0; color: var(--faint); font-size: 12px; }
+.learning-controls > p { max-width: 660px; }
+.learning-controls button { margin: 8px 8px 0 0; }
+.today-focus-card:has(.today-focus-score[hidden]) { grid-template-columns: 170px minmax(0, 1fr); }
+.today-focus-card:has(.today-focus-board[hidden]) { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 800px) { .today-focus-card:has(.today-focus-score[hidden]) { grid-template-columns: 120px minmax(0, 1fr); } }
+
+.library-layout.lesson-mode .games-panel { display: none; }
+.coaching-panel.lesson .coaching-intro { display: none; }
