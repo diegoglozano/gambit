@@ -226,3 +226,13 @@ secrets:
 The updater private key must be backed up permanently. Existing installations
 trust its matching embedded public key and cannot migrate automatically if the
 private key is lost. Windows packaging remains a later release milestone.
+
+### Recent games first
+
+A new Lichess connection loads up to 24 recent completed games first. They are
+usable for browsing and automatic lesson preparation while the full initial
+history follows in the background. The successful history cursor is saved only
+after that full export and index finish; relaunch resumes an interrupted import
+without skipping older games. Sync now retries a failed import and preserves an
+open game, lesson feedback, and explanation playback. Optional tokens are held
+only for the active import, never saved.

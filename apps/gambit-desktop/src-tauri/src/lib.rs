@@ -245,6 +245,7 @@ static SAVED_SESSION_WRITE_LOCK: Mutex<()> = Mutex::new(());
 #[derive(Serialize)]
 struct DatabaseSession {
     path: String,
+    history_pending: bool,
     managed_user: Option<String>,
     last_sync: Option<SavedSyncSummary>,
     review_progress: Option<SavedReviewProgress>,
@@ -580,12 +581,18 @@ async fn sync_user(
     .map_err(|error| error.to_string())?;
     request.token = normalized_token(input.token);
     let database = request.database.clone();
-    let report = perform_sync(&app, request).await?;
+    let report = perform_recent_sync(&app, request).await?;
     remember_session(&app, &database, Some(&username))?;
-    let last_sync = remember_sync(&app, &database, &report)?;
+    let history_pending = gambit::sync::history_pending(&root.join("lichess"), &username)
+        .map_err(|error| error.to_string())?;
+    let last_sync = if history_pending {
+        None
+    } else {
+        Some(remember_sync(&app, &database, &report)?)
+    };
     let review_progress =
         known_library(&app, &database)?.and_then(|library| library.review_progress);
-    let session = load_session(&database, Some(&username), Some(last_sync), review_progress)?;
+    let session = load_session(&database, Some(&username), last_sync, review_progress)?;
     set_database(&state, database)?;
     Ok(SyncResult { session, report })
 }
@@ -594,12 +601,13 @@ async fn sync_user(
 async fn sync_active_user(
     app: AppHandle,
     state: State<'_, AppState>,
+    token: Option<String>,
 ) -> Result<SyncResult, String> {
     let database = database(&state)?;
     let username = known_library(&app, &database)?
         .and_then(|library| library.managed_user)
         .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
-    sync_managed_database(&app, database, username).await
+    sync_managed_database(&app, database, username, normalized_token(token)).await
 }
 
 #[tauri::command]
@@ -610,10 +618,13 @@ async fn auto_sync_active_user(app: AppHandle, path: String) -> Result<Option<Sy
     let username = library
         .managed_user
         .ok_or_else(|| String::from("the active library is not managed from Lichess"))?;
-    if !auto_sync_due(library.last_sync.as_ref(), current_time_milliseconds()?) {
+    let pending = database.parent().is_some_and(|parent| {
+        gambit::sync::history_pending(&parent.join("lichess"), &username).unwrap_or(false)
+    });
+    if !pending && !auto_sync_due(library.last_sync.as_ref(), current_time_milliseconds()?) {
         return Ok(None);
     }
-    sync_managed_database(&app, database, username)
+    sync_managed_database(&app, database, username, None)
         .await
         .map(Some)
 }
@@ -622,19 +633,33 @@ async fn sync_managed_database(
     app: &AppHandle,
     database: PathBuf,
     username: String,
+    token: Option<String>,
 ) -> Result<SyncResult, String> {
     let destination = database
         .parent()
         .ok_or_else(|| String::from("managed database has no parent directory"))?
         .join("lichess");
-    let request = SyncRequest::with_since(&username, destination, &database, None)
+    let mut request = SyncRequest::with_since(&username, destination, &database, None)
         .map_err(|error| error.to_string())?;
+    request.token = token;
     let report = perform_sync(app, request).await?;
     let last_sync = remember_sync(app, &database, &report)?;
     let review_progress =
         known_library(app, &database)?.and_then(|library| library.review_progress);
     let session = load_session(&database, Some(&username), Some(last_sync), review_progress)?;
     Ok(SyncResult { session, report })
+}
+
+async fn perform_recent_sync(app: &AppHandle, request: SyncRequest) -> Result<SyncReport, String> {
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        collection::sync_recent_lichess_with_progress(&request, |progress| {
+            let _ = progress_app.emit("sync-progress", progress);
+        })
+    })
+    .await
+    .map_err(|error| format!("recent-game import failed: {error}"))?
+    .map_err(|error| error.to_string())
 }
 
 async fn perform_sync(app: &AppHandle, request: SyncRequest) -> Result<SyncReport, String> {
@@ -844,6 +869,11 @@ fn load_session(
     };
     let page = index::search_games(path, &options, 0, 100).map_err(|error| error.to_string())?;
     Ok(DatabaseSession {
+        history_pending: player.is_some_and(|username| {
+            path.parent().is_some_and(|parent| {
+                gambit::sync::history_pending(&parent.join("lichess"), username).unwrap_or(false)
+            })
+        }),
         path: path.to_string_lossy().into_owned(),
         managed_user: player.map(str::to_owned),
         last_sync,
