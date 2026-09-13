@@ -237,7 +237,7 @@ fn skipping_persists_without_attempts_or_independent_solves() {
     store.save_diagnosis(&key, diagnosis).unwrap();
     store
         .update_practice(&key, |progress| {
-            progress.disposition = PracticeDisposition::Skipped
+            progress.disposition = PracticeDisposition::Skipped;
         })
         .unwrap();
     let record = CacheStore::for_library(root.path(), &library)
