@@ -42,3 +42,10 @@ An isolated native returning-player launch showed automatic preparation on
 Today without any game-selection or diagnosis action. Controller tests cover
 interruption, cache reuse, late preparation while a lesson opens, and honest
 empty/failure states; browser checks enter from Today with one action.
+
+Visual-consequence native QA used a synthetic legal position with real Stockfish
+at 1040 × 700. The original queen move and the opponent's queen capture played
+on the board without an attempt; a different completed board move launched local
+grading. The backend real-engine test passes with automatic independent-solve
+completion. Browser checks cover response playback, skipped outcomes, keyboard
+moves, saved re-entry and local source replay in Chromium and WebKit.

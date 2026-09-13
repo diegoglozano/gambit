@@ -110,7 +110,12 @@ child. A different move can be strong if it is within 30 centipawns; a submitted
 preferred move is still searched, sharing its reference search. Illegal moves
 do not launch an engine. Unsupported score inequalities are **inconclusive**,
 not “try again.” Forced mates retain their type; preserving a forced mate is
-accepted without translating mate distances into centipawns.
+accepted without translating mate distances into centipawns. New turning points also
+retain the legally verified line after the original mistake for visual consequence
+playback. Those optional fields default to empty in older valid records; cache
+validation replays every supplied response move and checks its notation.
+Skipped, saved-for-later, revealed completion and independent solves remain
+separate durable outcomes.
 
 Attempt feedback contains only the submitted move and its evaluations/verdict,
 not the preferred move or PV. Reveal is an explicit separate action. The cache

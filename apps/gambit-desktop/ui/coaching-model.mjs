@@ -51,13 +51,14 @@ export function queueGameState(game) {
   const practice = game.record?.practice;
   if (practice?.disposition === "completed") return "completed";
   if (practice?.disposition === "again_later") return "deferred";
+  if (practice?.disposition === "skipped") return "skipped";
   if (practice && (practice.revealed || practice.solution !== "unsolved" || practice.attempts?.length)) return "attempted";
   return game.record ? "ready" : game.status;
 }
 
 export function queueStateLabel(state) {
   return { unseen: "NOT ANALYZED", analyzing: "ANALYZING", ready: "READY TO PRACTICE",
-    attempted: "ATTEMPTED", completed: "COMPLETED ✓", deferred: "FOR LATER",
+    skipped: "SKIPPED", attempted: "ATTEMPTED", completed: "COMPLETED ✓", deferred: "FOR LATER",
     unsupported: "UNSUPPORTED", failed: "FAILED" }[state] ?? "";
 }
 
@@ -94,7 +95,7 @@ export function summaryText(snapshot, deferredIds = []) {
   if (!summary) return "Completed results are saved privately on this Mac.";
   const parts = [`${summary.games_analyzed} analyzed`, `${summary.turning_points} turning points`,
     `${summary.solved_without_reveal} solved without reveal`, `${summary.solved_after_hint ?? 0} solved after a hint`, `${summary.completed_after_reveal} completed after reveal`,
-    `${new Set([...deferredIds, ...snapshot.games.filter(g => g.record?.practice.disposition === "again_later").map(g => g.id)]).size} for later`, `${summary.no_clear_turning_point} with no clear turning point`];
+    `${summary.skipped ?? 0} skipped`, `${new Set([...deferredIds, ...snapshot.games.filter(g => g.record?.practice.disposition === "again_later").map(g => g.id)]).size} for later`, `${summary.no_clear_turning_point} with no clear turning point`];
   const unsupported = snapshot.games.filter((g) => g.status === "unsupported").length;
   const failed = snapshot.games.filter((g) => g.status === "failed").length;
   const pending = snapshot.games.filter((g) => ["unseen", "analyzing"].includes(g.status)).length;
@@ -116,10 +117,12 @@ export function summaryText(snapshot, deferredIds = []) {
 export function describeMove(fen, uci) {
   if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci ?? "")) return "";
   const from = uci.slice(0, 2), to = uci.slice(2, 4);
-  const piece = fenSquares(fen).find(square => square.name === from)?.piece.toLowerCase();
+  const squares = fenSquares(fen);
+  const piece = squares.find(square => square.name === from)?.piece.toLowerCase();
+  const captured = squares.find(square => square.name === to)?.piece.toLowerCase();
   const names = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
   const castle = piece === "k" && Math.abs(from.charCodeAt(0) - to.charCodeAt(0)) === 2;
-  return `${names[piece] ?? "piece"} from ${from} to ${to}${castle ? " (castling)" : ""}${uci[4] ? `, promote to ${names[uci[4]]}` : ""}`;
+  return `${names[piece] ?? "piece"} from ${from} to ${to}${castle ? " (castling)" : ""}${captured ? `, capturing a ${names[captured]}` : ""}${uci[4] ? `, promote to ${names[uci[4]]}` : ""}`;
 }
 
 export function moveArrow(uci, black = false) {

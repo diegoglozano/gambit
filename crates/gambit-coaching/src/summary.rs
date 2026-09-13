@@ -37,6 +37,8 @@ pub struct ReviewSummary {
     pub solved_after_hint: usize,
     pub completed_after_reveal: usize,
     pub practice_again_later: usize,
+    #[serde(default)]
+    pub skipped: usize,
     pub move_range: Option<(u16, u16)>,
     pub centipawn_loss: Option<LossStatistics>,
     pub allowed_mates: usize,
@@ -90,6 +92,7 @@ pub fn summarize(records: &[CacheEntry]) -> Result<ReviewSummary, SummaryError> 
         );
         summary.practice_again_later +=
             usize::from(progress.disposition == PracticeDisposition::AgainLater);
+        summary.skipped += usize::from(progress.disposition == PracticeDisposition::Skipped);
         let DiagnosisOutcome::TurningPoint(point) = &record.diagnosis.outcome else {
             summary.no_clear_turning_point += 1;
             continue;

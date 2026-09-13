@@ -305,6 +305,35 @@ fn turning_point_progress_roundtrips_and_illegal_cached_notation_is_rejected() {
             .practice
             .revealed
     );
+    let mut invalid_line = diagnosis.clone();
+    if let gambit_coaching::DiagnosisOutcome::TurningPoint(point) = &mut invalid_line.outcome {
+        point.after_pv = vec!["a1a8".into()];
+        point.after_pv_san = vec!["Ra8".into()];
+    }
+    let invalid_key = CacheKey::new(
+        "invalid-response",
+        &fixture.game,
+        0,
+        &fixture.identity(),
+        100,
+    )
+    .unwrap();
+    assert!(store.save_diagnosis(&invalid_key, invalid_line).is_err());
+    // Additive explanation data does not discard an older valid lesson/outcome.
+    let path = record_file(fixture.root.path());
+    let mut legacy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let point = legacy["diagnosis"]["outcome"]["evidence"]
+        .as_object_mut()
+        .unwrap();
+    point.remove("after_pv");
+    point.remove("after_pv_san");
+    fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let restored = store.load(&key).unwrap().unwrap();
+    assert!(restored.practice.revealed);
+    assert_eq!(
+        restored.practice.disposition,
+        PracticeDisposition::Completed
+    );
     let other = CacheKey::new("other-lesson", &fixture.game, 0, &fixture.identity(), 100).unwrap();
     let mut corrupt = diagnosis;
     if let gambit_coaching::DiagnosisOutcome::TurningPoint(point) = &mut corrupt.outcome {

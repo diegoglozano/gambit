@@ -186,6 +186,7 @@ pub enum PracticeDisposition {
     Active,
     Completed,
     AgainLater,
+    Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -438,6 +439,8 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
             || point.pv_san.first() != Some(&point.best_san)
             || point.pv.len() != point.pv_san.len()
             || point.pv.len() > 32
+            || point.after_pv.len() != point.after_pv_san.len()
+            || point.after_pv.len() > 32
             || crate::assess(point.before, point.after)
                 != crate::Assessment::TurningPoint(point.loss)
         {
@@ -462,6 +465,9 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
         validate_attempts(&history, &point.best_uci, &record.practice.attempts)?;
         let mut played = history.position();
         replay_notation(&mut played, &point.played_uci, &point.played_san)?;
+        for (uci, san) in point.after_pv.iter().zip(&point.after_pv_san) {
+            replay_notation(&mut played, uci, san)?;
+        }
         let mut variation = history.position();
         for (uci, san) in point.pv.iter().zip(&point.pv_san) {
             replay_notation(&mut variation, uci, san)?;
@@ -474,7 +480,10 @@ fn validate(record: &CacheEntry) -> Result<(), CacheError> {
         }
     } else if record.practice.revealed
         || record.practice.solution != SolutionStatus::Unsolved
-        || record.practice.disposition == PracticeDisposition::AgainLater
+        || matches!(
+            record.practice.disposition,
+            PracticeDisposition::AgainLater | PracticeDisposition::Skipped
+        )
         || record.practice.total_attempts != 0
         || !record.practice.attempts.is_empty()
     {

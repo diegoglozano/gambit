@@ -66,6 +66,12 @@ const coaching = coachingUI({ invoke,
     lesson: state.review.lesson, complete: state.review.complete, deferredIds: [...state.review.deferredGameIds] } : null,
   onPracticeInteraction: () => { if (state.review) state.review.practiceEntryPending = false; },
   onDone: () => void markReviewGame(), onLater: () => void deferReviewGame(),
+  onSkip: () => {
+    if (!state.review) return;
+    const nextId = coaching.nextExercise(state.review.gameIds[state.review.index]);
+    if (nextId === null) finishReview(false, state.managedUser ? "today" : "explore");
+    else { state.review.index = state.review.gameIds.indexOf(nextId); openReviewGame(); }
+  },
   onExerciseChange: (practicing) => element("library-layout").classList.toggle("practice-mode", practicing),
   onUpdate: (snapshot) => {
     learning.receive(snapshot);
@@ -870,7 +876,7 @@ function renderLearningHome(plan) {
   element("today-review-progress").textContent = plan.error ?? (plan.snapshot?.message || (running
     ? `Preparing lessons privately · ${analyzed} of ${plan.games.length || "a few"} games checked. You can keep browsing.`
     : plan.paused ? "Preparation paused. Saved lessons and games are available."
-    : `${analyzed} games checked · ${ready} supported ${ready === 1 ? "mistake" : "mistakes"}. This is a small sample of your history.`));
+    : `${analyzed} ${analyzed === 1 ? "game" : "games"} checked · ${ready} supported ${ready === 1 ? "mistake" : "mistakes"}. This is a small sample of your history.`));
   if (finding) {
     const { source, point, supportingIds, revisit } = finding;
     element("today-focus-board").replaceChildren(renderMiniBoard(lessonBoard(point.position_fen)));
@@ -890,6 +896,10 @@ function renderLearningHome(plan) {
     button.textContent = "Browse my games →";
     button.onclick = () => navigateToView("library");
   }
+  const recoverable = plan.snapshot?.games.some(game => game.recoverable);
+  element("learning-recover").hidden = !recoverable;
+  element("learning-recover").disabled = Boolean(running || plan.snapshot?.practice_busy);
+  element("learning-recovery-copy").hidden = !recoverable;
   element("learning-pause").hidden = !plan.snapshot?.running;
   element("learning-resume").hidden = Boolean(running || !plan.paused && !plan.error && !plan.snapshot?.games.some(game => ["failed", "unseen"].includes(game.status)));
 }
@@ -904,6 +914,14 @@ async function enterLesson(finding) {
   } catch (error) { showToast(String(error), true); }
 }
 
+element("learning-recover").addEventListener("click", () => void learning.recover());
+element("lesson-source").addEventListener("click", () => {
+  if (!state.review) return;
+  const detail = state.review.details.get(state.review.gameIds[state.review.index]);
+  const ply = coaching.pointPly();
+  finishReview(false, "library");
+  if (detail) { displayGameDetail(detail); setPly(ply > 0 ? ply - 1 : 0); }
+});
 element("learning-pause").addEventListener("click", () => void learning.pause().catch(error => showToast(String(error), true)));
 element("learning-resume").addEventListener("click", () => {
   if (state.session && state.managedUser) void learning.prepare({ path: state.session.path, player: state.managedUser }, { resume: true });
@@ -1193,6 +1211,7 @@ function renderReviewPage(games) {
 function renderReviewBar() {
   const bar = element("review-bar");
   bar.hidden = !state.review || state.review.complete;
+  bar.classList.toggle("lesson", Boolean(state.review?.lesson));
   if (!state.review || state.review.complete) return;
   const current = state.review.index + 1;
   const total = state.review.gameIds.length;
@@ -1214,6 +1233,7 @@ function renderReviewBar() {
   element("defer-review").disabled = state.review.reviewedGameIds.has(currentId) || state.review.deferredGameIds.has(currentId);
   element("defer-review").textContent = state.review.deferredGameIds.has(currentId) ? "Deferred" : "Defer";
   element("review-on-lichess").disabled = !state.review.details.get(currentId)?.summary.site?.startsWith("https://lichess.org/");
+  element("review-on-lichess").hidden = state.review.lesson && element("review-on-lichess").disabled;
 }
 
 async function markReviewGame() {
@@ -1368,6 +1388,7 @@ function renderReviewMode() {
   element("review-complete").hidden = !complete;
   element("library-layout").hidden = complete;
   element("library-layout").classList.toggle("lesson-mode", Boolean(state.review?.lesson));
+  element("lesson-source").hidden = !state.review?.lesson;
   element("review-kind").textContent = state.review?.lesson ? "Lesson" : "Review set";
   element("review-result").hidden = Boolean(state.review?.lesson);
   element("workspace-eyebrow").textContent = reviewing ? state.review.lesson ? "Lesson" : "Review" : "Library";

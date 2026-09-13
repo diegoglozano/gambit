@@ -121,6 +121,8 @@
             <p>Gambit prepares a few games privately with Stockfish: one engine thread and short, bounded passes. Games and saved lessons stay available.</p>
             <button id="learning-pause" type="button" hidden>Pause preparation</button>
             <button id="learning-resume" type="button" hidden>Resume preparation</button>
+            <button id="learning-recover" type="button" hidden>Keep unreadable record as a backup and retry</button>
+            <p id="learning-recovery-copy" hidden>Unreadable saved progress cannot be reused. Recovery preserves that file as a backup and checks the game again.</p>
           <article class="today-sync-card" aria-live="polite">
             <div>
               <span class="eyebrow">Latest check</span>
@@ -182,6 +184,7 @@
                 <button id="next-review" type="button" aria-label="Next review game">Next →</button>
               </div>
               <div class="review-actions">
+                <button id="lesson-source" type="button" hidden>View source game</button>
                 <button id="review-on-lichess" type="button">Open on Lichess ↗</button>
                 <button id="defer-review" type="button">Defer</button>
                 <button class="review-primary" id="mark-reviewed" type="button">Mark reviewed ✓</button>
@@ -225,6 +228,11 @@
                   <span class="eyebrow">What happened</span>
                   <p id="coaching-played-description"></p>
                   <button id="coaching-played" class="coaching-secondary" type="button">See the move I played</button>
+                  <div id="coaching-played-playback" hidden>
+                    <p id="coaching-played-status" role="status" aria-live="polite"></p>
+                    <button id="coaching-played-back" class="coaching-secondary" type="button">← Back</button>
+                    <button id="coaching-played-next" class="coaching-secondary" type="button">See what follows →</button>
+                  </div>
                 </div>
                 <form id="coaching-form">
                   <div id="coaching-choice" class="coaching-choice" role="status">Choose your move on the board</div>
@@ -240,7 +248,7 @@
             </div>
             <span id="coaching-drag-piece" class="coaching-drag-piece" aria-hidden="true" hidden></span>
             <p id="coaching-feedback" role="status" aria-live="polite"></p>
-            <div class="coaching-outcomes"><button id="coaching-done" type="button" hidden>Continue →</button> <button id="coaching-later" type="button" hidden>Practice again later</button></div>
+            <div class="coaching-outcomes"><button id="coaching-done" type="button" hidden>Continue →</button> <button id="coaching-later" type="button" hidden>Save for later</button> <button id="coaching-skip" type="button" hidden>Skip this lesson</button></div>
             <details><summary>Review-set evidence</summary><p id="coaching-summary"></p></details>
           </section>
 
