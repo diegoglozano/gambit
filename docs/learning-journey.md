@@ -49,3 +49,11 @@ on the board without an attempt; a different completed board move launched local
 grading. The backend real-engine test passes with automatic independent-solve
 completion. Browser checks cover response playback, skipped outcomes, keyboard
 moves, saved re-entry and local source replay in Chromium and WebKit.
+
+
+Recent-first import checks cover an interrupted initial export, preserved date
+scope, repeated-preview deduplication and a cursor committed only after full
+history. Chromium and WebKit exercise usable recent games during background
+history and a manual sync completing during solved-lesson inspection. Native
+exit/relaunch retains completed practice and reopens the correction for visual
+inspection. No participant comprehension study has been performed.

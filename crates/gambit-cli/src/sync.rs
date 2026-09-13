@@ -157,6 +157,18 @@ struct SyncState {
     unfinished_game_ids: Vec<String>,
 }
 
+/// Whether a started collection still needs its full initial export. Recent
+/// preview imports must not advance the durable incremental cursor.
+pub fn history_pending(destination: &Path, username: &str) -> Result<bool, SyncError> {
+    let path = destination.join(STATE_FILE);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let state = read_state(&path)?;
+    validate_state(&state, username, destination)?;
+    Ok(state.cursor_milliseconds.is_none())
+}
+
 pub fn prepare(
     destination: &Path,
     username: &str,

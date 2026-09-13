@@ -48,6 +48,7 @@ const state = {
   syncReport: null,
   review: null,
   reviewProgress: null,
+  learningDirty: false,
 };
 
 const element = (id) => document.getElementById(id);
@@ -104,14 +105,19 @@ element("sync-form").addEventListener("submit", async (event) => {
   const since = element("since").value.trim() || null;
   const tokenInput = element("lichess-token");
   const token = tokenInput.value.trim() || null;
+  let bootstrap = null;
   try {
-    await withBusy("Building your library…", "Lichess streams your game history before Gambit indexes it locally.", async () => {
+    await withBusy("Loading your recent games…", "A small recent sample becomes usable first. The rest of your history follows in the background.", async () => {
       const result = await invoke("sync_user", { input: { username, since, token } });
-      await showSession(result.session, { syncReport: result.session.last_sync, view: "today" });
+      bootstrap = result;
+      await showSession(result.session, { syncReport: result.session.last_sync ?? result.report, view: "today" });
       showToast(`${result.session.info.games.toLocaleString()} games are ready.`);
     }, { sync: true, since });
   } finally {
     tokenInput.value = "";
+  }
+  if (bootstrap?.session.history_pending && state.session?.path === bootstrap.session.path) {
+    void syncManagedLibrary({ token });
   }
 });
 
@@ -257,58 +263,53 @@ async function updateDatabase() {
   });
 }
 
-async function syncManagedLibrary() {
-  if (!state.managedUser || state.syncRunning) return;
-  setSyncRunning(true);
-  try {
-    await withBusy("Syncing your latest games…", "Only new or changed Lichess games will be indexed.", async () => {
-      try {
-        const result = await invoke("sync_active_user");
-        await showSession(result.session, { syncReport: result.session.last_sync, view: "today" });
-        showToast(syncToast(result.report));
-      } catch (error) {
-        renderTodaySyncError(String(error));
-        throw error;
-      }
-    }, { sync: true });
-  } finally {
-    setSyncRunning(false);
+async function applySyncResult(result, expectedPath) {
+  if (state.session?.path !== expectedPath) return;
+  state.session.info = result.session.info;
+  state.session.history_pending = result.session.history_pending;
+  state.syncReport = result.session.last_sync ?? result.report;
+  state.explore = null;
+  state.explorePlayer = null;
+  renderDatabaseInfo(result.session.info);
+  renderTodaySync(state.syncReport);
+  if (state.review) state.learningDirty = true;
+  else {
+    void learning.prepare({ path: expectedPath, player: state.managedUser }, { refresh: true });
+    if (state.currentView === "today") await loadToday();
+    else if (state.currentView === "explore") await loadExplore();
+    else await loadPage(state.session.page.offset, { preserveInteraction: true });
   }
+}
+
+async function syncManagedLibrary({ token = null } = {}) {
+  if (!state.managedUser || state.syncRunning) return;
+  const expectedPath = state.session.path;
+  setSyncRunning(true);
+  renderTodaySyncPending(state.session.history_pending ? "Your recent games are ready. Adding the rest of your history in the background…" : "Checking Lichess for new games…");
+  try {
+    const result = await invoke("sync_active_user", { token });
+    await applySyncResult(result, expectedPath);
+    if (state.session?.path === expectedPath) showToast(syncToast(result.report));
+  } catch (error) {
+    if (state.session?.path === expectedPath) { renderTodaySyncError(String(error)); showToast(`Sync stopped. Your games and lessons remain available. Sync now to retry: ${error}`, true); }
+  } finally { setSyncRunning(false); }
 }
 
 async function autoSyncManagedLibrary() {
   if (!state.managedUser || state.syncRunning) return;
   const expectedPath = state.session?.path;
   setSyncRunning(true);
-  if (!state.syncReport) renderTodaySyncPending("Checking Lichess for new games…");
+  if (!state.syncReport || state.session.history_pending) renderTodaySyncPending(state.session.history_pending
+    ? "Continuing your initial history import. Recent games and saved lessons are ready." : "Checking Lichess for new games…");
   try {
     const result = await invoke("auto_sync_active_user", { path: expectedPath });
     if (state.session?.path !== expectedPath) return;
-    if (!result) {
-      renderTodaySync(state.syncReport);
-      return;
-    }
-    state.session.info = result.session.info;
-    state.syncReport = result.session.last_sync ?? result.report;
-    state.explore = null;
-    state.explorePlayer = null;
-    renderDatabaseInfo(result.session.info);
-    renderTodaySync(result.report);
-    if (!state.review) {
-      void learning.prepare({ path: expectedPath, player: state.managedUser }, { refresh: true });
-      if (state.currentView === "today") await loadToday();
-      else if (state.currentView === "explore") await loadExplore();
-      else await loadPage(state.session.page.offset, { preserveInteraction: true });
-    }
+    if (!result) { renderTodaySync(state.syncReport); return; }
+    await applySyncResult(result, expectedPath);
     if (result.report.created || result.report.updated) showToast(syncToast(result.report));
   } catch (error) {
-    if (state.session?.path === expectedPath) {
-      renderTodaySyncError(String(error));
-      showToast(`Background sync failed: ${error}`, true);
-    }
-  } finally {
-    setSyncRunning(false);
-  }
+    if (state.session?.path === expectedPath) { renderTodaySyncError(String(error)); showToast(`Background sync stopped. Sync now to retry: ${error}`, true); }
+  } finally { setSyncRunning(false); }
 }
 
 function setSyncRunning(running) {
@@ -401,6 +402,7 @@ async function showSession(session, options = {}) {
   state.syncReport = options.syncReport ?? session.last_sync ?? null;
   state.review = null;
   state.reviewProgress = session.review_progress ?? null;
+  state.learningDirty = false;
   state.detail = null;
   state.ply = 0;
   element("welcome-screen").hidden = true;
@@ -709,8 +711,9 @@ function renderTodaySync(report) {
   element("today-total-games").textContent = state.session ? Number(state.session.info.games).toLocaleString() : "—";
   if (!report) {
     element("today-sync-heading").textContent = "Your local library is ready";
-    element("today-sync-copy").textContent = state.managedUser
-      ? "Gambit will check Lichess without blocking your library."
+    element("today-sync-copy").textContent = state.session?.history_pending
+      ? "Your recent games are ready. The rest of your history will continue in the background."
+      : state.managedUser ? "Gambit will check Lichess without blocking your library."
       : "Open a managed Lichess library to see new games here.";
     element("today-new-games").textContent = "—";
     element("today-new-record").textContent = "—";
@@ -720,6 +723,11 @@ function renderTodaySync(report) {
   element("today-new-games").textContent = Number(report.created).toLocaleString();
   element("today-new-record").textContent = formatPlayerRecord(report.results) ?? "—";
   element("today-updated-games").textContent = Number(report.updated).toLocaleString();
+  if (state.session?.history_pending) {
+    element("today-sync-heading").textContent = "Your recent games are ready";
+    element("today-sync-copy").textContent = "More history is being added in the background. You can browse and learn now.";
+    return;
+  }
   const checked = formatLastChecked(report.checked_at_milliseconds ?? report.cursor_milliseconds);
   if (report.created || report.updated) {
     element("today-sync-heading").textContent = report.created
@@ -1354,6 +1362,10 @@ function finishReview(notify = true, destination = null) {
   void persistReviewProgress();
   const { previous } = state.review;
   state.review = null;
+  if (state.learningDirty && state.managedUser) {
+    state.learningDirty = false;
+    void learning.prepare({ path: state.session.path, player: state.managedUser }, { refresh: true });
+  }
   reviewRequests.invalidate();
   state.filters = previous.filters;
   state.player = previous.player;
@@ -1546,7 +1558,7 @@ async function mockInvoke(command, args = {}) {
   if (command === "install_update" || command === "restart_app" || command === "save_review_progress") return null;
   if (command === "get_game") return mockDetail(args.id);
   if (command === "sync_user" || command === "sync_active_user" || command === "auto_sync_active_user") {
-    return { session: mockSession(), report: mockSyncReport() };
+    return { session: { ...mockSession(), history_pending: command === "sync_user", last_sync: command === "sync_user" ? null : mockSyncReport() }, report: mockSyncReport() };
   }
   if (command === "list_games") {
     const page = mockSession().page;

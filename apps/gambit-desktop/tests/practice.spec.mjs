@@ -119,3 +119,27 @@ test("keyboard moves grade directly, saved lessons reopen, and source games stay
   await expect(page.locator(".board-panel")).toBeVisible();
   await expect(page.locator("#workspace-eyebrow")).toHaveText("Library");
 });
+
+
+test("recent games become usable before history finishes and sync preserves lesson feedback", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#username").fill("demo");
+  await page.locator("#sync-form button[type=submit]").click();
+  await expect(page.locator("#today-view")).toBeVisible();
+  await expect(page.locator("#today-sync-copy")).toContainText("background");
+  await expect(page.locator("#today-sync")).toBeEnabled();
+  await expect(page.locator("#today-review-focus")).toHaveText("Learn this move →");
+  await page.locator("#today-sync").click();
+  await expect(page.locator("#busy-overlay")).toBeHidden();
+  await page.locator("#today-review-focus").click();
+  await page.locator("#coaching-board [data-square=g6]").click();
+  await page.locator("#coaching-board [data-square=h6]").click();
+  await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
+  // A completed sync must leave the solved board and its inspection controls intact.
+  await expect(page.locator("#today-sync")).toBeEnabled();
+  await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
+  await expect(page.locator("#coaching-solution")).toBeVisible();
+  await expect(page.locator("#coaching-board [data-square=h6]")).toHaveAttribute("aria-label", "h6, White queen");
+  await page.locator("#finish-review").click();
+  await expect(page.locator("#today-view")).toBeVisible();
+});

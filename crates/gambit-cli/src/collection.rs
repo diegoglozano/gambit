@@ -112,6 +112,87 @@ pub fn sync_lichess(request: &SyncRequest) -> Result<SyncReport, CollectionError
     sync_lichess_with_progress(request, |_| {})
 }
 
+/// Load a small recent preview before the full initial export. Its cursor stays
+/// unset, so interruption/relaunch cannot skip older history. Existing completed
+/// collections use the ordinary incremental sync contract.
+pub fn sync_recent_lichess_with_progress<F: FnMut(SyncProgress)>(
+    request: &SyncRequest,
+    mut on_progress: F,
+) -> Result<SyncReport, CollectionError> {
+    if request.username.trim().is_empty() {
+        return Err(CollectionError::InvalidRequest(
+            "Lichess username cannot be empty".into(),
+        ));
+    }
+    let plan = sync::prepare(
+        &request.destination,
+        request.username.trim(),
+        current_time_milliseconds()?,
+        request.since,
+    )?;
+    if !plan.is_initial() {
+        return sync_lichess_with_progress(request, on_progress);
+    }
+    let options = QueryOptions {
+        since: plan.initial_since,
+        ..QueryOptions::default()
+    };
+    let api_request = UserGamesRequest {
+        username: request.username.trim(),
+        maximum_games: Some(24),
+        options: &options,
+        since_timestamp: None,
+        until_timestamp: Some(plan.until_timestamp),
+        include_ongoing: false,
+        oldest_first: false,
+    };
+    on_progress(SyncProgress {
+        phase: "connecting",
+        games: 0,
+        date: None,
+    });
+    let mut response = lichess::user_games(&api_request, request.token.as_deref())
+        .map_err(CollectionError::Lichess)?;
+    import_recent_stream(
+        request,
+        &plan,
+        response.body_mut().as_reader(),
+        &mut on_progress,
+    )
+}
+
+fn import_recent_stream<R: Read, F: FnMut(SyncProgress)>(
+    request: &SyncRequest,
+    plan: &sync::SyncPlan,
+    reader: R,
+    on_progress: &mut F,
+) -> Result<SyncReport, CollectionError> {
+    sync::start(plan)?;
+    let (summary, date) = ingest_user_stream(reader, plan, on_progress)?;
+    on_progress(SyncProgress {
+        phase: "indexing",
+        games: summary.received,
+        date,
+    });
+    let (index_mode, index) = maintain_database(&request.destination, &request.database)?;
+    // Do not call sync::finish: the latest 24 games are not a complete export.
+    Ok(SyncReport {
+        username: request.username.trim().into(),
+        destination: request.destination.to_string_lossy().into_owned(),
+        database: request.database.to_string_lossy().into_owned(),
+        received: summary.received,
+        created: summary.created,
+        updated: summary.updated,
+        unchanged: summary.unchanged,
+        results: summary.created_results,
+        refreshed_unfinished: 0,
+        unfinished: 0,
+        cursor_milliseconds: 0,
+        index_mode,
+        index,
+    })
+}
+
 /// Synchronizes one Lichess collection while reporting streaming progress.
 pub fn sync_lichess_with_progress<F: FnMut(SyncProgress)>(
     request: &SyncRequest,
@@ -300,6 +381,39 @@ fn current_time_milliseconds() -> Result<i64, CollectionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_preview_is_usable_without_committing_or_skipping_initial_history() {
+        let root =
+            std::env::temp_dir().join(format!("gambit-recent-preview-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let request = SyncRequest::with_since(
+            "A",
+            root.join("lichess"),
+            root.join("library.gambit"),
+            Some("2026-01-01"),
+        )
+        .unwrap();
+        let plan =
+            sync::prepare(&request.destination, "A", 1_789_310_000_000, request.since).unwrap();
+        let pgn = b"[Site \"https://lichess.org/abcdefgh\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2026.09.12\"]\n[Result \"1-0\"]\n1.e4 e5 1-0";
+        let report = import_recent_stream(&request, &plan, &pgn[..], &mut |_| {}).unwrap();
+        assert_eq!(report.received, 1);
+        assert_eq!(index::info(&request.database, false).unwrap().games, 1);
+        assert!(sync::history_pending(&request.destination, "A").unwrap());
+        let resumed =
+            sync::prepare(&request.destination, "A", plan.until_timestamp + 1000, None).unwrap();
+        assert!(resumed.is_initial());
+        assert_eq!(resumed.since_timestamp, None);
+        assert_eq!(resumed.initial_since, Some(20_260_101));
+        let repeated = import_recent_stream(&request, &resumed, &pgn[..], &mut |_| {}).unwrap();
+        assert_eq!(repeated.created, 0);
+        assert_eq!(index::info(&request.database, false).unwrap().games, 1);
+        let summary = sync::ingest(&pgn[..], &resumed, None).unwrap();
+        sync::finish(&resumed, summary.statuses).unwrap();
+        assert!(!sync::history_pending(&request.destination, "A").unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn managed_database_builds_then_updates_incrementally() {
