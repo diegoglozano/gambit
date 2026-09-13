@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress, queueGameState, queueStateLabel, practiceEntryGameId } from "./coaching-model.mjs";
+import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquares, summaryText, recommendationLabel, reconcileCoachingProgress, queueGameState, queueStateLabel, practiceEntryGameId, describeMove, moveArrow } from "./coaching-model.mjs";
 
 test("Today and Explore practice entry prefer actionable exercises over no-result or completed games", () => {
   const exercise = (id, disposition = "active", solution = "unsolved") => ({ id, record: {
@@ -82,4 +82,15 @@ test("practice board uses exact FEN squares, not the game viewer position", () =
 });
 test("empty summary does not invent evidence", () => {
   assert.equal(summaryText(null), "Completed results are saved privately on this Mac.");
+});
+
+test("visual moves name pieces, promotions and castling, with arrows facing the player", () => {
+  const fen = "4k3/8/8/8/8/8/1p2P3/4K2R w K - 0 9";
+  assert.equal(describeMove(fen, "e2e4"), "pawn from e2 to e4");
+  assert.equal(describeMove(fen, "b2b1n"), "pawn from b2 to b1, promote to knight");
+  assert.equal(describeMove(fen, "e1g1"), "king from e1 to g1 (castling)");
+  assert.deepEqual(moveArrow("e2e4"), { x1: 450, y1: 650, x2: 450, y2: 450 });
+  assert.deepEqual(moveArrow("e2e4", true), { x1: 350, y1: 150, x2: 350, y2: 350 });
+  assert.equal(moveArrow(undefined), null);
+  assert.equal(describeMove(fen, undefined), "");
 });

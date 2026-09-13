@@ -110,3 +110,24 @@ export function summaryText(snapshot, deferredIds = []) {
   }
   return parts.join(" · ");
 }
+
+// Keep coordinates as a reference, while naming the piece for readers who do
+// not recognize SAN. The original position also identifies promotion pawns.
+export function describeMove(fen, uci) {
+  if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci ?? "")) return "";
+  const from = uci.slice(0, 2), to = uci.slice(2, 4);
+  const piece = fenSquares(fen).find(square => square.name === from)?.piece.toLowerCase();
+  const names = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
+  const castle = piece === "k" && Math.abs(from.charCodeAt(0) - to.charCodeAt(0)) === 2;
+  return `${names[piece] ?? "piece"} from ${from} to ${to}${castle ? " (castling)" : ""}${uci[4] ? `, promote to ${names[uci[4]]}` : ""}`;
+}
+
+export function moveArrow(uci, black = false) {
+  if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci ?? "")) return null;
+  const center = square => {
+    const file = square.charCodeAt(0) - 97, rank = Number(square[1]) - 1;
+    return black ? [750 - file * 100, 50 + rank * 100] : [50 + file * 100, 750 - rank * 100];
+  };
+  const [x1, y1] = center(uci.slice(0, 2)), [x2, y2] = center(uci.slice(2, 4));
+  return { x1, y1, x2, y2 };
+}
