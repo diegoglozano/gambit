@@ -222,3 +222,33 @@ fn attempts_and_explicit_outcomes_survive_reopening_and_history_is_bounded() {
     let record = store.record_attempt(&other, strong).unwrap();
     assert_eq!(record.practice.solution, SolutionStatus::AfterHint);
 }
+
+#[test]
+fn skipping_persists_without_attempts_or_independent_solves() {
+    let root = tempfile::tempdir().unwrap();
+    let library = root.path().join("library.gambit");
+    let engine = root.path().join("engine");
+    std::fs::write(&library, b"evidence").unwrap();
+    std::fs::write(&engine, b"fixture engine").unwrap();
+    let (game, diagnosis) = lesson("A");
+    let identity = EngineIdentity::from_file("fixture", &engine).unwrap();
+    let key = CacheKey::new("skipped", &game, 0, &identity, 100).unwrap();
+    let store = CacheStore::for_library(root.path(), &library).unwrap();
+    store.save_diagnosis(&key, diagnosis).unwrap();
+    store
+        .update_practice(&key, |progress| {
+            progress.disposition = PracticeDisposition::Skipped
+        })
+        .unwrap();
+    let record = CacheStore::for_library(root.path(), &library)
+        .unwrap()
+        .load(&key)
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.practice.solution, SolutionStatus::Unsolved);
+    assert_eq!(record.practice.total_attempts, 0);
+    let summary = gambit_coaching::summarize(&[record]).unwrap();
+    assert_eq!(summary.skipped, 1);
+    assert_eq!(summary.solved_without_reveal, 0);
+    assert_eq!(summary.completed_after_reveal, 0);
+}

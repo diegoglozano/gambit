@@ -105,14 +105,19 @@ Click a piece to see its legal destinations, then click a destination or drag
 there. Completing a legal move checks it automatically; selecting a piece alone
 is not an attempt. For promotion, choose the new piece after choosing a
 destination. Coordinate entry remains available with Enter or **Play move**. **See the move I played** previews the
-original decision without recording an attempt. Move descriptions name the
+original decision without recording an attempt. **See what follows** plays a
+legal local-engine response to that mistake, naming moves and captures. Older
+saved lessons without this response line remain usable and say so explicitly. Move descriptions name the
 piece, and arrows show its path. **Show me a better move** reveals the answer;
 use **See next move**, **Back**, and **Starting position** to follow it on the
 board. Successful attempts and revealed answers save completion automatically,
 with independent solves kept separate from help. The board stays available for
 inspection until **Continue**; answer playback never submits an attempt. If a
 check fails or is cancelled, play the move again to retry. Completed practice
-and positions saved for later remain on this Mac.
+and positions saved for later remain on this Mac. **Skip this lesson** saves a
+separate skipped outcome. **View source game** opens local replay at the original
+decision. Unreadable records can be preserved as backups and analyzed again
+from Today's local analysis controls; unreadable practice is not silently reused.
 
 The app replays a selected standard-chess mainline. The board automatically
 faces the selected player and can be flipped manually. Arrow keys and board

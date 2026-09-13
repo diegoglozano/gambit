@@ -21,6 +21,12 @@ pub struct TurningPoint {
     pub loss: Loss,
     pub pv: Vec<String>,
     pub pv_san: Vec<String>,
+    /// Legal continuation after the original mistake. Older records retain
+    /// their valid evidence and simply lack this optional visual explanation.
+    #[serde(default)]
+    pub after_pv: Vec<String>,
+    #[serde(default)]
+    pub after_pv_san: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +148,8 @@ pub fn diagnose(
                     loss,
                     pv: before.pv,
                     pv_san: before.pv_san,
+                    after_pv: after.pv,
+                    after_pv_san: after.pv_san,
                 }));
                 return Ok(diagnosis);
             }

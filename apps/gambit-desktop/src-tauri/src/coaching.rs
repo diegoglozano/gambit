@@ -66,6 +66,7 @@ pub(super) struct Game {
     record: Option<CacheEntry>,
     message: Option<String>,
     line_positions: Vec<String>,
+    played_line_positions: Vec<String>,
     move_options: Vec<MoveOption>,
     recoverable: bool,
 }
@@ -92,6 +93,7 @@ pub(super) enum PracticeAction {
     Reveal,
     Done,
     Later,
+    Skip,
     Replay,
 }
 
@@ -166,6 +168,7 @@ impl Service {
                     record: None,
                     message: None,
                     line_positions: Vec::new(),
+                    played_line_positions: Vec::new(),
                     move_options: Vec::new(),
                     recoverable: false,
                 })
@@ -364,6 +367,17 @@ fn update(
         change(&mut state);
         for game in &mut state.games {
             game.line_positions = game.record.as_ref().map_or_else(Vec::new, line_positions);
+            game.played_line_positions = game.record.as_ref().map_or_else(Vec::new, |record| {
+                let gambit_coaching::DiagnosisOutcome::TurningPoint(point) =
+                    &record.diagnosis.outcome
+                else {
+                    return Vec::new();
+                };
+                let moves = std::iter::once(point.played_uci.clone())
+                    .chain(point.after_pv.iter().take(5).cloned())
+                    .collect::<Vec<_>>();
+                replay_line(&point.position_fen, &moves).unwrap_or_default()
+            });
             game.move_options = game.record.as_ref().map_or_else(Vec::new, |record| {
                 let gambit_coaching::DiagnosisOutcome::TurningPoint(point) =
                     &record.diagnosis.outcome
@@ -487,6 +501,7 @@ fn practice_action(
             }
             PracticeAction::Done => progress.disposition = PracticeDisposition::Completed,
             PracticeAction::Later => progress.disposition = PracticeDisposition::AgainLater,
+            PracticeAction::Skip => progress.disposition = PracticeDisposition::Skipped,
             PracticeAction::Replay => progress.disposition = PracticeDisposition::Active,
             PracticeAction::Attempt(_) => unreachable!(),
         })

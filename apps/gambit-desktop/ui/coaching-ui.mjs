@@ -3,7 +3,7 @@ import { acceptSnapshot, sameQueue, scoreText, lossText, feedbackText, fenSquare
 const symbols = { P: "♙", N: "♘", B: "♗", R: "♖", Q: "♕", K: "♔", p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" };
 const names = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
 
-export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => {}, onExerciseChange = () => {}, onPracticeInteraction = () => {} }) {
+export function coachingUI({ invoke, context, onDone, onLater, onSkip = () => {}, onUpdate = () => {}, onExerciseChange = () => {}, onPracticeInteraction = () => {} }) {
   const el = (id) => document.getElementById(`coaching-${id}`);
   let snapshot = null;
   let busy = false;
@@ -17,6 +17,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
   let gesture = null;
   let promotionChoices = [];
   let viewingPlayed = false;
+  let playedPly = 1;
 
   // Revealing an answer changes the sidebar height. Keep the pieces in view.
   function showBoard() { el("board-wrap").scrollIntoView?.({ block: "nearest" }); }
@@ -132,7 +133,9 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       if (kind === "replay") { forceHidden = true; linePly = 0; clearMove(); el("feedback").textContent = "Choose a move from the starting exercise position."; }
       if (kind === "done") onDone();
       if (kind === "later") onLater();
+      if (kind === "skip") onSkip();
     } catch (error) {
+      if (context()?.path !== ctx.path || context()?.gameId !== id) return;
       if (kind === "attempt") clearMove();
       el("feedback").textContent = `${error}${kind === "attempt" ? " Your attempt was not saved. Play your move again to retry." : ""}`;
     }
@@ -230,7 +233,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     onExerciseChange(Boolean(point) && !ctx.complete);
     el("panel").classList.toggle("has-exercise", Boolean(point));
     el("panel").classList.toggle("lesson", Boolean(ctx.lesson));
-    if (point && !running) el("progress").textContent = "Practice this turning point";
+    if (point && !running) el("progress").textContent = ctx.lesson ? "A decision from your game" : "Practice this turning point";
     el("analyze").hidden = Boolean(point && ctx.lesson || matches && snapshot.games.every(game => game.status === "ready"));
     const practice = game?.record?.practice;
     const solved = practice && practice.solution !== "unsolved";
@@ -245,6 +248,18 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     el("solution").hidden = !shown;
     el("best-description").textContent = shown ? `Move your ${describeMove(point.position_fen, point.best_uci)}.` : "";
     const playedMove = point && game.move_options?.find(move => move.uci === point.played_uci);
+    const playedPositions = game?.played_line_positions ?? [];
+    playedPly = Math.min(playedPly, Math.max(1, playedPositions.length - 1));
+    const playedMoves = point ? [point.played_uci, ...(point.after_pv ?? [])] : [];
+    const playedSans = point ? [point.played_san, ...(point.after_pv_san ?? [])] : [];
+    el("played-playback").hidden = !viewingPlayed;
+    el("played-next").hidden = playedPositions.length < 3;
+    el("played-back").hidden = playedPositions.length < 3;
+    el("played-next").disabled = playedPly >= playedPositions.length - 1;
+    el("played-back").disabled = playedPly <= 1;
+    el("played-status").textContent = viewingPlayed && point ? playedPly > 1
+      ? `${playedPositions[playedPly - 1].split(" ")[1] === "w" ? "White" : "Black"} moves the ${describeMove(playedPositions[playedPly - 1], playedMoves[playedPly - 1])}${playedSans[playedPly - 1]?.endsWith("#") ? ". Checkmate." : playedSans[playedPly - 1]?.endsWith("+") ? ". Check." : "."}`
+      : `${point.loss.kind === "allowed_mate" ? "Local analysis found a forced checkmate against you after this move." : point.loss.kind === "lost_forced_mate" ? "You had a forced checkmate; this move let it escape." : "After this move, local analysis found a stronger continuation for your opponent."} ${playedPositions.length > 2 ? "See what follows on the board." : "Compare this position with the better continuation. This saved lesson has no further line after your move."}` : "";
     el("played").hidden = !playedMove;
     el("played").disabled = busy || snapshot?.practice_busy;
     el("played").textContent = viewingPlayed ? "Return to my turn" : "See the move I played";
@@ -264,6 +279,8 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     el("done").textContent = "Continue →";
     el("later").hidden = !point;
     el("later").disabled = busy || snapshot?.practice_busy;
+    el("skip").hidden = !point || Boolean(shown);
+    el("skip").disabled = busy || snapshot?.practice_busy;
     el("replay").hidden = !point || (!practice.revealed && !solved);
     for (const name of ["check", "reveal", "replay"]) el(name).disabled = busy || snapshot?.practice_busy;
     el("check").disabled ||= linePly > 0 || viewingPlayed || !el("move").value;
@@ -276,8 +293,8 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     const moveDescription = point && describeMove(point.position_fen, pendingMove?.uci);
     el("choice").textContent = viewingPlayed ? "Watching your move from the game" : linePly ? "Watching a better continuation" : pendingMove ? `Your ${moveDescription}` : "Choose your move on the board";
     el("choice").classList.toggle("is-chosen", Boolean(pendingMove));
-    el("task").textContent = shown ? "Explore a better move" : "Find a better move";
-    el("guide").textContent = viewingPlayed ? "This is the move you made in the game. Return to your turn to try a different idea." : linePly ? "Watch the pieces move through the answer. Return to the starting position to try your own idea." : busy ? "Checking your move privately. Your progress saves automatically." : shown ? "Take your time to compare the moves. Continue when you are ready." : promoting ? "Choose your promotion piece to submit the move."
+    el("task").textContent = viewingPlayed ? "See what went wrong" : shown ? "Explore a better move" : "Find a better move";
+    el("guide").textContent = viewingPlayed ? "Follow what happens after your original move. Return to your turn to try a different idea." : linePly ? "Watch the pieces move through the answer. Return to the starting position to try your own idea." : busy ? "Checking your move privately. Your progress saves automatically." : shown ? "Take your time to compare the moves. Continue when you are ready." : promoting ? "Choose your promotion piece to submit the move."
       : "Click a piece, then a highlighted square, or drag it there. Completing your move checks it automatically.";
     el("move-status").textContent = viewingPlayed ? "Your move from the game. Return to your turn to try a different move."
       : linePly ? "Following the answer. Use the arrows to watch each move on the board."
@@ -290,7 +307,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       el("turn-label").textContent = viewingPlayed ? "Your move in the game" : linePly ? "Following the answer" : `You play ${black ? "Black" : "White"}`;
       el("move-number").textContent = `Move ${point.position_fen.split(" ")[5]}`;
       const lineMove = linePly ? point.pv?.[linePly - 1] ?? (linePly === 1 ? point.best_uci : null) : point.best_uci;
-      const arrow = moveArrow(selected ? null : viewingPlayed ? point.played_uci : pendingMove?.uci ?? (shown ? lineMove : null), black);
+      const arrow = moveArrow(selected ? null : viewingPlayed ? playedMoves[playedPly - 1] : pendingMove?.uci ?? (shown ? lineMove : null), black);
       el("arrow").hidden = !arrow;
       el("arrow").style.display = arrow ? "block" : "none";
       el("arrow").classList.toggle("played", viewingPlayed);
@@ -299,7 +316,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     el("status").textContent = point ? viewingPlayed ? "Compare your original move with another idea." : linePly ? "Watch how the position changes with each move." : pendingMove ? "Your chosen move is previewed on the board." : "This is your position just before a move you could improve."
       : game?.record ? `No clear turning point found at this analysis budget.${game.record.diagnosis.inconclusive_moves ? " Some decisions had inconclusive engine evidence." : ""}`
         : game?.message ?? (matches ? snapshot.message : null) ?? (game?.status === "analyzing" ? "This game is being analyzed. You can keep navigating." : "Analyze this set to find supported turning points after the shared opening position.");
-    if (point) renderBoard(point, viewingPlayed && playedMove ? playedMove.fen : linePly ? positions[linePly] : pendingMove?.fen ?? point.position_fen);
+    if (point) renderBoard(point, viewingPlayed && playedMove ? playedPositions[playedPly] ?? playedMove.fen : linePly ? positions[linePly] : pendingMove?.fen ?? point.position_fen);
     if (snapshot?.running || snapshot?.practice_busy) {
       if (!poll) poll = window.setTimeout(async () => { poll = null; try { receive(await invoke("coaching_status")); } catch { /* Next navigation retries. */ } }, 1000);
     }
@@ -345,7 +362,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     if (busy || snapshot?.practice_busy) return;
     onPracticeInteraction();
     const show = !viewingPlayed;
-    clearMove(); linePly = 0; viewingPlayed = show;
+    clearMove(); linePly = 0; playedPly = 1; viewingPlayed = show;
     render(); showBoard();
   });
   el("reset").addEventListener("click", () => {
@@ -380,7 +397,7 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
     if (current()?.record?.practice.disposition === "completed") onDone();
     else void action("done");
   });
-  for (const name of ["reveal", "later", "replay"]) el(name).addEventListener("click", () => action(name));
+  for (const name of ["reveal", "later", "skip", "replay"]) el(name).addEventListener("click", () => action(name));
   for (const [name, delta] of [["start", 0], ["previous", -1], ["next", 1]]) {
     el(`line-${name}`).addEventListener("click", () => {
       clearMove();
@@ -389,7 +406,16 @@ export function coachingUI({ invoke, context, onDone, onLater, onUpdate = () => 
       render(); showBoard();
     });
   }
+  for (const [name, delta] of [["back", -1], ["next", 1]]) {
+    el(`played-${name}`).addEventListener("click", () => {
+      if (!viewingPlayed || busy || snapshot?.practice_busy) return;
+      onPracticeInteraction();
+      playedPly = Math.max(1, playedPly + delta);
+      render(); showBoard();
+    });
+  }
   return { receive, load, render,
+    pointPly: () => current()?.record?.diagnosis.outcome.evidence?.ply ?? 0,
     nextExercise: (id) => sameQueue(snapshot, context()) ? snapshot.games.find(game => game.id !== id
       && game.record?.diagnosis.outcome.kind === "turning_point"
       && game.record.practice.disposition === "active" && game.record.practice.solution === "unsolved" && !game.record.practice.revealed)?.id ?? null : null,

@@ -16,7 +16,7 @@ export function lessonFinding(snapshot, summaries = []) {
   };
   const active = points.filter(game => game.record.practice.disposition === "active" && game.record.practice.solution === "unsolved" && !game.record.practice.revealed);
   const later = points.filter(game => game.record.practice.disposition === "again_later");
-  const candidates = active.length ? active : later.length ? later : points;
+  const candidates = active.length ? active : later.length ? later : points.filter(game => game.record.practice.disposition !== "skipped");
   const game = candidates.slice().sort((a, b) => rank(b) - rank(a))[0];
   if (!game) return null;
   const point = game.record.diagnosis.outcome.evidence;
@@ -110,5 +110,16 @@ export function learningFlow({ invoke, onUpdate, blocked = () => false, setTimer
     await invoke("cancel_coaching", { expectedPath: plan.path, generation: plan.snapshot.generation });
     receive(await invoke("coaching_status"));
   }
-  return { prepare, receive, pause, reset, current: () => plan };
+  async function recover() {
+    const game = plan?.snapshot?.games.find(game => game.recoverable);
+    if (!game || blocked() || plan.snapshot.running || plan.snapshot.practice_busy) return;
+    try {
+      const ctx = context();
+      plan.paused = false;
+      plan.error = null;
+      receive(await invoke("start_coaching", { request: { expected_path: ctx.path, player: ctx.player,
+        game_ids: ctx.gameIds, shared_ply: 0, analyze: true, recover_game_id: game.id } }));
+    } catch (error) { if (plan) { plan.error = String(error); notify(); } }
+  }
+  return { prepare, receive, pause, recover, reset, current: () => plan };
 }

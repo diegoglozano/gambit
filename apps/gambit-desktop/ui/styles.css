@@ -432,3 +432,8 @@ button.ranked-row:hover { border-color: rgba(130,217,162,0.35); background: rgba
 
 .library-layout.lesson-mode .games-panel { display: none; }
 .coaching-panel.lesson .coaching-intro { display: none; }
+
+.review-bar.lesson { flex-direction: row; align-items: center; gap: 12px; padding: 12px 16px; }
+.review-bar.lesson .review-scope, .review-bar.lesson .review-navigation, .review-bar.lesson .eyebrow { display: none; }
+.review-bar.lesson .review-controls { width: auto; margin-left: auto; flex-wrap: nowrap; }
+.review-bar.lesson .review-copy strong { font-size: 12px; }

@@ -30,6 +30,10 @@ test("practice teaches moves visually and submits intentional board moves", asyn
   await expect(page.locator("#coaching-arrow")).toHaveClass(/played/);
   await expect(page.locator("#coaching-check")).toBeDisabled();
   await expect(page.locator("#coaching-solution")).toBeHidden();
+  await page.locator("#coaching-played-next").click();
+  await expect(page.locator("#coaching-board [data-square=h7]")).toHaveAttribute("aria-label", "h7, Black king");
+  await expect(page.locator("#coaching-played-status")).toContainText("capturing a queen");
+  await expect(page.locator("#coaching-feedback")).not.toContainText("Strong move");
   await assertBoardVisible();
   await page.locator("#coaching-played").click();
   await expect(page.locator("#coaching-board [data-square=g6]")).toHaveAttribute("aria-label", "g6, White queen");
@@ -80,4 +84,38 @@ test("practice teaches moves visually and submits intentional board moves", asyn
   expect(compactBoard.y + compactBoard.height).toBeLessThanOrEqual(700);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+ test("skipped lessons return without independent solves", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#username").fill("demo");
+  await page.locator("#sync-form button[type=submit]").click();
+  await expect(page.locator("#today-review-focus")).toHaveText("Learn this move →");
+  await page.locator("#today-review-focus").click();
+  await page.locator("#coaching-skip").click();
+  await expect(page.locator("#today-view")).toBeVisible();
+  await expect(page.locator("#today-review-progress")).not.toContainText("solved");
+});
+
+test("keyboard moves grade directly, saved lessons reopen, and source games stay accessible", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#username").fill("demo");
+  await page.locator("#sync-form button[type=submit]").click();
+  await expect(page.locator("#today-review-focus")).toHaveText("Learn this move →");
+  await page.locator("#today-review-focus").click();
+  const queen = page.locator("#coaching-board [data-square=g6]");
+  await queen.focus();
+  await queen.press("Enter");
+  await expect(page.locator("#coaching-feedback")).toContainText("selected");
+  await queen.press("ArrowRight");
+  await page.locator("#coaching-board [data-square=h6]").press("Enter");
+  await expect(page.locator("#coaching-feedback")).toContainText("Strong move");
+  await page.locator("#finish-review").click();
+  await expect(page.locator("#today-view")).toBeVisible();
+  await page.locator("#today-review-focus").click();
+  await expect(page.locator("#coaching-solution")).toBeVisible();
+  await page.locator("#lesson-source").click();
+  await expect(page.locator("#coaching-panel")).toBeHidden();
+  await expect(page.locator(".board-panel")).toBeVisible();
+  await expect(page.locator("#workspace-eyebrow")).toHaveText("Library");
 });
