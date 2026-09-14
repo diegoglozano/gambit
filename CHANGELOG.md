@@ -4,6 +4,46 @@ All notable changes to Gambit are documented in this file.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-13
+
+### Added
+
+- Today prepares a bounded sample of recent games automatically and offers one
+  supported mistake to learn, with a board preview, source game, and honest
+  recurrence within the checked sample.
+- New Lichess connections load up to 24 recent completed games first, then add
+  the rest of the initial history in the background with safe interruption and
+  retry.
+- Original-move playback shows the supported opponent continuation on the same
+  board, with named pieces and captures. Lessons can return to the source game.
+- Added a durable skipped outcome, distinct from independent solves, revealed
+  answers, and practice saved for later.
+
+### Changed
+
+- Completing a legal board move by click, drag, or keyboard now submits the
+  attempt directly; promotion waits only for a piece choice.
+- Successful and revealed corrections save completion automatically. Feedback
+  remains available until Continue or exit, and lesson entry hides review-set
+  administration.
+- Bounded local preparation reuses valid cache and provides pause, resume,
+  retry, and backup-preserving recovery without routine engine configuration.
+
+### Fixed
+
+- Manual and background sync preserve an open game, lesson feedback, and
+  explanation playback. Preparation refresh waits until an active lesson exits.
+- Explanation playback, piece selection, pending grading, and stale responses
+  cannot record duplicate or unintended attempts.
+
+### Validation
+
+- Native QA covers a fresh and returning player journey, real Stockfish
+  grading, visual response playback, minimum-window layout, and saved progress
+  across exit/relaunch. Browser regressions run in Chromium and WebKit.
+- Player comprehension research and measured improvement in later games remain
+  follow-up work; this release does not infer broader chess themes.
+
 ## [0.17.0] - 2026-09-13
 
 ### Changed
